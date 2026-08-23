@@ -142,15 +142,15 @@ jobs:
             --exe build/ntoskrnl/xboxkrnl.unstripped.exe \
             "$RUNNER_TEMP/cov-trace.log"
 
-      # - name: Upload coverage to codecov
-      #   if: matrix.coverage == 1
-      #   uses: codecov/codecov-action@v5
-      #   with:
-      #     files: coverage.info
-      #     disable_search: true
-      #     flags: api-regression
-      #     token: ${{ secrets.CODECOV_TOKEN }}
-      #     fail_ci_if_error: false
+      - name: Upload coverage to codecov
+        if: matrix.coverage == 1
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.info
+          disable_search: true
+          flags: api-regression
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
       - name: Upload coverage artifact
         if: always() && matrix.coverage == 1
