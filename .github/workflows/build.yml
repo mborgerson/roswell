@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always() && matrix.coverage == 1
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-info
           path: coverage.info
@@ -162,7 +162,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nxkrnl-${{ matrix.variant }}
           path: |
