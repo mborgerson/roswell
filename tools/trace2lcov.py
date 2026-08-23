@@ -3,11 +3,19 @@
 trace2lcov.py: convert xemu `-d in_asm,nochain` trace logs into an lcov
 tracefile (.info) using the kernel's DWARF line tables.
 
-The in_asm log records every instruction of every translated block, and
-translation happens at first execution, so an instruction address in the
-log means "this instruction ran at least once".  Every DWARF line-table
-row starts at an instruction boundary, so a source line is hit iff any
-of its row addresses appears in the trace.
+The in_asm log records every translated block, and translation happens
+at first execution, so a translated byte means "this instruction ran at
+least once".  Every DWARF line-table row starts at an instruction
+boundary, so a source line is hit iff any of its row addresses falls
+inside a translated block.
+
+The log comes in two dialects.  With a target disassembler built in
+(capstone), every instruction gets its own "0x<addr>:  <insn>" line.
+Without one, qemu logs only the TB start address followed by the raw
+bytes ("OBJD-T: <hex>" lines) -- interior instruction addresses never
+appear, so matching bare addresses would mark only the first line of
+each block as hit.  Both dialects are handled by accumulating [start,
+end) byte ranges per TB.
 
 Requires a kernel built with -DCOVERAGE=ON (Release builds otherwise
 carry no line info).  Line tables are read from the unstripped image.
@@ -27,25 +35,63 @@ import os
 import re
 import subprocess
 import sys
+from bisect import bisect_right
 from collections import defaultdict
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class Ranges:
+    """Merged set of [start, end) intervals with membership testing."""
+
+    def __init__(self, intervals):
+        self.starts = []
+        self.ends = []
+        for s, e in sorted(intervals):
+            if self.ends and s <= self.ends[-1]:
+                self.ends[-1] = max(self.ends[-1], e)
+            else:
+                self.starts.append(s)
+                self.ends.append(e)
+
+    def __contains__(self, addr):
+        i = bisect_right(self.starts, addr) - 1
+        return i >= 0 and addr < self.ends[i]
+
+    def total_within(self, lo, hi):
+        """Covered byte count clipped to [lo, hi)."""
+        return sum(max(0, min(e, hi) - max(s, lo))
+                   for s, e in zip(self.starts, self.ends))
+
+
 def parse_trace(paths):
-    """Union of instruction addresses across all trace logs."""
+    """Union of translated byte ranges across all trace logs."""
     addr_re = re.compile(r"^0x([0-9a-fA-F]+):")
-    addrs = set()
+    objd_re = re.compile(r"^OBJD-T:\s*([0-9a-fA-F]+)")
+    intervals = []
     for path in paths:
-        n0 = len(addrs)
+        n0 = len(intervals)
+        base = None  # last TB/instruction address; anchors OBJD-T bytes
+        off = 0
         with open(path, errors="replace") as f:
             for line in f:
                 m = addr_re.match(line)
                 if m:
-                    addrs.add(int(m.group(1), 16))
-        print(f"  {path}: {len(addrs) - n0} new instruction addrs",
+                    base = int(m.group(1), 16)
+                    off = 0
+                    # Disassembler dialect: one line per instruction, so
+                    # the address itself is an instruction boundary.
+                    intervals.append((base, base + 1))
+                    continue
+                m = objd_re.match(line)
+                if m and base is not None:
+                    # Raw-bytes dialect: extend the current TB's range.
+                    n = len(m.group(1)) // 2
+                    intervals.append((base + off, base + off + n))
+                    off += n
+        print(f"  {path}: {len(intervals) - n0} trace records",
               file=sys.stderr)
-    return addrs
+    return Ranges(intervals)
 
 
 def pe_image_range(path):
@@ -126,9 +172,8 @@ def main():
     print("reading trace logs...", file=sys.stderr)
     traced = parse_trace(args.traces)
     lo, hi = pe_image_range(args.exe)
-    traced_img = {a for a in traced if lo <= a < hi}
-    print(f"  {len(traced_img)} in kernel image [{lo:#x},{hi:#x})",
-          file=sys.stderr)
+    print(f"  {traced.total_within(lo, hi)} translated bytes in kernel "
+          f"image [{lo:#x},{hi:#x})", file=sys.stderr)
 
     print(f"reading line tables from {args.exe}...", file=sys.stderr)
     src_root = os.path.realpath(args.src_root)
@@ -164,7 +209,7 @@ def main():
         if rel is None:
             continue
         nrows += 1
-        lines[(rel, lineno)] |= addr in traced_img
+        lines[(rel, lineno)] |= addr in traced
     if not nrows:
         sys.exit("trace2lcov: no line-table rows found -- was the kernel "
                  "built with -DCOVERAGE=ON?")

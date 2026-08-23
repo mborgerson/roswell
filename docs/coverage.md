@@ -1,10 +1,10 @@
 # Code coverage
 
 Line coverage of the kernel as exercised under xemu, without any
-guest-side instrumentation: xemu's `-d in_asm` log records every
-instruction of every translated block, translation happens at first
-execution, and the kernel's DWARF line tables map those addresses back
-to source lines.  `tools/trace2lcov.py` turns the two into an lcov
+guest-side instrumentation: xemu's `-d in_asm` log records the address
+and bytes of every translated block, translation happens at first
+execution, and the kernel's DWARF line tables map those byte ranges
+back to source lines.  `tools/trace2lcov.py` turns the two into an lcov
 tracefile that lcov/genhtml and codecov.io consume directly.
 
 Because the measurement is a side effect of running the kernel, any
