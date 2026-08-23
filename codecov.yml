@@ -1,0 +1,16 @@
+# Trace-based coverage is hit/no-hit at instruction granularity and the
+# measured image differs slightly from the shipped LTO layout (see
+# docs/coverage.md), so keep the status checks informational rather
+# than PR-gating.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "condensed_header, diff, files"
+  require_changes: true
