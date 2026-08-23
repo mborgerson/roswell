@@ -21,9 +21,11 @@ AtaWriteBlock16(
     ASSERT(Buffer != NULL);
     ASSERT(Count != 0);
 
+#ifndef SARCH_XBOX
     if (MmioFlags)
         WRITE_REGISTER_BUFFER_USHORT(Port, Buffer, Count);
     else
+#endif
         WRITE_PORT_BUFFER_USHORT(Port, Buffer, Count);
 }
 
@@ -37,9 +39,11 @@ AtaReadBlock16(
     ASSERT(Buffer != NULL);
     ASSERT(Count != 0);
 
+#ifndef SARCH_XBOX
     if (MmioFlags)
         READ_REGISTER_BUFFER_USHORT(Port, Buffer, Count);
     else
+#endif
         READ_PORT_BUFFER_USHORT(Port, Buffer, Count);
 }
 
@@ -53,9 +57,11 @@ AtaWriteBlock32(
     ASSERT(Buffer != NULL);
     ASSERT(Count != 0);
 
+#ifndef SARCH_XBOX
     if (MmioFlags)
         WRITE_REGISTER_BUFFER_ULONG(Port, Buffer, Count);
     else
+#endif
         WRITE_PORT_BUFFER_ULONG(Port, Buffer, Count);
 }
 
@@ -69,9 +75,11 @@ AtaReadBlock32(
     ASSERT(Buffer != NULL);
     ASSERT(Count != 0);
 
+#ifndef SARCH_XBOX
     if (MmioFlags)
         READ_REGISTER_BUFFER_ULONG(Port, Buffer, Count);
     else
+#endif
         READ_PORT_BUFFER_ULONG(Port, Buffer, Count);
 }
 
@@ -80,9 +88,11 @@ AtaReadPortUchar(
     _In_ PUCHAR Port,
     _In_ ULONG MmioFlags)
 {
+#ifndef SARCH_XBOX
     if (MmioFlags)
         return READ_REGISTER_UCHAR(Port);
     else
+#endif
         return READ_PORT_UCHAR(Port);
 }
 
@@ -92,9 +102,11 @@ AtaWritePortUchar(
     _In_ UCHAR Value,
     _In_ ULONG MmioFlags)
 {
+#ifndef SARCH_XBOX
     if (MmioFlags)
         WRITE_REGISTER_UCHAR(Port, Value);
     else
+#endif
         WRITE_PORT_UCHAR(Port, Value);
 }
 
@@ -104,9 +116,11 @@ AtaWritePortUlong(
     _In_ ULONG Value,
     _In_ ULONG MmioFlags)
 {
+#ifndef SARCH_XBOX
     if (MmioFlags)
         WRITE_REGISTER_ULONG(Port, Value);
     else
+#endif
         WRITE_PORT_ULONG(Port, Value);
 }
 

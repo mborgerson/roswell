@@ -426,6 +426,25 @@ FsRtlPrivateLock(IN PFILE_LOCK FileLock,
 
     if (Conflict && !InsertedNew)
     {
+#ifdef SARCH_XBOX
+        /* Titles set SL_FAIL_IMMEDIATELY on byte-range locks and don't take
+         * overlapping shared locks; the blocking-queue + shared-range
+         * rebuild paths collapse to a simple lock-conflict return. */
+        UNREFERENCED_PARAMETER(NewSharedRange);
+        UNREFERENCED_PARAMETER(LockInfo);
+        IoStatus->Status = STATUS_FILE_LOCK_CONFLICT;
+        if (Irp)
+        {
+            FsRtlCompleteLockIrpReal
+                (FileLock->CompleteLockIrpRoutine,
+                 Context,
+                 Irp,
+                 IoStatus->Status,
+                 &Status,
+                 FileObject);
+        }
+        return FALSE;
+#else
         if (Conflict->Exclusive.FileLock.ExclusiveLock || ExclusiveLock)
         {
             DPRINT("Conflict %08x%08x:%08x%08x Exc %u (Want Exc %u)\n",
@@ -589,6 +608,7 @@ FsRtlPrivateLock(IN PFILE_LOCK FileLock,
             }
             return TRUE;
         }
+#endif /* SARCH_XBOX */
     }
     else if (!Conflict)
     {
@@ -666,12 +686,22 @@ FsRtlPrivateLock(IN PFILE_LOCK FileLock,
 
 /*
  * @implemented
+ *
+ * Xbox titles never byte-range lock files; FileLock->LockInformation is
+ * always NULL on Xbox so the "no lock" fast path is the only reachable
+ * one.  Shrink the body to just that path so the generic-table lookup
+ * + key/exclusive compare drops out.
  */
 BOOLEAN
 NTAPI
 FsRtlCheckLockForReadAccess(IN PFILE_LOCK FileLock,
                             IN PIRP Irp)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(Irp);
+    return TRUE;
+#else
     BOOLEAN Result;
     PIO_STACK_LOCATION IoStack = IoGetCurrentIrpStackLocation(Irp);
     COMBINED_LOCK_ELEMENT ToFind;
@@ -700,16 +730,24 @@ FsRtlCheckLockForReadAccess(IN PFILE_LOCK FileLock,
         IoStack->Parameters.Read.Key == Found->Exclusive.FileLock.Key;
     DPRINT("CheckLockForReadAccess(%wZ) => %s\n", &IoStack->FileObject->FileName, Result ? "TRUE" : "FALSE");
     return Result;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * Xbox titles never byte-range lock files; mirror the no-lock fast path.
  */
 BOOLEAN
 NTAPI
 FsRtlCheckLockForWriteAccess(IN PFILE_LOCK FileLock,
                              IN PIRP Irp)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(Irp);
+    return TRUE;
+#else
     BOOLEAN Result;
     PIO_STACK_LOCATION IoStack = IoGetCurrentIrpStackLocation(Irp);
     COMBINED_LOCK_ELEMENT ToFind;
@@ -738,6 +776,7 @@ FsRtlCheckLockForWriteAccess(IN PFILE_LOCK FileLock,
     Result = Process == Found->Exclusive.FileLock.ProcessId;
     DPRINT("CheckLockForWriteAccess(%wZ) => %s\n", &IoStack->FileObject->FileName, Result ? "TRUE" : "FALSE");
     return Result;
+#endif
 }
 
 /*
@@ -831,6 +870,20 @@ FsRtlFastUnlockSingle(IN PFILE_LOCK FileLock,
                       IN PVOID Context OPTIONAL,
                       IN BOOLEAN AlreadySynchronized)
 {
+#ifdef SARCH_XBOX
+    /* LockInformation is always NULL on Xbox and no live caller (folded
+     * driver or in-kernel) invokes single-range unlock.  Keep the export
+     * alive but drop the body so generic-table teardown drops out. */
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(FileObject);
+    UNREFERENCED_PARAMETER(FileOffset);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Key);
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(AlreadySynchronized);
+    return STATUS_RANGE_NOT_LOCKED;
+#else
     BOOLEAN FoundShared = FALSE;
     PLIST_ENTRY SharedEntry;
     PLOCK_SHARED_RANGE SharedRange = NULL;
@@ -1015,10 +1068,14 @@ FsRtlFastUnlockSingle(IN PFILE_LOCK FileLock,
 
     DPRINT("Success %wZ\n", &FileObject->FileName);
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * LockInformation is always NULL on Xbox; return RANGE_NOT_LOCKED and let
+ * --gc-sections drop the unlock-single + shared-range walk machinery.
  */
 NTSTATUS
 NTAPI
@@ -1027,6 +1084,13 @@ FsRtlFastUnlockAll(IN PFILE_LOCK FileLock,
                    IN PEPROCESS Process,
                    IN PVOID Context OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(FileObject);
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Context);
+    return STATUS_RANGE_NOT_LOCKED;
+#else
     PLIST_ENTRY ListEntry;
     PCOMBINED_LOCK_ELEMENT Entry;
     PLOCK_INFORMATION InternalInfo = FileLock->LockInformation;
@@ -1076,10 +1140,13 @@ FsRtlFastUnlockAll(IN PFILE_LOCK FileLock,
     }
     DPRINT("Done %wZ\n", &FileObject->FileName);
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * LockInformation is always NULL on Xbox; mirror the no-lock fast path.
  */
 NTSTATUS
 NTAPI
@@ -1089,6 +1156,14 @@ FsRtlFastUnlockAllByKey(IN PFILE_LOCK FileLock,
                         IN ULONG Key,
                         IN PVOID Context OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(FileObject);
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Key);
+    UNREFERENCED_PARAMETER(Context);
+    return STATUS_RANGE_NOT_LOCKED;
+#else
     PLIST_ENTRY ListEntry;
     PCOMBINED_LOCK_ELEMENT Entry;
     PLOCK_INFORMATION InternalInfo = FileLock->LockInformation;
@@ -1142,10 +1217,16 @@ FsRtlFastUnlockAllByKey(IN PFILE_LOCK FileLock,
     }
 
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * On Xbox titles never issue IRP_MJ_LOCK_CONTROL; complete every lock
+ * IRP with STATUS_INVALID_DEVICE_REQUEST and skip the dispatch into
+ * FsRtlPrivateLock / FsRtlFastUnlock*.  Those internal helpers drop
+ * out via --gc-sections.
  */
 NTSTATUS
 NTAPI
@@ -1153,6 +1234,12 @@ FsRtlProcessFileLock(IN PFILE_LOCK FileLock,
                      IN PIRP Irp,
                      IN PVOID Context OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+    UNREFERENCED_PARAMETER(Context);
+    FsRtlCompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST);
+    return STATUS_INVALID_DEVICE_REQUEST;
+#else
     PIO_STACK_LOCATION IoStackLocation;
     NTSTATUS Status;
     IO_STATUS_BLOCK IoStatusBlock;
@@ -1252,10 +1339,13 @@ FsRtlProcessFileLock(IN PFILE_LOCK FileLock,
          &Status,
          NULL);
     return IoStatusBlock.Status;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * Xbox titles never allocate LockInformation; just zero the structure.
  */
 VOID
 NTAPI
@@ -1263,21 +1353,32 @@ FsRtlInitializeFileLock (IN PFILE_LOCK FileLock,
                          IN PCOMPLETE_LOCK_IRP_ROUTINE CompleteLockIrpRoutine OPTIONAL,
                          IN PUNLOCK_ROUTINE UnlockRoutine OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(CompleteLockIrpRoutine);
+    UNREFERENCED_PARAMETER(UnlockRoutine);
+    RtlZeroMemory(FileLock, sizeof(*FileLock));
+#else
     /* Setup the lock */
     RtlZeroMemory(FileLock, sizeof(*FileLock));
     FileLock->FastIoIsQuestionable = FALSE;
     FileLock->CompleteLockIrpRoutine = CompleteLockIrpRoutine;
     FileLock->UnlockRoutine = UnlockRoutine;
     FileLock->LockInformation = NULL;
+#endif
 }
 
 /*
  * @implemented
+ *
+ * LockInformation is always NULL on Xbox; the teardown loop never runs.
  */
 VOID
 NTAPI
 FsRtlUninitializeFileLock(IN PFILE_LOCK FileLock)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileLock);
+#else
     if (FileLock->LockInformation)
     {
         PIRP Irp;
@@ -1308,6 +1409,7 @@ FsRtlUninitializeFileLock(IN PFILE_LOCK FileLock)
         ExFreePoolWithTag(InternalInfo, TAG_FLOCK);
         FileLock->LockInformation = NULL;
     }
+#endif
 }
 
 /*

@@ -12,6 +12,7 @@
 #include <ntoskrnl.h>
 #include <reactos/buildno.h>
 #include "inbv/logo.h"
+#include "../xb/strace.h"
 
 #define NDEBUG
 #include <debug.h>
@@ -69,17 +70,23 @@ ULONG ExpInitializationPhase;
 BOOLEAN ExpInTextModeSetup;
 BOOLEAN IoRemoteBootClient;
 ULONG InitSafeBootMode;
-BOOLEAN InitIsWinPEMode, InitWinPEModeType;
+/* InitWinPEModeType is OR'd with 0x80000000 / 0x00000001 below, so it
+ * needs to be wider than the upstream BOOLEAN -- a 1-byte truncation
+ * silently zeroes the INRAM bit (which IopMarkBootPartition relies on). */
+BOOLEAN InitIsWinPEMode;
+ULONG InitWinPEModeType;
 BOOLEAN SosEnabled; // Used by driver.c!IopDisplayLoadingMessage()
 
 /* NT Boot Path */
 UNICODE_STRING NtSystemRoot;
 
-/* NT Initial User Application */
+#ifndef SARCH_XBOX
+/* NT Initial User Application -- only read by ExpLoadInitialProcess. */
 WCHAR NtInitialUserProcessBuffer[128] = L"\\SystemRoot\\System32\\smss.exe";
 ULONG NtInitialUserProcessBufferLength = sizeof(NtInitialUserProcessBuffer) -
                                          sizeof(WCHAR);
 ULONG NtInitialUserProcessBufferType = REG_SZ;
+#endif
 
 /* Boot NLS information */
 PVOID ExpNlsTableBase;
@@ -212,6 +219,19 @@ VOID
 NTAPI
 ExpInitNls(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
+#ifdef SARCH_XBOX
+    /* Codepage tables are gone; the Unicode case table lives in .rdata as
+     * NxkrnlNlsCase and is read directly by RtlpUpcase/DowncaseUnicodeChar
+     * in nls-stubs.c.  No pool buffer, no section, no per-process map. */
+    UNREFERENCED_PARAMETER(LoaderBlock);
+    ExpAnsiCodePageDataOffset = 0;
+    ExpOemCodePageDataOffset = 0;
+    ExpUnicodeCaseTableDataOffset = 0;
+    ExpNlsTableSize = 0;
+    ExpNlsTableBase = NULL;
+    ExpNlsSectionPointer = NULL;
+    return;
+#else
     LARGE_INTEGER SectionSize;
     NTSTATUS Status;
     HANDLE NlsSection;
@@ -250,41 +270,6 @@ ExpInitNls(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 
             /* Go to the next block */
             NextEntry = MdBlock->ListEntry.Flink;
-        }
-
-        /* Allocate the a new buffer since loader memory will be freed */
-        ExpNlsTableBase = ExAllocatePoolWithTag(NonPagedPool,
-                                                ExpNlsTableSize,
-                                                TAG_RTLI);
-        if (!ExpNlsTableBase) KeBugCheck(PHASE0_INITIALIZATION_FAILED);
-
-        /* Copy the codepage data in its new location. */
-        if (NlsTablesEncountered == 1)
-        {
-            /* Ntldr-way boot process */
-            RtlCopyMemory(ExpNlsTableBase,
-                          LoaderBlock->NlsData->AnsiCodePageData,
-                          ExpNlsTableSize);
-        }
-        else
-        {
-            /*
-            * In NT, the memory blocks are contiguous, but in ReactOS they aren't,
-            * so unless someone fixes FreeLdr, we'll have to use this icky hack.
-            */
-            RtlCopyMemory(ExpNlsTableBase,
-                          LoaderBlock->NlsData->AnsiCodePageData,
-                          NlsTableSizes[0]);
-
-            RtlCopyMemory((PVOID)((ULONG_PTR)ExpNlsTableBase + NlsTableSizes[0]),
-                          LoaderBlock->NlsData->OemCodePageData,
-                          NlsTableSizes[1]);
-
-            RtlCopyMemory((PVOID)((ULONG_PTR)ExpNlsTableBase + NlsTableSizes[0] +
-                          NlsTableSizes[1]),
-                          LoaderBlock->NlsData->UnicodeCodePageData,
-                          NlsTableSizes[2]);
-            /* End of Hack */
         }
 
         /* Initialize and reset the NLS TAbles */
@@ -358,8 +343,9 @@ ExpInitNls(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
                      &ExpNlsTableInfo);
     RtlResetRtlTranslations(&ExpNlsTableInfo);
 
-    /* Reset the base to 0 */
-    SectionBase = NULL;
+    /* Map the NLS user view at a fixed base; the default (lowest user
+     * address, 0x00010000) is the fixed XBE title base. */
+    SectionBase = (PVOID)0x20000000;
 
     /* Map the section in the system process */
     Status = MmMapViewOfSection(ExpNlsSectionPointer,
@@ -381,8 +367,12 @@ ExpInitNls(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Copy the table into the system process and set this as the base */
     RtlCopyMemory(SectionBase, ExpNlsTableBase, ExpNlsTableSize);
     ExpNlsTableBase = SectionBase;
+#endif
 }
 
+#ifndef SARCH_XBOX
+/* Loads smss.exe -- the first usermode process. Xbox runs the XBE title
+ * via XeRunInitialTitle() instead; smss/csrss/userinit never load. */
 CODE_SEG("INIT")
 VOID
 NTAPI
@@ -599,6 +589,7 @@ ExpLoadInitialProcess(IN PINIT_BUFFER InitBuffer,
     *ProcessParameters = ProcessParams;
     *ProcessEnvironment = EnvironmentPtr;
 }
+#endif /* !SARCH_XBOX */
 
 CODE_SEG("INIT")
 ULONG
@@ -674,11 +665,13 @@ ExpInitSystemPhase1(VOID)
         DPRINT1("Executive: Event initialization failed\n");
         return FALSE;
     }
+#ifndef SARCH_XBOX
     if (ExpInitializeEventPairImplementation() == FALSE)
     {
         DPRINT1("Executive: Event Pair initialization failed\n");
         return FALSE;
     }
+#endif
 
     /* Initialize mutants */
     if (ExpInitializeMutantImplementation() == FALSE)
@@ -708,12 +701,14 @@ ExpInitSystemPhase1(VOID)
         return FALSE;
     }
 
+#ifndef SARCH_XBOX
     /* Initialize profiling */
     if (ExpInitializeProfileImplementation() == FALSE)
     {
         DPRINT1("Executive: Profile initialization failed\n");
         return FALSE;
     }
+#endif
 
     /* Initialize UUIDs */
     if (ExpUuidInitialization() == FALSE)
@@ -722,6 +717,7 @@ ExpInitSystemPhase1(VOID)
         return FALSE;
     }
 
+#ifndef SARCH_XBOX
     /* Initialize keyed events */
     if (ExpInitializeKeyedEventImplementation() == FALSE)
     {
@@ -735,6 +731,7 @@ ExpInitSystemPhase1(VOID)
         DPRINT1("Executive: Win32 initialization failed\n");
         return FALSE;
     }
+#endif
     return TRUE;
 }
 
@@ -928,7 +925,6 @@ NTAPI
 ExpInitializeExecutive(IN ULONG Cpu,
                        IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
-    PNLS_DATA_BLOCK NlsData;
     CHAR Buffer[256];
     ANSI_STRING AnsiPath;
     NTSTATUS Status;
@@ -972,6 +968,14 @@ ExpInitializeExecutive(IN ULONG Cpu,
     /* Assume no text-mode or remote boot */
     ExpInTextModeSetup = FALSE;
     IoRemoteBootClient = FALSE;
+
+#ifdef SARCH_XBOX
+    /* Announce the kernel build on the debug serial (INIT-only). */
+    {
+        extern VOID NxkPrintVersionBanner(VOID);
+        NxkPrintVersionBanner();
+    }
+#endif
 
     /* Check if we have a setup loader block */
     if (LoaderBlock->SetupLdrBlock)
@@ -1033,24 +1037,39 @@ ExpInitializeExecutive(IN ULONG Cpu,
         }
     }
 
-    /* Setup NLS Base and offsets */
-    NlsData = LoaderBlock->NlsData;
-    ExpNlsTableBase = NlsData->AnsiCodePageData;
-    ExpAnsiCodePageDataOffset = 0;
-    ExpOemCodePageDataOffset = (ULONG)((ULONG_PTR)NlsData->OemCodePageData -
-                                       (ULONG_PTR)NlsData->AnsiCodePageData);
-    ExpUnicodeCaseTableDataOffset = (ULONG)((ULONG_PTR)NlsData->UnicodeCodePageData -
-                                            (ULONG_PTR)NlsData->AnsiCodePageData);
+#ifdef SARCH_XBOX
+    /* Codepage tables are gone; on Xbox RtlInitNlsTables is a no-op (case
+     * table lookup goes directly through NxkrnlNlsCase in nls-stubs.c). */
+    {
+        extern const unsigned char NxkrnlNlsCase[];
 
-    /* Initialize the NLS Tables */
-    RtlInitNlsTables((PVOID)((ULONG_PTR)ExpNlsTableBase +
-                             ExpAnsiCodePageDataOffset),
-                     (PVOID)((ULONG_PTR)ExpNlsTableBase +
-                             ExpOemCodePageDataOffset),
-                     (PVOID)((ULONG_PTR)ExpNlsTableBase +
-                             ExpUnicodeCaseTableDataOffset),
-                     &ExpNlsTableInfo);
-    RtlResetRtlTranslations(&ExpNlsTableInfo);
+        RtlInitNlsTables(NULL, NULL, (PVOID)NxkrnlNlsCase, &ExpNlsTableInfo);
+        RtlResetRtlTranslations(&ExpNlsTableInfo);
+    }
+#else
+    {
+        PNLS_DATA_BLOCK NlsData;
+
+        /* Setup NLS Base and offsets */
+        NlsData = LoaderBlock->NlsData;
+        ExpNlsTableBase = NlsData->AnsiCodePageData;
+        ExpAnsiCodePageDataOffset = 0;
+        ExpOemCodePageDataOffset = (ULONG)((ULONG_PTR)NlsData->OemCodePageData -
+                                           (ULONG_PTR)NlsData->AnsiCodePageData);
+        ExpUnicodeCaseTableDataOffset = (ULONG)((ULONG_PTR)NlsData->UnicodeCodePageData -
+                                                (ULONG_PTR)NlsData->AnsiCodePageData);
+
+        /* Initialize the NLS Tables */
+        RtlInitNlsTables((PVOID)((ULONG_PTR)ExpNlsTableBase +
+                                 ExpAnsiCodePageDataOffset),
+                         (PVOID)((ULONG_PTR)ExpNlsTableBase +
+                                 ExpOemCodePageDataOffset),
+                         (PVOID)((ULONG_PTR)ExpNlsTableBase +
+                                 ExpUnicodeCaseTableDataOffset),
+                         &ExpNlsTableInfo);
+        RtlResetRtlTranslations(&ExpNlsTableInfo);
+    }
+#endif
 
     /* Now initialize the HAL */
     if (!HalInitSystem(ExpInitializationPhase, LoaderBlock))
@@ -1090,8 +1109,10 @@ ExpInitializeExecutive(IN ULONG Cpu,
     /* Setup bugcheck messages */
     KiInitializeBugCheck();
 
-    /* Setup initial system settings */
+#ifndef SARCH_XBOX
+    /* Set initial system settings */
     CmGetSystemControlValues(LoaderBlock->RegistryBase, CmControlVector);
+#endif
 
     /* Set the Service Pack Number and add it to the CSD Version number if needed */
     CmNtSpBuildNumber = VER_PRODUCTBUILD_QFE;
@@ -1116,12 +1137,14 @@ ExpInitializeExecutive(IN ULONG Cpu,
     if (KdBreakAfterSymbolLoad)
         DbgBreakPointWithStatus(DBG_STATUS_CONTROL_C);
 
+#ifndef SARCH_XBOX
     /* Check if this loader is compatible with NT 5.2 */
     if (LoaderBlock->Extension->Size >= sizeof(LOADER_PARAMETER_EXTENSION))
     {
         /* Setup headless terminal settings */
         HeadlessInit(LoaderBlock);
     }
+#endif
 
     /* Set system ranges */
 #ifdef _M_AMD64
@@ -1291,7 +1314,7 @@ ExpInitializeExecutive(IN ULONG Cpu,
     /* Initialize the Handle Table */
     ExpInitializeHandleTables();
 
-#if DBG
+#if DBG && !defined(SARCH_XBOX)
     /* On checked builds, allocate the system call count table */
     KeServiceDescriptorTable[0].Count =
         ExAllocatePoolWithTag(NonPagedPool,
@@ -1313,17 +1336,20 @@ ExpInitializeExecutive(IN ULONG Cpu,
     /* Create the Basic Object Manager Types to allow new Object Types */
     if (!ObInitSystem()) KeBugCheck(OBJECT_INITIALIZATION_FAILED);
 
+#ifndef SARCH_XBOX
     /* Load basic Security for other Managers */
     if (!SeInitSystem()) KeBugCheck(SECURITY_INITIALIZATION_FAILED);
+#endif
 
     /* Initialize the Process Manager */
     if (!PsInitSystem(LoaderBlock)) KeBugCheck(PROCESS_INITIALIZATION_FAILED);
 
     /* Initialize the PnP Manager */
+#ifndef SARCH_XBOX
     if (!PpInitSystem()) KeBugCheck(PP0_INITIALIZATION_FAILED);
+#endif
 
-    /* Initialize the User-Mode Debugging Subsystem */
-    DbgkInitialize();
+    /* Skip Dbgk init -- there is no user mode. */
 
     /* Calculate the tick count multiplier */
     ExpTickCountMultiplier = ExComputeTickCountMultiplier(KeMaximumIncrement);
@@ -1344,6 +1370,9 @@ ExpInitializeExecutive(IN ULONG Cpu,
 VOID
 NTAPI
 MmFreeLoaderBlock(IN PLOADER_PARAMETER_BLOCK LoaderBlock);
+
+/* XBE loader (ntoskrnl/xb/xbe.c), linked into the kernel. */
+VOID XeRunInitialTitle(VOID);
 
 CODE_SEG("INIT")
 VOID
@@ -1398,6 +1427,23 @@ Phase1InitializationDiscard(IN PVOID Context)
 
     /* Get the SOS setting */
     SosEnabled = (CommandLine && strstr(CommandLine, "SOS") != NULL);
+
+    /* Bring up the UC MMIO window + NV2A CRTC/TV encoder BEFORE bootvid
+     * latches the framebuffer pointer.  Without this, VidInitialize reads
+     * the unprogrammed NV2A and disables itself ("Unsupported screen
+     * resolution!"), and the boot logo never paints.  The MMIO/WC window
+     * paint is the early-safe half of NxkMmEnsureXboxWindows -- the KSEG0
+     * PSE overlay (in the same function) still runs later, after the
+     * init-section free, since MiFreeInitializationCode walks PTs in the
+     * kernel-image VA range. */
+    {
+        extern VOID NxkMmEnsureMmioWindow(VOID);
+        extern VOID NxConfigurePciDevicesLate(VOID);
+        extern VOID NxkInitializeVideo(VOID);
+        NxkMmEnsureMmioWindow();
+        NxConfigurePciDevicesLate();
+        NxkInitializeVideo();
+    }
 
     /* Setup the boot video driver */
     InbvEnableBootDriver(!NoGuiBoot);
@@ -1517,7 +1563,9 @@ Phase1InitializationDiscard(IN PVOID Context)
     InbvDisplayString(EndBuffer);
 
     /* Initialize Power Subsystem in Phase 0 */
+#ifndef SARCH_XBOX
     if (!PoInitSystem(0)) KeBugCheck(INTERNAL_POWER_ERROR);
+#endif
 
     /* Check for Y2K hack */
     Y2KHackRequired = CommandLine ? strstr(CommandLine, "YEAR") : NULL;
@@ -1559,7 +1607,9 @@ Phase1InitializationDiscard(IN PVOID Context)
 
         /* Update the system time and notify the system */
         KeSetSystemTime(&UniversalBootTime, &OldTime, FALSE, NULL);
+#ifndef SARCH_XBOX
         PoNotifySystemTimeSet();
+#endif
 
         /* Remember this as the boot time */
         KeBootTime = UniversalBootTime;
@@ -1670,8 +1720,10 @@ Phase1InitializationDiscard(IN PVOID Context)
         KeBugCheckEx(PHASE1_INITIALIZATION_FAILED, 0, 0, 3, 0);
     }
 
+#ifndef SARCH_XBOX
     /* Initialize the SRM in Phase 1 */
     if (!SeInitSystem()) KeBugCheck(SECURITY1_INITIALIZATION_FAILED);
+#endif
 
     /* Update the progress bar */
     InbvUpdateProgressBar(10);
@@ -1693,11 +1745,15 @@ Phase1InitializationDiscard(IN PVOID Context)
     /* Initialize Cache Views */
     if (!CcInitializeCacheManager()) KeBugCheck(CACHE_INITIALIZATION_FAILED);
 
+#ifndef SARCH_XBOX
     /* Initialize the Registry */
     if (!CmInitSystem1()) KeBugCheck(CONFIG_INITIALIZATION_FAILED);
+#endif
 
+#ifndef SARCH_XBOX
     /* Initialize Prefetcher */
     CcPfInitializePrefetcher();
+#endif
 
     /* Update progress bar */
     InbvUpdateProgressBar(15);
@@ -1719,32 +1775,42 @@ Phase1InitializationDiscard(IN PVOID Context)
     }
     else
     {
+#ifndef SARCH_XBOX
         /* Check if the timezone switched and update the time */
         if (LastTzBias != ExpLastTimeZoneBias)
             ZwSetSystemTime(NULL, NULL);
+#endif
     }
 
     /* Initialize the File System Runtime Library */
     if (!FsRtlInitSystem()) KeBugCheck(FILE_INITIALIZATION_FAILED);
 
-    /* Initialize range lists */
+#ifndef SARCH_XBOX
+    /* Initialize range lists (no IO arbitration on Xbox -- package unlinked) */
     RtlInitializeRangeListPackage();
+#endif
 
     /* Report all resources used by HAL */
     HalReportResourceUsage();
 
+#ifndef SARCH_XBOX
     /* Call the debugger DLL */
     KdDebuggerInitialize1(LoaderBlock);
+#endif
 
     /* Setup PnP Manager in phase 1 */
+#ifndef SARCH_XBOX
     if (!PpInitSystem()) KeBugCheck(PP1_INITIALIZATION_FAILED);
+#endif
 
     /* Update progress bar */
     InbvUpdateProgressBar(20);
 
-    /* Initialize LPC */
+#ifndef SARCH_XBOX
     if (!LpcInitSystem()) KeBugCheck(LPC_INITIALIZATION_FAILED);
+#endif
 
+#ifndef SARCH_XBOX
     /* Make sure we have a command line */
     if (CommandLine)
     {
@@ -1829,6 +1895,7 @@ Phase1InitializationDiscard(IN PVOID Context)
             //IopInitializeBootLogging(LoaderBlock, InitBuffer->BootlogHeader);
         }
     }
+#endif /* !SARCH_XBOX */
 
     /* Setup the Executive in Phase 2 */
     //ExInitSystemPhase2();
@@ -1836,11 +1903,15 @@ Phase1InitializationDiscard(IN PVOID Context)
     /* Update progress bar */
     InbvUpdateProgressBar(25);
 
+#ifndef SARCH_XBOX
     /* No KD Time Slip is pending */
     KdpTimeSlipPending = 0;
+#endif
 
+#ifndef SARCH_XBOX
     /* Initialize in-place execution support */
     XIPInit(LoaderBlock);
+#endif
 
     /* Set maximum update to 75% */
     InbvSetProgressBarSubset(25, 75);
@@ -1852,6 +1923,7 @@ Phase1InitializationDiscard(IN PVOID Context)
     InbvSetProgressBarSubset(0, 100);
 
     /* Are we in safe mode? */
+#ifndef SARCH_XBOX
     if (InitSafeBootMode)
     {
         /* Open the safe boot key */
@@ -1930,7 +2002,9 @@ Phase1InitializationDiscard(IN PVOID Context)
             }
         }
     }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
     /* Are we in Win PE mode? */
     if (InitIsWinPEMode)
     {
@@ -1974,6 +2048,7 @@ Phase1InitializationDiscard(IN PVOID Context)
         NtClose(KeyHandle);
         NtClose(OptionHandle);
     }
+#endif
 
     /* FIXME: This doesn't do anything for now */
     MmArmInitSystem(2, LoaderBlock);
@@ -1982,12 +2057,14 @@ Phase1InitializationDiscard(IN PVOID Context)
     InbvUpdateProgressBar(80);
 
     /* Initialize VDM support */
-#if defined(_M_IX86)
+#if defined(_M_IX86) && !defined(SARCH_XBOX)
     KeI386VdmInitialize();
 #endif
 
     /* Initialize Power Subsystem in Phase 1*/
+#ifndef SARCH_XBOX
     if (!PoInitSystem(1)) KeBugCheck(INTERNAL_POWER_ERROR);
+#endif
 
     /* Update progress bar */
     InbvUpdateProgressBar(90);
@@ -2000,8 +2077,10 @@ Phase1InitializationDiscard(IN PVOID Context)
     MmFreeLoaderBlock(LoaderBlock);
     LoaderBlock = Context = NULL;
 
+#ifndef SARCH_XBOX
     /* Initialize the SRM in phase 1 */
     if (!SeRmInitPhase1()) KeBugCheck(PROCESS1_INITIALIZATION_FAILED);
+#endif
 
     /* Update progress bar */
     InbvUpdateProgressBar(100);
@@ -2012,45 +2091,28 @@ Phase1InitializationDiscard(IN PVOID Context)
     /* Allow strings to be displayed */
     InbvEnableDisplayString(TRUE);
 
-    /* Launch initial process */
-    ProcessInfo = &InitBuffer->ProcessInfo;
-    ExpLoadInitialProcess(InitBuffer, &ProcessParameters, &Environment);
+    /* Title launch + init-section free + KSEG0/WC/MMIO paint live in
+     * Phase1Initialization (`.text`) instead of here -- this function is
+     * in `.INIT`, and the pre-paint MiFreeInitializationCode would unmap
+     * our own code page mid-execution. */
 
-    /* Wait 5 seconds for initial process to initialize */
-    Timeout.QuadPart = Int32x32To64(5, -10000000);
-    Status = ZwWaitForSingleObject(ProcessInfo->ProcessHandle, FALSE, &Timeout);
-    if (Status == STATUS_SUCCESS)
+    /* Pool free-list integrity probe (no-op when XB_STRACE is off). */
+    XbStraceValidatePool("phase1-before-init-free");
+
+    /* The boot drivers' PnP dispatch lives in INIT; stamp their entry
+     * points before the discard so a stray post-boot PnP IRP fails
+     * cleanly (see IopSealBootDriverPnp). */
     {
-        /* Failed, display error */
-        DPRINT1("INIT: Session Manager terminated.\n");
-
-        /* Bugcheck the system if SMSS couldn't initialize */
-        KeBugCheck(SESSION5_INITIALIZATION_FAILED);
+        extern VOID IopSealBootDriverPnp(VOID);
+        IopSealBootDriverPnp();
     }
-
-    /* Close process handles */
-    ZwClose(ProcessInfo->ThreadHandle);
-    ZwClose(ProcessInfo->ProcessHandle);
-
-    /* Free the initial process environment */
-    Size = 0;
-    ZwFreeVirtualMemory(NtCurrentProcess(),
-                        (PVOID*)&Environment,
-                        &Size,
-                        MEM_RELEASE);
-
-    /* Free the initial process parameters */
-    Size = 0;
-    ZwFreeVirtualMemory(NtCurrentProcess(),
-                        (PVOID*)&ProcessParameters,
-                        &Size,
-                        MEM_RELEASE);
 
     /* Increase init phase */
     ExpInitializationPhase++;
 
     /* Free the boot buffer */
     ExFreePoolWithTag(InitBuffer, TAG_INIT);
+    XbStraceValidatePool("phase1-after-free-InitBuffer");
 }
 
 VOID
@@ -2060,6 +2122,47 @@ Phase1Initialization(IN PVOID Context)
     /* Do the .INIT part of Phase 1 which we can free later */
     Phase1InitializationDiscard(Context);
 
+    /* Free ntoskrnl's discardable sections (INITDATA / .reloc / the
+     * deferred .INIT range) BEFORE the KSEG0 paint.  This function is in
+     * `.text`, so freeing `.INIT` doesn't unmap our own code.  Must run
+     * before the paint -- the PT-walking MiFreeInitializationCode would
+     * otherwise see PSE-direct PDEs and corrupt Mm.  Set NxInitFreesDone
+     * so MmZeroPageThread skips its own (now-unmappable) call. */
+    {
+        extern VOID NTAPI MiFindInitializationCode(OUT PVOID *, OUT PVOID *);
+        extern VOID NTAPI MiFreeInitializationCode(IN PVOID, IN PVOID);
+        extern volatile LONG NxInitFreesDone;
+        PVOID StartAddress = NULL, EndAddress = NULL;
+
+        MiFindInitializationCode(&StartAddress, &EndAddress);
+        if (StartAddress)
+            MiFreeInitializationCode(StartAddress, EndAddress);
+        NxInitFreesDone = 1;
+    }
+
+    /* KSEG0 PSE overlay -- the WC + UC MMIO half ran early in
+     * Phase1InitializationDiscard for bootvid; the KSEG0 half waits
+     * until here, after MiFreeInitializationCode, because that walker
+     * needs the kernel-image VAs PT-backed.  NxkMmEnsureMmioWindow's
+     * idempotency makes this single call safe. */
+    {
+        extern VOID NxkMmEnsureXboxWindows(VOID);
+        NxkMmEnsureXboxWindows();
+    }
+
+    /* Run the XBE title in place of smss.  Spawns the title's threads on
+     * the painted map and returns; system falls into MmZeroPageThread. */
+    {
+        extern VOID XeRunInitialTitle(VOID);
+        XeRunInitialTitle();
+    }
+
+#ifdef NXK_MM_PHYS
+    /* The supply zeroes inline and never signals MmZeroingPageEvent;
+     * parking here would only strand this thread's stack pages. */
+    PsTerminateSystemThread(STATUS_SUCCESS);
+#else
     /* Jump into zero page thread */
     MmZeroPageThread();
+#endif
 }

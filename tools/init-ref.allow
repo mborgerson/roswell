@@ -1,0 +1,52 @@
+# init-audit.py --check allowlist: resident functions permitted to reference
+# discardable sections (INIT / INITDATA / .rsrc).
+#
+# An entry asserts: EVERY path through this function that dereferences a
+# discardable address completes before Phase1Initialization runs
+# MiFindInitializationCode/MiFreeInitializationCode.  Names are compared
+# after stripping stdcall/fastcall decoration and LTO clone suffixes
+# (.lto_priv/.constprop/.isra/.part/.cold).
+#
+# Adding an entry requires the same review bar as an INIT migration:
+# explain WHY the reference cannot execute post-discard.  "the suite
+# passed" is not a justification.
+
+# The Phase-1 orchestrator itself: calls Phase1InitializationDiscard and
+# the MiFindInitializationCode/MiFreeInitializationCode pair.  Runs in
+# .text precisely so it survives the discard it performs; everything INIT
+# it touches happens before (or is) the free.
+Phase1Initialization
+
+# The boot PnP dispatch chain (ClassDispatchPnp, PciIdeXDispatchPnp,
+# AtaDispatchPnp, PartMgrPnp, PciPnpControl, PdoDispatchPnp, the
+# AddDevice/START handlers under them) moved INTO INIT 2026-06-10 --
+# their former resident->INIT references are INIT->INIT now, and
+# IopSealBootDriverPnp stamps the driver objects' PnP entry points back
+# to IopInvalidDeviceRequest before the discard.  PciIdeXInitialize
+# stays: pciide's DriverEntry-time miniport registration calls
+# IoAllocateDriverObjectExtension (INIT) and remains resident (it is an
+# exported-shape helper, standalone on DBG builds).
+PciIdeXInitialize
+
+# KdInitSystem's INIT targets are first-call-only: the
+# KdRegisterDebuggerDataBlock call is guarded by the data-list head not
+# yet existing, and the KdDebuggerInitialize0 call needs EnableKd, which
+# a re-entry only sets when KD was never enabled at boot.  Our DBG flash
+# bakes /DEBUG into LoadOptions, so KD enables at boot and bugcheck-time
+# re-entry returns at the KdDebuggerEnabled early-out.  CAVEAT: a DBG
+# kernel booted WITHOUT /DEBUG that bugchecks post-boot would reach the
+# discarded KdDebuggerInitialize0 -- that configuration does not exist
+# in our boot chain.
+KdInitSystem
+
+# MmZeroPageThread's MiFindInitializationCode call is skipped via the
+# NxInitFreesDone latch, set by Phase1Initialization before the discard
+# (see xb/mm/init.c).
+MmZeroPageThread
+
+# PspCreateProcess calls MmInitializeHandBuiltProcess(2) only on the
+# Parent == NULL path -- the hand-built System process during Phase 1.
+# Titles cannot create processes (single-process model, no such
+# ordinal), so the path never runs post-discard.
+PspCreateProcess
+

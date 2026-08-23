@@ -86,6 +86,8 @@ PspTerminateProcess(IN PEPROCESS Process,
             "Process: %p ExitStatus: %d\n", Process, ExitStatus);
     PSREFTRACE(Process);
 
+#ifndef SARCH_XBOX
+    /* BreakOnTermination is set via stubbed NtSetInformationProcess. */
     /* Check if this is a Critical Process */
     if (Process->BreakOnTermination)
     {
@@ -94,6 +96,7 @@ PspTerminateProcess(IN PEPROCESS Process,
                               Process,
                               Process->ImageFileName);
     }
+#endif
 
     /* Set the delete flag */
     InterlockedOr((PLONG)&Process->Flags, PSF_PROCESS_DELETE_BIT);
@@ -184,9 +187,12 @@ PspReapRoutine(IN PVOID Context)
             /* Get the first Thread Entry */
             Thread = CONTAINING_RECORD(NextEntry, ETHREAD, ReaperLink);
 
-            /* Delete this entry's kernel stack */
-            MmDeleteKernelStack((PVOID)Thread->Tcb.StackBase,
-                                Thread->Tcb.LargeStack);
+            /* Delete this entry's kernel stack -- honor the custom size,
+             * or a large stack is parked/freed as a default-sized one
+             * and its tail pages leak. */
+            MmDeleteKernelStackEx((PVOID)Thread->Tcb.StackBase,
+                                  Thread->Tcb.LargeStack,
+                                  Thread->Tcb.XeStackSize);
             Thread->Tcb.InitialStack = NULL;
 
             /* Move to the next entry */
@@ -279,6 +285,7 @@ PspDeleteProcess(IN PVOID ObjectBody)
     }
 
     /* Check if we have a job */
+#ifndef SARCH_XBOX /* ps/job.c is unlinked; Process->Job is never set */
     if (Process->Job)
     {
         /* Remove the process from the job */
@@ -288,6 +295,7 @@ PspDeleteProcess(IN PVOID ObjectBody)
         ObDereferenceObject(Process->Job);
         Process->Job = NULL;
     }
+#endif
 
     /* Increase the stack count */
     Process->Pcb.StackCount++;
@@ -316,7 +324,7 @@ PspDeleteProcess(IN PVOID ObjectBody)
         Process->SectionObject = NULL;
     }
 
-#if defined(_X86_)
+#if defined(_X86_) && !defined(SARCH_XBOX) /* ldt/vdm support is unlinked */
     /* Clean Ldt and Vdm objects */
     PspDeleteLdt(Process);
     PspDeleteVdmObjects(Process);
@@ -335,7 +343,10 @@ PspDeleteProcess(IN PVOID ObjectBody)
         KeUnstackDetachProcess(&ApcState);
     }
 
-    /* Check if we have an address space, and clean it */
+#ifndef SARCH_XBOX
+    /* Check if we have an address space, and clean it.  The single system
+     * process is permanently referenced and no path creates another one,
+     * so process deletion never tears down an address space here. */
     if (Process->HasAddressSpace)
     {
         /* Attach to the process */
@@ -350,6 +361,7 @@ PspDeleteProcess(IN PVOID ObjectBody)
         /* Completely delete the Address Space */
         MmDeleteProcessAddressSpace(Process);
     }
+#endif
 
     /* See if we have a PID */
     if (Process->UniqueProcessId)
@@ -363,7 +375,9 @@ PspDeleteProcess(IN PVOID ObjectBody)
     }
 
     /* Cleanup security information */
+#ifndef SARCH_XBOX
     PspDeleteProcessSecurity(Process);
+#endif
 
     /* Check if we have kept information on the Working Set */
     if (Process->WorkingSetWatch)
@@ -400,9 +414,10 @@ PspDeleteThread(IN PVOID ObjectBody)
     /* Check if we have a stack */
     if (Thread->Tcb.InitialStack)
     {
-        /* Release it */
-        MmDeleteKernelStack((PVOID)Thread->Tcb.StackBase,
-                            Thread->Tcb.LargeStack);
+        /* Release it -- honor the custom size (see PspReapRoutine). */
+        MmDeleteKernelStackEx((PVOID)Thread->Tcb.StackBase,
+                              Thread->Tcb.LargeStack,
+                              Thread->Tcb.XeStackSize);
     }
 
     /* Check if we have a CID Handle */
@@ -417,7 +432,9 @@ PspDeleteThread(IN PVOID ObjectBody)
     }
 
     /* Cleanup impersonation information */
+#ifndef SARCH_XBOX
     PspDeleteThreadSecurity(Thread);
+#endif
 
     /* Free the thread name if set */
     if (Thread->ThreadName)
@@ -516,8 +533,10 @@ PspExitThread(IN NTSTATUS ExitStatus)
     /* Lock the thread */
     ExWaitForRundownProtectionRelease(&Thread->RundownProtect);
 
+#ifndef SARCH_XBOX
     /* Cleanup the power state */
     PopCleanupPowerState((PPOWER_STATE)&Thread->Tcb.PowerState);
+#endif
 
     /* Call the WMI Callback for Threads */
     //WmiTraceThread(Thread, NULL, FALSE);
@@ -607,6 +626,9 @@ PspExitThread(IN NTSTATUS ExitStatus)
     /* Check if we had a previous thread to dereference */
     if (PreviousThread) ObDereferenceObject(PreviousThread);
 
+#ifndef SARCH_XBOX
+    /* No debug ports on Xbox -- titles never set DebugPort and all threads
+     * are system threads, so this Dbgk notify is unreachable. */
     /* Check if the process has a debug port and if this is a user thread */
     if ((CurrentProcess->DebugPort) && !(Thread->SystemThread))
     {
@@ -614,6 +636,11 @@ PspExitThread(IN NTSTATUS ExitStatus)
         Last ? DbgkExitProcess(CurrentProcess->ExitStatus) :
                DbgkExitThread(ExitStatus);
     }
+#endif
+
+#ifndef SARCH_XBOX
+    /* BreakOnTermination is set via NtSetInformation{Process,Thread}, both
+     * of which are stubbed -- no Xbox thread/process ever has it set. */
 
     /* Check if this is a Critical Thread */
     if ((KdDebuggerEnabled) && (Thread->BreakOnTermination))
@@ -645,9 +672,14 @@ PspExitThread(IN NTSTATUS ExitStatus)
                          0);
         }
     }
+#endif
 
     /* Sanity check */
     ASSERT(Thread->Tcb.CombinedApcDisable == 0);
+
+#ifndef SARCH_XBOX
+    /* No NtRegisterThreadTerminatePort and no LPC exception ports on Xbox
+     * (TerminationPort and CurrentProcess->ExceptionPort are always NULL). */
 
     /* Process the Termination Ports */
     TerminationPort = Thread->TerminationPort;
@@ -747,6 +779,11 @@ PspExitThread(IN NTSTATUS ExitStatus)
             }
         }
     }
+#endif
+
+#ifndef SARCH_XBOX
+    /* No win32k on Xbox; PsEstablishWin32Callouts is a no-op stub, so
+     * Tcb.Win32Thread/Win32Process never get set. */
 
     /* Rundown Win32 Thread if there is one */
     if (Thread->Tcb.Win32Thread) PspW32ThreadCallout(Thread,
@@ -758,6 +795,7 @@ PspExitThread(IN NTSTATUS ExitStatus)
         /* Run it down too */
         PspW32ProcessCallout(CurrentProcess, FALSE);
     }
+#endif
 
     /* Make sure Stack Swap is enabled */
     if (!Thread->Tcb.EnableStackSwap)
@@ -777,6 +815,10 @@ PspExitThread(IN NTSTATUS ExitStatus)
 
     /* Rundown Mutexes */
     KeRundownThread();
+
+#ifndef SARCH_XBOX
+    /* No user mode -> no TEB on any Xbox thread (KeInitThread is always
+     * called with Teb=NULL via PspSystemThreadStartup). */
 
     /* Check if we have a TEB */
     Teb = Thread->Tcb.Teb;
@@ -808,9 +850,12 @@ PspExitThread(IN NTSTATUS ExitStatus)
         MmDeleteTeb(CurrentProcess, Teb);
         Thread->Tcb.Teb = NULL;
     }
+#endif
 
     /* Free LPC Data */
+#ifndef SARCH_XBOX
     LpcExitThread(Thread);
+#endif
 
     /* Save the exit status and exit time */
     Thread->ExitStatus = ExitStatus;
@@ -828,6 +873,7 @@ PspExitThread(IN NTSTATUS ExitStatus)
         /* Exit the process */
         PspExitProcess(TRUE, CurrentProcess);
 
+#ifndef SARCH_XBOX
         /* Get the process token and check if we need to audit */
         PrimaryToken = PsReferencePrimaryToken(CurrentProcess);
         if (SeDetailedAuditingWithToken(PrimaryToken))
@@ -838,6 +884,7 @@ PspExitThread(IN NTSTATUS ExitStatus)
 
         /* Dereference the process token */
         ObFastDereferenceObject(&CurrentProcess->Token, PrimaryToken);
+#endif
 
         /* Check if this is a VDM Process and rundown the VDM DPCs if so */
         if (CurrentProcess->VdmObjects) { /* VdmRundownDpcs(CurrentProcess); */ }
@@ -853,12 +900,14 @@ PspExitThread(IN NTSTATUS ExitStatus)
             CurrentProcess->SectionObject = NULL;
         }
 
+#ifndef SARCH_XBOX
         /* Check if the process is part of a job */
         if (CurrentProcess->Job)
         {
             /* Remove the process from the job */
             PspExitProcessFromJob(CurrentProcess->Job, CurrentProcess);
         }
+#endif
     }
 
     /* Disable APCs */
@@ -900,8 +949,12 @@ PspExitThread(IN NTSTATUS ExitStatus)
         while (CurrentEntry != FirstEntry);
     }
 
-    /* Clean address space if this was the last thread */
+#ifndef SARCH_XBOX
+    /* Clean address space if this was the last thread; the single system
+     * process never loses its last thread (idle and worker threads do not
+     * exit), so this edge cannot fire */
     if (Last) MmCleanProcessAddressSpace(CurrentProcess);
+#endif
 
     /* Call the Lego routine */
     if (Thread->Tcb.LegoData) PspRunLegoRoutine(&Thread->Tcb);
@@ -1004,6 +1057,8 @@ PspTerminateThreadByPointer(IN PETHREAD Thread,
     PSTRACE(PS_KILL_DEBUG, "Thread: %p ExitStatus: %d\n", Thread, ExitStatus);
     PSREFTRACE(Thread);
 
+#ifndef SARCH_XBOX
+    /* BreakOnTermination is set via stubbed NtSetInformationThread. */
     /* Check if this is a Critical Thread, and Bugcheck */
     if (Thread->BreakOnTermination)
     {
@@ -1012,6 +1067,7 @@ PspTerminateThreadByPointer(IN PETHREAD Thread,
                               Thread,
                               Thread->ThreadsProcess->ImageFileName);
     }
+#endif
 
     /* Check if we are already inside the thread */
     if ((bSelf) || (PsGetCurrentThread() == Thread))
@@ -1026,6 +1082,12 @@ PspTerminateThreadByPointer(IN PETHREAD Thread,
         PspExitThread(ExitStatus);
     }
 
+#ifdef SARCH_XBOX
+    /* Cross-thread termination on Xbox: every thread is a system thread, so
+     * the user-APC redirection chain (PsExitSpecialApc/PspExitNormalApc) is
+     * unreachable -- titles only ever self-terminate. */
+    return STATUS_ACCESS_DENIED;
+#else
     /* This shouldn't be a system thread */
     if (Thread->SystemThread) return STATUS_ACCESS_DENIED;
 
@@ -1069,6 +1131,7 @@ PspTerminateThreadByPointer(IN PETHREAD Thread,
 
     /* Return Status */
     return Status;
+#endif
 }
 
 BOOLEAN
@@ -1102,8 +1165,10 @@ PspExitProcess(IN BOOLEAN LastThread,
         PspRunCreateProcessNotifyRoutines(Process, FALSE);
     }
 
+#ifndef SARCH_XBOX
     /* Cleanup the power state */
     PopCleanupPowerState((PPOWER_STATE)&Process->Pcb.PowerState);
+#endif
 
     /* Clear the security port */
     if (!Process->SecurityPort)
@@ -1121,12 +1186,14 @@ PspExitProcess(IN BOOLEAN LastThread,
     /* Check if we are the last thread */
     if (LastThread)
     {
+#ifndef SARCH_XBOX
         /* Check if we have to set the Timer Resolution */
         if (Process->SetTimerResolution)
         {
             /* Set it to default */
             ZwSetTimerResolution(KeMaximumIncrement, 0, &Actual);
         }
+#endif
 
         /* Check if we are part of a Job that has a completion port */
         if ((Process->Job) && (Process->Job->CompletionPort))
@@ -1169,6 +1236,11 @@ NTAPI
 NtTerminateProcess(IN HANDLE ProcessHandle OPTIONAL,
                    IN NTSTATUS ExitStatus)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ProcessHandle);
+    UNREFERENCED_PARAMETER(ExitStatus);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     NTSTATUS Status;
     PEPROCESS Process, CurrentProcess = PsGetCurrentProcess();
     PETHREAD Thread, CurrentThread = PsGetCurrentThread();
@@ -1280,6 +1352,7 @@ NtTerminateProcess(IN HANDLE ProcessHandle OPTIONAL,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -1287,6 +1360,11 @@ NTAPI
 NtTerminateThread(IN HANDLE ThreadHandle,
                   IN NTSTATUS ExitStatus)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ThreadHandle);
+    UNREFERENCED_PARAMETER(ExitStatus);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PETHREAD Thread;
     PETHREAD CurrentThread = PsGetCurrentThread();
     NTSTATUS Status;
@@ -1343,6 +1421,7 @@ TerminateSelf:
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS

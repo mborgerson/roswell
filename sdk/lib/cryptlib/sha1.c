@@ -53,6 +53,25 @@ static void SHA1Transform(ULONG State[5], UCHAR Buffer[64])
    d = State[3];
    e = State[4];
 
+#ifdef SARCH_XBOX
+   /* Rolled SHA-1 core: bit-identical to the unrolled form below (same
+    * circular 16-word schedule + same f/K per 20-round group), trading the
+    * unroll's speed for ~3.8 KB of resident .text.  SHA-1 is not a hot path
+    * on Xbox -- boot XBE digest verify + save-game HMAC only. */
+   {
+      ULONG i, t, f, k;
+      for (i = 0; i < 80; i++)
+      {
+         ULONG w = (i < 16) ? blk0(i) : blk1(i);
+         if (i < 20)      { f = f1(b, c, d); k = 0x5A827999; }
+         else if (i < 40) { f = f2(b, c, d); k = 0x6ED9EBA1; }
+         else if (i < 60) { f = f3(b, c, d); k = 0x8F1BBCDC; }
+         else             { f = f4(b, c, d); k = 0xCA62C1D6; }
+         t = rol(a, 5) + f + e + k + w;
+         e = d; d = c; c = rol(b, 30); b = a; a = t;
+      }
+   }
+#else
    /* 4 rounds of 20 operations each. Loop unrolled. */
    R0(a,b,c,d,e, 0); R0(e,a,b,c,d, 1); R0(d,e,a,b,c, 2); R0(c,d,e,a,b, 3);
    R0(b,c,d,e,a, 4); R0(a,b,c,d,e, 5); R0(e,a,b,c,d, 6); R0(d,e,a,b,c, 7);
@@ -74,6 +93,7 @@ static void SHA1Transform(ULONG State[5], UCHAR Buffer[64])
    R4(c,d,e,a,b,68); R4(b,c,d,e,a,69); R4(a,b,c,d,e,70); R4(e,a,b,c,d,71);
    R4(d,e,a,b,c,72); R4(c,d,e,a,b,73); R4(b,c,d,e,a,74); R4(a,b,c,d,e,75);
    R4(e,a,b,c,d,76); R4(d,e,a,b,c,77); R4(c,d,e,a,b,78); R4(b,c,d,e,a,79);
+#endif
 
    /* Add the working variables back into Context->State[] */
    State[0] += a;

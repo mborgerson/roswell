@@ -264,6 +264,17 @@ RtlAddAccessAllowedAce(IN OUT PACL Acl,
                        IN ACCESS_MASK AccessMask,
                        IN PSID Sid)
 {
+#ifdef SARCH_XBOX
+    /* No SRM on Xbox; DACLs aren't evaluated.  Only kept caller is
+     * NtCreatePagingFile (titles never invoke).  Skipping the worker
+     * drops RtlpAddKnownAce + its RtlValidSid/RtlValidAcl/RtlFirstFreeAce/
+     * RtlLengthSid/RtlCopySid chain. */
+    UNREFERENCED_PARAMETER(Acl);
+    UNREFERENCED_PARAMETER(Revision);
+    UNREFERENCED_PARAMETER(AccessMask);
+    UNREFERENCED_PARAMETER(Sid);
+    return STATUS_SUCCESS;
+#else
     PAGED_CODE_RTL();
 
     /* Call the worker function */
@@ -273,6 +284,7 @@ RtlAddAccessAllowedAce(IN OUT PACL Acl,
                            AccessMask,
                            Sid,
                            ACCESS_ALLOWED_ACE_TYPE);
+#endif
 }
 
 /*
@@ -836,6 +848,13 @@ BOOLEAN
 NTAPI
 RtlValidAcl(IN PACL Acl)
 {
+#ifdef SARCH_XBOX
+    /* Only kept caller is RtlpAddKnownAce, only invoked from ob/se with
+     * compile-time-built ACLs.  Drop the 360 B SEH-guarded validator. */
+    return Acl != NULL && Acl->AclRevision >= MIN_ACL_REVISION &&
+           Acl->AclRevision <= MAX_ACL_REVISION &&
+           Acl->AclSize >= sizeof(ACL);
+#else
     PACE_HEADER Ace;
     PISID Sid;
     ULONG i;
@@ -1026,6 +1045,7 @@ RtlValidAcl(IN PACL Acl)
 
     /* The ACL looks ok */
     return TRUE;
+#endif
 }
 
 /* EOF */

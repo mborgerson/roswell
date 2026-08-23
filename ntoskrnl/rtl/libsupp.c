@@ -21,7 +21,9 @@ typedef struct _RTL_RANGE_ENTRY
     RTL_RANGE Range;
 } RTL_RANGE_ENTRY, *PRTL_RANGE_ENTRY;
 
+#ifndef SARCH_XBOX
 PAGED_LOOKASIDE_LIST RtlpRangeListEntryLookasideList;
+#endif
 SIZE_T RtlpAllocDeallocQueryBufferSize = 128;
 
 /* FUNCTIONS *****************************************************************/
@@ -57,6 +59,7 @@ RtlPcToFileHeader(
     return *BaseOfImage;
 }
 
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 RtlInitializeRangeListPackage(VOID)
@@ -70,6 +73,7 @@ RtlInitializeRangeListPackage(VOID)
                                    'elRR',
                                    16);
 }
+#endif
 
 BOOLEAN
 NTAPI
@@ -752,8 +756,12 @@ IMAGE_RESOURCE_DIRECTORY *find_first_entry( IMAGE_RESOURCE_DIRECTORY *dir,
 /**********************************************************************
  *  find_entry
  *
- * Find a resource entry
+ * Find a resource entry.  Boot-only on Xbox (the PE resource walker is
+ * used only at boot), so it lives in the discardable INIT section.
  */
+#ifdef SARCH_XBOX
+CODE_SEG("INIT")
+#endif
 NTSTATUS find_entry( PVOID BaseAddress, LDR_RESOURCE_INFO *info,
                      ULONG level, void **ret, int want_dir )
 {

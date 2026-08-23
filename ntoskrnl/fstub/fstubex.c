@@ -161,6 +161,11 @@ FstubWriteSector(IN PDEVICE_OBJECT DeviceObject,
                  IN PVOID Buffer
 );
 
+#ifndef SARCH_XBOX
+/* Xbox HDD is FATX-style RAW; the EFI/GPT + MBR partition machinery and
+ * disk-create + boot-disk-info paths below are dead on a folded Xbox image.
+ * Wrapped out wholesale.  FstubReadPartitionTableXbox + the public
+ * IoReadPartitionTableEx (further down) handle the live path. */
 VOID
 NTAPI
 FstubAdjustPartitionCount(IN ULONG SectorSize,
@@ -196,6 +201,8 @@ FstubAdjustPartitionCount(IN ULONG SectorSize,
         ASSERT(Count % 4 == 0);
     }
 }
+
+#endif /* close block 1 momentarily -- FstubAllocateDiskInformation is needed by the Xbox path */
 
 NTSTATUS
 NTAPI
@@ -259,6 +266,8 @@ FstubAllocateDiskInformation(IN PDEVICE_OBJECT DeviceObject,
 
     return STATUS_SUCCESS;
 }
+
+#ifndef SARCH_XBOX /* re-enter block 1 -- EFI/MBR machinery resumes */
 
 PDRIVE_LAYOUT_INFORMATION
 NTAPI
@@ -522,6 +531,7 @@ FstubCreateDiskRaw(IN PDEVICE_OBJECT DeviceObject)
     FstubFreeDiskInformation(Disk);
     return Status;
 }
+#endif /* SARCH_XBOX (block 1: EFI/MBR partition machinery) */
 
 #ifndef NDEBUG
 static __inline
@@ -666,6 +676,7 @@ FstubDbgPrintSetPartitionEx(
 #define FstubDbgPrintSetPartitionEx(PartitionEntry, PartitionNumber)
 #endif // !NDEBUG
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI
 FstubDetectPartitionStyle(IN PDISK_INFORMATION Disk,
@@ -712,6 +723,7 @@ FstubDetectPartitionStyle(IN PDISK_INFORMATION Disk,
 
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 VOID
 NTAPI
@@ -732,6 +744,18 @@ NTAPI
 FstubGetDiskGeometry(IN PDEVICE_OBJECT DeviceObject,
                      OUT PDISK_GEOMETRY_EX Geometry)
 {
+#ifdef SARCH_XBOX
+    /* Xbox HDD is always 512-byte sectors (FATX requires it); skip the
+     * IOCTL_DISK_GET_DRIVE_GEOMETRY_EX roundtrip.  Only SectorSize is
+     * consumed by the FATX-table synthesiser; DiskSize is set non-zero so
+     * IS_VALID_DISK_INFO passes. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    ASSERT(Geometry);
+    RtlZeroMemory(Geometry, sizeof(DISK_GEOMETRY_EX));
+    Geometry->Geometry.BytesPerSector = 512;
+    Geometry->DiskSize.QuadPart = 512;
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     PIRP Irp;
     PKEVENT Event = NULL;
@@ -819,8 +843,10 @@ Cleanup:
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI
 FstubReadHeaderEFI(IN PDISK_INFORMATION Disk,
@@ -1185,6 +1211,8 @@ FstubReadPartitionTableMBR(IN PDISK_INFORMATION Disk,
     return STATUS_SUCCESS;
 }
 
+#endif /* close block 2 momentarily -- FstubReadSector is needed by the Xbox path */
+
 NTSTATUS
 NTAPI
 FstubReadSector(IN PDEVICE_OBJECT DeviceObject,
@@ -1238,6 +1266,8 @@ FstubReadSector(IN PDEVICE_OBJECT DeviceObject,
 
     return Status;
 }
+
+#ifndef SARCH_XBOX /* re-enter block 2 -- EFI/MBR table machinery resumes */
 
 NTSTATUS
 NTAPI
@@ -1735,7 +1765,9 @@ FstubWritePartitionTableMBR(IN PDISK_INFORMATION Disk,
     ExFreePoolWithTag(DriveLayout, TAG_FSTUB);
     return Status;
 }
+#endif /* SARCH_XBOX (block 2: EFI/MBR read+write+verify table machinery) */
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI
 FstubWriteSector(IN PDEVICE_OBJECT DeviceObject,
@@ -1789,12 +1821,33 @@ FstubWriteSector(IN PDEVICE_OBJECT DeviceObject,
 
     return Status;
 }
+#endif /* SARCH_XBOX (FstubWriteSector) */
 
 /* PUBLIC FUNCTIONS **********************************************************/
 
-/*
- * @implemented
- */
+#ifdef SARCH_XBOX
+/* Xbox: partmgr/disk reference IoCreateDisk + IoReadDiskSignature via
+ * __imp_ thunks but the runtime paths (partition repartition, signature
+ * read for new disk init) are dead -- there's only ever the one fixed
+ * FATX HDD on Xbox.  Stub to STATUS_NOT_IMPLEMENTED so the EFI/MBR write
+ * machinery below GCs out. */
+NTSTATUS NTAPI
+IoCreateDisk(IN PDEVICE_OBJECT DeviceObject, IN PCREATE_DISK Disk)
+{ (void)DeviceObject; (void)Disk; return STATUS_NOT_IMPLEMENTED; }
+
+NTSTATUS NTAPI
+IoReadDiskSignature(IN PDEVICE_OBJECT DeviceObject,
+                    IN ULONG BytesPerSector,
+                    OUT PDISK_SIGNATURE Signature)
+{ (void)DeviceObject; (void)BytesPerSector;
+  if (Signature) Signature->PartitionStyle = PARTITION_STYLE_RAW;
+  return STATUS_NOT_IMPLEMENTED; }
+
+NTSTATUS NTAPI
+IoGetBootDiskInformation(IN OUT PBOOTDISK_INFORMATION BootDiskInformation,
+                         IN ULONG Size)
+{ (void)BootDiskInformation; (void)Size; return STATUS_NOT_IMPLEMENTED; }
+#else
 NTSTATUS
 NTAPI
 IoCreateDisk(IN PDEVICE_OBJECT DeviceObject,
@@ -2265,6 +2318,121 @@ Cleanup:
     ExFreePoolWithTag(Buffer, TAG_FSTUB);
     return Status;
 }
+#endif /* SARCH_XBOX (IoCreateDisk / IoGetBootDiskInformation / IoReadDiskSignature) */
+
+#ifdef SARCH_XBOX
+/*
+ * the original Xbox HDD has no MBR or GPT -- it is detected as a RAW
+ * disk.  Its filesystem partitions live at fixed byte offsets baked into the
+ * console's firmware, each beginning with a FATX superblock and no on-disk
+ * partition table.  This is the canonical retail layout (offset, length),
+ * cross-checked against cromwell fs/fatx, the fatxfs project, and the
+ * retail Xbox HAL (hal/halx86/xbox/part_xbox.c XboxPartitions[]).
+ *
+ * The array order MUST match \Device\Harddisk0\PartitionN naming used by the
+ * Xbox kernel and assumed by titles -- titles look up the cache partitions
+ * via fixed Partition3/4/5 mounts and the system XBE always lives at
+ * Partition2 (= C:).  This is *not* physical disk order:
+ *
+ *   PartitionN  Drive  Role         Byte offset    Byte length
+ *      1        E:     data         0xABE80000     0x1312D6000
+ *      2        C:     system       0x8CA80000     0x01F400000   (xboxdash.xbe)
+ *      3        X:     game cache   0x00080000     0x02EE00000
+ *      4        Y:     game cache   0x2EE80000     0x02EE00000
+ *      5        Z:     game cache   0x5DC80000     0x02EE00000
+ *
+ * FstubReadPartitionTableXbox probes each offset for the FATX magic and
+ * synthesises an MBR-style DRIVE_LAYOUT_INFORMATION_EX from those that carry
+ * it, so partmgr enumerates them as ordinary partitions and vfatfs can mount
+ * the volumes.
+ */
+static const struct
+{
+    ULONGLONG Offset;
+    ULONGLONG Length;
+} FstubXboxFatxPartitions[] =
+{
+    { 0xABE80000ULL, 0x1312D6000ULL },  /* Partition1 -- E: data        */
+    { 0x8CA80000ULL, 0x01F400000ULL },  /* Partition2 -- C: system      */
+    { 0x00080000ULL, 0x02EE00000ULL },  /* Partition3 -- X: game cache  */
+    { 0x2EE80000ULL, 0x02EE00000ULL },  /* Partition4 -- Y: game cache  */
+    { 0x5DC80000ULL, 0x02EE00000ULL },  /* Partition5 -- Z: game cache  */
+};
+
+CODE_SEG("PAGE")
+NTSTATUS
+NTAPI
+FstubReadPartitionTableXbox(IN PDISK_INFORMATION Disk,
+                            OUT PDRIVE_LAYOUT_INFORMATION_EX* ReturnedDriveLayout)
+{
+    PDRIVE_LAYOUT_INFORMATION_EX Layout;
+    ULONG i, Count = 0;
+    NTSTATUS Status;
+
+    PAGED_CODE();
+
+    ASSERT(IS_VALID_DISK_INFO(Disk));
+    ASSERT(ReturnedDriveLayout);
+
+    *ReturnedDriveLayout = NULL;
+
+    Layout = ExAllocatePoolWithTag(NonPagedPool,
+                                   FIELD_OFFSET(DRIVE_LAYOUT_INFORMATION_EX, PartitionEntry) +
+                                   RTL_NUMBER_OF(FstubXboxFatxPartitions) * sizeof(PARTITION_INFORMATION_EX),
+                                   TAG_FSTUB);
+    if (!Layout)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    for (i = 0; i < RTL_NUMBER_OF(FstubXboxFatxPartitions); i++)
+    {
+        ULONGLONG Offset = FstubXboxFatxPartitions[i].Offset;
+
+        /* Read the first sector of the candidate partition; a FATX volume
+         * begins with the four-byte "FATX" superblock magic. */
+        Status = FstubReadSector(Disk->DeviceObject,
+                                 Disk->SectorSize,
+                                 Offset / Disk->SectorSize,
+                                 Disk->Buffer);
+        if (!NT_SUCCESS(Status))
+        {
+            continue;
+        }
+
+        if (Disk->Buffer[0] != 'F' || Disk->Buffer[1] != 'A' ||
+            Disk->Buffer[2] != 'T' || Disk->Buffer[3] != 'X')
+        {
+            continue;
+        }
+
+        Layout->PartitionEntry[Count].PartitionStyle = PARTITION_STYLE_MBR;
+        Layout->PartitionEntry[Count].StartingOffset.QuadPart = Offset;
+        Layout->PartitionEntry[Count].PartitionLength.QuadPart = FstubXboxFatxPartitions[i].Length;
+        Layout->PartitionEntry[Count].PartitionNumber = Count + 1;
+        Layout->PartitionEntry[Count].RewritePartition = FALSE;
+        Layout->PartitionEntry[Count].Mbr.PartitionType = PARTITION_FAT32;
+        Layout->PartitionEntry[Count].Mbr.BootIndicator = FALSE;
+        Layout->PartitionEntry[Count].Mbr.RecognizedPartition = TRUE;
+        Layout->PartitionEntry[Count].Mbr.HiddenSectors = (ULONG)(Offset / Disk->SectorSize);
+        Count++;
+    }
+
+    if (Count == 0)
+    {
+        /* Not an Xbox FATX disk -- let the caller fall back to MBR/GPT/RAW. */
+        ExFreePoolWithTag(Layout, TAG_FSTUB);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    Layout->PartitionStyle = PARTITION_STYLE_MBR;
+    Layout->PartitionCount = Count;
+    Layout->Mbr.Signature = 0x584F4258; /* 'XBOX' */
+
+    *ReturnedDriveLayout = Layout;
+    return STATUS_SUCCESS;
+}
+#endif /* SARCH_XBOX */
 
 /*
  * @implemented
@@ -2276,7 +2444,9 @@ IoReadPartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
 {
     NTSTATUS Status;
     PDISK_INFORMATION Disk;
+#ifndef SARCH_XBOX
     PARTITION_STYLE PartitionStyle;
+#endif
 
     PAGED_CODE();
 
@@ -2291,6 +2461,11 @@ IoReadPartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
     }
     ASSERT(Disk);
 
+#ifdef SARCH_XBOX
+    /* Xbox HDD is always the FATX-style RAW layout; synthesise the table
+     * from the fixed FATX superblock offsets without an MBR/GPT probe. */
+    Status = FstubReadPartitionTableXbox(Disk, DriveLayout);
+#else
     /* Then, detect partition style (MBR? GPT/EFI? RAW?) */
     Status = FstubDetectPartitionStyle(Disk, &PartitionStyle);
     if (!NT_SUCCESS(Status))
@@ -2321,6 +2496,7 @@ IoReadPartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
             DPRINT("Unknown partition type\n");
             Status = STATUS_UNSUCCESSFUL;
     }
+#endif
 
     /* It's over, internal structure not needed anymore */
     FstubFreeDiskInformation(Disk);
@@ -2335,6 +2511,25 @@ IoReadPartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
 /*
  * @implemented
  */
+#ifdef SARCH_XBOX
+/* Xbox: write-side partition-table APIs have no folded-driver consumer.
+ * Stub to make the EFI/MBR write/verify chains they call GC out. */
+NTSTATUS NTAPI
+IoSetPartitionInformationEx(IN PDEVICE_OBJECT DeviceObject,
+                            IN ULONG PartitionNumber,
+                            IN PSET_PARTITION_INFORMATION_EX PartitionInfo)
+{ (void)DeviceObject; (void)PartitionNumber; (void)PartitionInfo;
+  return STATUS_NOT_IMPLEMENTED; }
+
+NTSTATUS NTAPI
+IoVerifyPartitionTable(IN PDEVICE_OBJECT DeviceObject, IN BOOLEAN FixErrors)
+{ (void)DeviceObject; (void)FixErrors; return STATUS_NOT_IMPLEMENTED; }
+
+NTSTATUS NTAPI
+IoWritePartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
+                        IN PDRIVE_LAYOUT_INFORMATION_EX DriveLayout)
+{ (void)DeviceObject; (void)DriveLayout; return STATUS_NOT_IMPLEMENTED; }
+#else
 NTSTATUS
 NTAPI
 IoSetPartitionInformationEx(IN PDEVICE_OBJECT DeviceObject,
@@ -2555,5 +2750,6 @@ IoWritePartitionTableEx(IN PDEVICE_OBJECT DeviceObject,
 
     return Status;
 }
+#endif /* SARCH_XBOX (Set/Verify/Write partition table public APIs) */
 
 /* EOF */

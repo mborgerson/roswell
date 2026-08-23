@@ -760,7 +760,8 @@ KeInitThread(IN OUT PKTHREAD Thread,
              IN PVOID StartContext,
              IN PCONTEXT Context,
              IN PVOID Teb,
-             IN PKPROCESS Process)
+             IN PKPROCESS Process,
+             IN SIZE_T StackSize)
 {
     BOOLEAN AllocatedStack = FALSE;
     ULONG i;
@@ -841,18 +842,24 @@ KeInitThread(IN OUT PKTHREAD Thread,
     /* Check if we have a kernel stack */
     if (!KernelStack)
     {
-        /* We don't, allocate one */
-        KernelStack = MmCreateKernelStack(FALSE, 0);
+        /* We don't, allocate one.  StackSize == 0 means the caller wants the
+         * default; MmCreateKernelStackEx falls back to KERNEL_STACK_SIZE in
+         * that case. */
+        KernelStack = MmCreateKernelStackEx(FALSE, 0, StackSize);
         if (!KernelStack) return STATUS_INSUFFICIENT_RESOURCES;
 
         /* Remember for later */
         AllocatedStack = TRUE;
     }
 
-    /* Set the Thread Stacks */
+    /* Set the Thread Stacks.  StackLimit reflects the actually-committed
+     * size so #DF / __chkstk / bugcheck output match the real bottom of the
+     * stack. */
     Thread->InitialStack = KernelStack;
     Thread->StackBase = KernelStack;
-    Thread->StackLimit = (ULONG_PTR)KernelStack - KERNEL_STACK_SIZE;
+    Thread->StackLimit = (ULONG_PTR)KernelStack -
+                         (StackSize ? StackSize : KERNEL_STACK_SIZE);
+    Thread->XeStackSize = StackSize;
     Thread->KernelStackResident = TRUE;
 
     /* Enter SEH to avoid crashes due to user mode */
@@ -874,8 +881,9 @@ KeInitThread(IN OUT PKTHREAD Thread,
         /* Check if a stack was allocated */
         if (AllocatedStack)
         {
-            /* Delete the stack */
-            MmDeleteKernelStack((PVOID)Thread->StackBase, FALSE);
+            /* Delete the stack -- honor the custom size if any. */
+            MmDeleteKernelStackEx((PVOID)Thread->StackBase, FALSE,
+                                  Thread->XeStackSize);
             Thread->InitialStack = NULL;
         }
     }
@@ -897,7 +905,9 @@ KeInitializeThread(IN PKPROCESS Process,
                    IN PVOID Teb,
                    IN PVOID KernelStack)
 {
-    /* Initialize and start the thread on success */
+    /* Initialize and start the thread on success.  This wrapper is only used
+     * by callers that pass in their own pre-allocated KernelStack and don't
+     * need a custom-sized stack -- the size therefore stays at the default. */
     if (NT_SUCCESS(KeInitThread(Thread,
                                 KernelStack,
                                 SystemRoutine,
@@ -905,7 +915,8 @@ KeInitializeThread(IN PKPROCESS Process,
                                 StartContext,
                                 Context,
                                 Teb,
-                                Process)))
+                                Process,
+                                0)))
     {
         /* Start it */
         KeStartThread(Thread);
@@ -916,8 +927,8 @@ VOID
 NTAPI
 KeUninitThread(IN PKTHREAD Thread)
 {
-    /* Delete the stack */
-    MmDeleteKernelStack((PVOID)Thread->StackBase, FALSE);
+    /* Delete the stack -- honor the custom size set by KeInitThread. */
+    MmDeleteKernelStackEx((PVOID)Thread->StackBase, FALSE, Thread->XeStackSize);
     Thread->InitialStack = NULL;
 }
 

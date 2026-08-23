@@ -363,6 +363,7 @@ IopParseDevice(IN PVOID ParseObject,
         /* Validate the open packet */
         if (!IopValidateOpenPacket(OpenPacket)) return STATUS_OBJECT_TYPE_MISMATCH;
 
+#ifndef SARCH_XBOX
         /* Valide reparse point in case we traversed a mountpoint */
         if (OpenPacket->TraversedMountPoint)
         {
@@ -379,6 +380,7 @@ IopParseDevice(IN PVOID ParseObject,
                 return STATUS_IO_REPARSE_DATA_INVALID;
             }
         }
+#endif
 
         /* Check if we have a related file object */
         if (OpenPacket->RelatedFileObject)
@@ -401,8 +403,10 @@ IopParseDevice(IN PVOID ParseObject,
                           &IoFileObjectType->TypeInfo.GenericMapping);
         RtlMapGenericMask(&AccessState->OriginalDesiredAccess,
                           &IoFileObjectType->TypeInfo.GenericMapping);
+#ifndef SARCH_XBOX
         SeSetAccessStateGenericMapping(AccessState,
                                        &IoFileObjectType->TypeInfo.GenericMapping);
+#endif
         DesiredAccess = AccessState->RemainingDesiredAccess;
 
         /* Check what kind of access checks to do */
@@ -419,11 +423,14 @@ IopParseDevice(IN PVOID ParseObject,
         }
 
         /* Check privilege for backup or restore operation */
+#ifndef SARCH_XBOX
         IopCheckBackupRestorePrivilege(AccessState,
                                        &OpenPacket->CreateOptions,
                                        CheckMode,
                                        OpenPacket->Disposition);
+#endif
 
+#ifndef SARCH_XBOX
         /* Check if we are re-parsing */
         if (((OpenPacket->Override) && !(RemainingName->Length)) ||
             (AccessState->Flags & SE_BACKUP_PRIVILEGES_CHECKED))
@@ -431,6 +438,7 @@ IopParseDevice(IN PVOID ParseObject,
             /* Get granted access from the last call */
             DesiredAccess |= AccessState->PreviouslyGrantedAccess;
         }
+#endif
 
         /* Check if this is a volume open */
         if ((OpenPacket->RelatedFileObject) &&
@@ -442,6 +450,7 @@ IopParseDevice(IN PVOID ParseObject,
         }
 
         /* Now check if we need access checks */
+#ifndef SARCH_XBOX
         if (((AccessMode != KernelMode) ||
              (OpenPacket->Options & IO_FORCE_ACCESS_CHECK)) &&
             (!(OpenPacket->RelatedFileObject) || (VolumeOpen)) &&
@@ -580,6 +589,7 @@ IopParseDevice(IN PVOID ParseObject,
                 return STATUS_ACCESS_DENIED;
             }
         }
+#endif
 
         /* Check if we can simply use a dummy file */
         UseDummyFile = ((OpenPacket->QueryOnly) || (OpenPacket->DeleteOnly));
@@ -615,11 +625,13 @@ IopParseDevice(IN PVOID ParseObject,
                 /* Reference it */
                 InterlockedIncrement((PLONG)&Vpb->ReferenceCount);
 
+#ifndef SARCH_XBOX
                 /* Check if we were given a specific top level device to use */
                 if (OpenPacket->InternalFlags & IOP_USE_TOP_LEVEL_DEVICE_HINT)
                 {
                     DeviceObject = Vpb->DeviceObject;
                 }
+#endif
             }
         }
         else
@@ -643,15 +655,15 @@ IopParseDevice(IN PVOID ParseObject,
                 DeviceObject = OriginalDeviceObject;
             }
 
-            /* If we weren't given a specific top level device, look for an attached device */
-            if (!(OpenPacket->InternalFlags & IOP_USE_TOP_LEVEL_DEVICE_HINT) &&
-                DeviceObject->AttachedDevice)
+            /* Look for an attached device */
+            if (DeviceObject->AttachedDevice)
             {
                 /* Get the attached device */
                 DeviceObject = IoGetAttachedDevice(DeviceObject);
             }
         }
 
+#ifndef SARCH_XBOX
         /* If we have a top level device hint, verify it */
         if (OpenPacket->InternalFlags & IOP_USE_TOP_LEVEL_DEVICE_HINT)
         {
@@ -663,14 +675,18 @@ IopParseDevice(IN PVOID ParseObject,
                 return Status;
             }
         }
+#endif
 
+#ifndef SARCH_XBOX
         /* If we traversed a mount point, reset the information */
         if (OpenPacket->TraversedMountPoint)
         {
             OpenPacket->TraversedMountPoint = FALSE;
         }
+#endif
 
         /* Check if this is a secure FSD */
+#ifndef SARCH_XBOX
         if ((DeviceObject->Characteristics & FILE_DEVICE_SECURE_OPEN) &&
             ((OpenPacket->RelatedFileObject) || (RemainingName->Length)) &&
             (!VolumeOpen))
@@ -740,6 +756,7 @@ IopParseDevice(IN PVOID ParseObject,
                 return STATUS_ACCESS_DENIED;
             }
         }
+#endif
 
         /* Allocate the IRP */
         Irp = IoAllocateIrp(DeviceObject->StackSize, TRUE);
@@ -773,6 +790,13 @@ IopParseDevice(IN PVOID ParseObject,
         StackLoc = IoGetNextIrpStackLocation(Irp);
         StackLoc->Control = 0;
 
+#ifdef SARCH_XBOX
+        /* No named pipes or mailslots; only IRP_MJ_CREATE is reachable */
+        StackLoc->MajorFunction = IRP_MJ_CREATE;
+        StackLoc->Parameters.Create.EaLength = OpenPacket->EaLength;
+        StackLoc->Flags = (UCHAR)OpenPacket->Options;
+        StackLoc->Flags |= !(Attributes & OBJ_CASE_INSENSITIVE) ? SL_CASE_SENSITIVE: 0;
+#else
         /* Check what kind of file this is */
         switch (OpenPacket->CreateFileType)
         {
@@ -804,6 +828,7 @@ IopParseDevice(IN PVOID ParseObject,
                 StackLoc->Parameters.CreateMailslot.Parameters = OpenPacket->ExtraCreateParameters;
                 break;
         }
+#endif
 
         /* Set the common data */
         Irp->Overlay.AllocationSize = OpenPacket->AllocationSize;
@@ -906,6 +931,7 @@ IopParseDevice(IN PVOID ParseObject,
                 FileObject->Flags |= FO_RANDOM_ACCESS;
             }
 
+#ifndef SARCH_XBOX
             /* Check if we were asked to setup a file object extension */
             if (OpenPacket->InternalFlags & IOP_CREATE_FILE_OBJECT_EXTENSION)
             {
@@ -924,6 +950,7 @@ IopParseDevice(IN PVOID ParseObject,
                     FileObjectExtension->TopDeviceObjectHint = DeviceObject;
                 }
             }
+#endif
         }
         else
         {
@@ -1012,6 +1039,7 @@ IopParseDevice(IN PVOID ParseObject,
             ASSERT(!Irp->MdlAddress);
 
             /* Handle name change if required */
+#ifndef SARCH_XBOX
             if (Status == STATUS_REPARSE)
             {
                 /* Check this is a mount point */
@@ -1030,6 +1058,7 @@ IopParseDevice(IN PVOID ParseObject,
                     IopDoNameTransmogrify(Irp, FileObject, ReparseData);
                 }
             }
+#endif
 
             /* Completion happens at APC_LEVEL */
             KeRaiseIrql(APC_LEVEL, &OldIrql);
@@ -1099,6 +1128,7 @@ IopParseDevice(IN PVOID ParseObject,
             OpenPacket->FinalStatus = Status;
             return Status;
         }
+#ifndef SARCH_XBOX
         else if (Status == STATUS_REPARSE)
         {
             if (OpenPacket->Information == IO_REPARSE ||
@@ -1197,6 +1227,7 @@ IopParseDevice(IN PVOID ParseObject,
             /* Loop again and reattempt an opening */
             continue;
         }
+#endif
 
         break;
     }
@@ -1657,6 +1688,20 @@ IopGetSetSecurityObject(IN PVOID ObjectBody,
                         IN POOL_TYPE PoolType,
                         IN OUT PGENERIC_MAPPING GenericMapping)
 {
+#ifdef SARCH_XBOX
+    /* No SE; titles never query or set SDs. Ob layer is gated upstream,
+     * but the symbol must remain because the object type initializer
+     * stores it as SecurityProcedure. */
+    UNREFERENCED_PARAMETER(ObjectBody);
+    UNREFERENCED_PARAMETER(OperationCode);
+    UNREFERENCED_PARAMETER(SecurityInformation);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(BufferLength);
+    UNREFERENCED_PARAMETER(OldSecurityDescriptor);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(GenericMapping);
+    return STATUS_SUCCESS;
+#else
     IO_STATUS_BLOCK IoStatusBlock;
     PIO_STACK_LOCATION StackPtr;
     PFILE_OBJECT FileObject;
@@ -1885,10 +1930,15 @@ IopGetSetSecurityObject(IN PVOID ObjectBody,
         /* Was this a query? */
         if (OperationCode == QuerySecurityDescriptor)
         {
+#ifndef SARCH_XBOX
             /* Set a World Security Descriptor */
             Status = SeSetWorldSecurityDescriptor(*SecurityInformation,
                                                   SecurityDescriptor,
                                                   BufferLength);
+#else
+            /* No SRM on Xbox; treat as success like the non-query path. */
+            Status = STATUS_SUCCESS;
+#endif
         }
         else
         {
@@ -1916,8 +1966,12 @@ IopGetSetSecurityObject(IN PVOID ObjectBody,
 
     /* Return Status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
+#ifndef SARCH_XBOX
+/* File objects have no QueryNameProcedure here; ObQueryNameString
+ * returns an empty name for them instead. */
 NTSTATUS
 NTAPI
 IopQueryName(IN PVOID ObjectBody,
@@ -1956,6 +2010,11 @@ IopQueryNameInternal(IN PVOID ObjectBody,
     PDEVICE_OBJECT DeviceObject;
     BOOLEAN NoObCall;
 
+#ifdef SARCH_XBOX
+    /* No mountmgr drive letters on Xbox; ignore QueryDosName. */
+    QueryDosName = FALSE;
+#endif
+
     IOTRACE(IO_FILE_DEBUG, "ObjectBody: %p\n", ObjectBody);
 
     /* Validate length */
@@ -1972,6 +2031,7 @@ IopQueryNameInternal(IN PVOID ObjectBody,
 
     /* Query DOS name if the caller asked to */
     NoObCall = FALSE;
+#ifndef SARCH_XBOX
     if (QueryDosName)
     {
         DeviceObject = FileObject->DeviceObject;
@@ -2001,6 +2061,7 @@ IopQueryNameInternal(IN PVOID ObjectBody,
             LocalReturnLength = LocalInfo->Name.Length + sizeof(OBJECT_NAME_INFORMATION) + sizeof(WCHAR);
         }
     }
+#endif
 
     /* Fall back if querying DOS name failed or if caller never wanted it ;-) */
     if (!QueryDosName || !NT_SUCCESS(Status))
@@ -2170,6 +2231,7 @@ IopQueryNameInternal(IN PVOID ObjectBody,
 
     return Status;
 }
+#endif /* !SARCH_XBOX */
 
 VOID
 NTAPI
@@ -2192,6 +2254,7 @@ IopCloseFile(IN PEPROCESS Process OPTIONAL,
     /* If this isn't the last handle for the current process, quit */
     if (HandleCount != 1) return;
 
+#ifndef SARCH_XBOX
     /* Check if the file is locked and has more then one handle opened */
     if ((FileObject->LockOperation) && (SystemHandleCount != 1))
     {
@@ -2261,6 +2324,7 @@ IopCloseFile(IN PEPROCESS Process OPTIONAL,
             IopUnlockFileObject(FileObject);
         }
     }
+#endif
 
     /* Make sure this is the last handle */
     if (SystemHandleCount != 1) return;
@@ -2354,6 +2418,7 @@ IopQueryAttributesFile(IN POBJECT_ATTRIBUTES ObjectAttributes,
     PAGED_CODE();
     IOTRACE(IO_FILE_DEBUG, "Class: %lx\n", FileInformationClass);
 
+#ifndef SARCH_XBOX
     /* Check if the caller was user mode */
     if (AccessMode != KernelMode)
     {
@@ -2370,6 +2435,7 @@ IopQueryAttributesFile(IN POBJECT_ATTRIBUTES ObjectAttributes,
         }
         _SEH2_END;
     }
+#endif
 
     /* Check if this is a basic or full request */
     IsBasic = (FileInformationSize == sizeof(FILE_BASIC_INFORMATION));
@@ -2382,9 +2448,14 @@ IopQueryAttributesFile(IN POBJECT_ATTRIBUTES ObjectAttributes,
     OpenPacket.ShareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     OpenPacket.Disposition = FILE_OPEN;
     OpenPacket.BasicInformation = IsBasic ? FileInformation : NULL;
+#ifdef SARCH_XBOX
+    /* Kernel mode: write directly into caller buffer for full query */
+    OpenPacket.NetworkInformation = IsBasic ? &NetworkOpenInfo : FileInformation;
+#else
     OpenPacket.NetworkInformation = IsBasic ? &NetworkOpenInfo :
                                     (AccessMode != KernelMode) ?
                                     &NetworkOpenInfo : FileInformation;
+#endif
     OpenPacket.QueryOnly = TRUE;
     OpenPacket.FullAttributes = IsBasic ? FALSE : TRUE;
     OpenPacket.LocalFileObject = &LocalFileObject;
@@ -2420,6 +2491,7 @@ IopQueryAttributesFile(IN POBJECT_ATTRIBUTES ObjectAttributes,
         Status = OpenPacket.FinalStatus;
     }
 
+#ifndef SARCH_XBOX
     /* Check if we were succesful and this was user mode and a full query */
     if ((NT_SUCCESS(Status)) && (AccessMode != KernelMode) && !(IsBasic))
     {
@@ -2438,6 +2510,7 @@ IopQueryAttributesFile(IN POBJECT_ATTRIBUTES ObjectAttributes,
         }
         _SEH2_END;
     }
+#endif
 
     /* Return status */
     return Status;
@@ -2591,6 +2664,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
     }
 
     /* Check if we need to do parameter checking */
+#ifndef SARCH_XBOX
     if ((AccessMode != KernelMode) || (Options & IO_CHECK_CREATE_PARAMETERS))
     {
         /* Validate parameters */
@@ -2719,6 +2793,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
             }
         }
     }
+#endif
 
     /* Allocate the open packet */
     OpenPacket = ExAllocatePoolWithTag(NonPagedPool, sizeof(*OpenPacket), 'pOoI');
@@ -2726,6 +2801,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
     RtlZeroMemory(OpenPacket, sizeof(*OpenPacket));
 
     /* Check if the call came from user mode */
+#ifndef SARCH_XBOX
     if (AccessMode != KernelMode)
     {
         _SEH2_TRY
@@ -2787,6 +2863,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
         _SEH2_END;
     }
     else
+#endif
     {
         /* Check if this is a device attach */
         if (CreateOptions & IO_ATTACH_DEVICE_API)
@@ -2941,6 +3018,13 @@ IopCreateFile(OUT PHANDLE FileHandle,
         OpenPacket->FileObject->Flags |= FO_HANDLE_CREATED;
         ASSERT(OpenPacket->FileObject->Type == IO_TYPE_FILE);
 
+#ifdef SARCH_XBOX
+        /* No user-mode callers; pointers are kernel-mode. */
+        *FileHandle = LocalHandle;
+        IoStatusBlock->Information = OpenPacket->Information;
+        IoStatusBlock->Status = OpenPacket->FinalStatus;
+        Status = OpenPacket->FinalStatus;
+#else
         /* Enter SEH for write back */
         _SEH2_TRY
         {
@@ -2958,6 +3042,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
             Status = _SEH2_GetExceptionCode();
         }
         _SEH2_END;
+#endif
     }
 
     /* Check if we were 100% successful */
@@ -3653,6 +3738,7 @@ IoCancelFileOpen(IN PDEVICE_OBJECT DeviceObject,
     FileObject->Flags |= FO_FILE_OPEN_CANCELLED;
 }
 
+#ifndef SARCH_XBOX
 /*
  * @implemented
  */
@@ -3712,6 +3798,7 @@ IoQueryFileDosDeviceName(IN PFILE_OBJECT FileObject,
     *ObjectNameInformation = LocalInfo;
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 /*
  * @implemented
@@ -3793,6 +3880,17 @@ NtCreateMailslotFile(OUT PHANDLE FileHandle,
                      IN ULONG MaxMessageSize,
                      IN PLARGE_INTEGER TimeOut)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(CreateOptions);
+    UNREFERENCED_PARAMETER(MailslotQuota);
+    UNREFERENCED_PARAMETER(MaxMessageSize);
+    UNREFERENCED_PARAMETER(TimeOut);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     MAILSLOT_CREATE_PARAMETERS Buffer;
     PAGED_CODE();
 
@@ -3849,6 +3947,7 @@ NtCreateMailslotFile(OUT PHANDLE FileHandle,
                         CreateFileTypeMailslot,
                         (PVOID)&Buffer,
                         0);
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -3868,6 +3967,23 @@ NtCreateNamedPipeFile(OUT PHANDLE FileHandle,
                       IN ULONG OutboundQuota,
                       IN PLARGE_INTEGER DefaultTimeout)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(ShareAccess);
+    UNREFERENCED_PARAMETER(CreateDisposition);
+    UNREFERENCED_PARAMETER(CreateOptions);
+    UNREFERENCED_PARAMETER(NamedPipeType);
+    UNREFERENCED_PARAMETER(ReadMode);
+    UNREFERENCED_PARAMETER(CompletionMode);
+    UNREFERENCED_PARAMETER(MaximumInstances);
+    UNREFERENCED_PARAMETER(InboundQuota);
+    UNREFERENCED_PARAMETER(OutboundQuota);
+    UNREFERENCED_PARAMETER(DefaultTimeout);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     NAMED_PIPE_CREATE_PARAMETERS Buffer;
     PAGED_CODE();
 
@@ -3929,6 +4045,7 @@ NtCreateNamedPipeFile(OUT PHANDLE FileHandle,
                         CreateFileTypeNamedPipe,
                         (PVOID)&Buffer,
                         0);
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -4017,6 +4134,11 @@ NTAPI
 NtCancelIoFile(IN HANDLE FileHandle,
                OUT PIO_STATUS_BLOCK IoStatusBlock)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFILE_OBJECT FileObject;
     PETHREAD Thread;
     PIRP Irp;
@@ -4139,6 +4261,7 @@ NtCancelIoFile(IN HANDLE FileHandle,
     /* Dereference the file object and return success */
     ObDereferenceObject(FileObject);
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 /*

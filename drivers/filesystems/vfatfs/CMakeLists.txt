@@ -19,20 +19,27 @@ list(APPEND SOURCE
     misc.c
     pnp.c
     rw.c
-    shutdown.c
     string.c
     volume.c
     vfat.h)
 
+# Nothing sends IRP_MJ_SHUTDOWN on Xbox; reboot drives the SMC directly.
+if(NOT SARCH STREQUAL "xbox")
+    list(APPEND SOURCE shutdown.c)
+endif()
+
 if(KDBG)
     add_definitions(-DKDBG)
 endif()
-add_library(vfatfs MODULE ${SOURCE} vfatfs.rc)
-set_module_type(vfatfs kernelmodedriver)
+
+# the FAT/FATX filesystem is linked into the kernel image as a static
+# library; ntoskrnl runs VfatfsDriverEntry via IoCreateDriver(\FileSystem\Vfatfs)
+# and it registers itself with IoRegisterFileSystem.  vfatfs already carries a
+# complete FATX (Xbox HDD filesystem) read/write implementation -- folding it
+# in is what gives the kernel FATX.  Built unchanged, in the normal driver
+# view -- kernel-API imports resolve through the in-kernel import table.
+add_library(vfatfs ${SOURCE})
 target_link_libraries(vfatfs ${PSEH_LIB})
-add_importlibs(vfatfs ntoskrnl hal)
-add_pch(vfatfs vfat.h SOURCE)
-if(SARCH STREQUAL "xbox")
-    add_cd_file(TARGET vfatfs DESTINATION reactos/system32/drivers NO_CAB FOR all)
-    add_registry_inf(vfatfs_reg.inf)
-endif()
+target_compile_definitions(vfatfs PRIVATE DriverEntry=VfatfsDriverEntry)
+add_dependencies(vfatfs psdk xdk bugcodes)
+add_registry_inf(vfatfs_reg.inf)

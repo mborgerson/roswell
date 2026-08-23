@@ -209,6 +209,20 @@ PciIdeXPnpRepeatRequest(
     return Status;
 }
 
+#ifdef SARCH_XBOX
+/* No pagefile / hibernation / crash-dump on Xbox: this minor never fires. */
+CODE_SEG("PAGE")
+NTSTATUS
+PciIdeXPnpQueryDeviceUsageNotification(
+    _In_ PCOMMON_DEVICE_EXTENSION CommonExt,
+    _In_ PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(CommonExt);
+    UNREFERENCED_PARAMETER(Irp);
+    PAGED_CODE();
+    return STATUS_SUCCESS;
+}
+#else
 CODE_SEG("PAGE")
 NTSTATUS
 PciIdeXPnpQueryDeviceUsageNotification(
@@ -260,6 +274,7 @@ PciIdeXPnpQueryDeviceUsageNotification(
 
     return STATUS_SUCCESS;
 }
+#endif
 
 CODE_SEG("PAGE")
 NTSTATUS
@@ -345,7 +360,6 @@ PciIdeXPnpQueryInterface(
 }
 
 static
-CODE_SEG("PAGE")
 NTSTATUS
 PciIdeXAddDeviceEx(
     _In_ PDRIVER_OBJECT DriverObject,
@@ -465,7 +479,6 @@ Failure:
     return Status;
 }
 
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 PciIdeXAddDevice(
@@ -555,10 +568,17 @@ PciIdeXInitialize(
     DriverExtension->HwGetControllerProperties = HwGetControllerProperties;
 
     DriverObject->MajorFunction[IRP_MJ_PNP] = PciIdeXDispatchPnp;
+#ifndef SARCH_XBOX /* ntoskrnl/po is unlinked; no Po* exports */
     DriverObject->MajorFunction[IRP_MJ_POWER] = PciIdeXDispatchPower;
+#endif
+#ifndef SARCH_XBOX
     DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = PciIdeXDispatchWmi;
+#endif
     DriverObject->DriverExtension->AddDevice = PciIdeXAddDevice;
+#ifndef SARCH_XBOX
+    /* Folded into the kernel image -- never unloaded. */
     DriverObject->DriverUnload = PciIdeXUnload;
+#endif
 
     /* Create a directory to hold the driver's device objects */
     PciIdeXCreateIdeDirectory();

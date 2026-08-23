@@ -24,7 +24,9 @@ AtaPdoStartDevice(
     {
         PATAPORT_PORT_DATA PortData = DevExt->Device.PortData;
 
+#ifndef SARCH_XBOX
         AtaPdoWmiRegistration(DevExt, TRUE);
+#endif
 
         /* Update the type of device connected to the port */
         PortData->SetDeviceData(PortData->ChannelContext,
@@ -38,11 +40,13 @@ AtaPdoStartDevice(
                                                               DevExt->Common.Self);
         }
 
+#ifndef SARCH_XBOX
         /* Use the standard power policy for mass storage devices */
         DevExt->Device.PowerIdleCounter = PoRegisterDeviceForIdleDetection(DevExt->Common.Self,
                                                                            (ULONG)-1,
                                                                            (ULONG)-1,
                                                                            PowerDeviceD3);
+#endif
 
         /* Set the new ATA volatile settings */
         KeClearEvent(&DevExt->Worker.ConfigureEvent);
@@ -91,7 +95,9 @@ AtaPdoRemoveDevice(
 
     AtaReqFreezeQueue(DevExt, QUEUE_FLAG_FROZEN_REMOVED);
     AtaReqFlushDeviceQueue(&DevExt->Device);
+#ifndef SARCH_XBOX
     AtaPdoWmiRegistration(DevExt, FALSE);
+#endif
 
     if (FinalRemove && DevExt->ReportedMissing)
     {
@@ -275,6 +281,8 @@ AtaPdoQueryId(
             break;
         }
 
+#ifndef SARCH_XBOX
+        /* The synthetic devtree only issues BusQueryDeviceID. */
         case BusQueryHardwareIDs:
         {
             PWCHAR IdStart;
@@ -457,6 +465,7 @@ AtaPdoQueryId(
             INFO("InstanceID: '%S'\n", Buffer);
             break;
         }
+#endif
 
         default:
             return Irp->IoStatus.Status;
@@ -576,6 +585,8 @@ AtaPdoPnp(
             Status = AtaPdoStartDevice(DevExt, Irp);
             break;
 
+#ifndef SARCH_XBOX
+        /* Xbox device PDO never stops / removes / surprise-removes. */
         case IRP_MN_STOP_DEVICE:
             Status = AtaPdoStopDevice(DevExt, Irp);
             break;
@@ -595,6 +606,7 @@ AtaPdoPnp(
         case IRP_MN_CANCEL_STOP_DEVICE:
             Status = STATUS_SUCCESS;
             break;
+#endif
 
         case IRP_MN_QUERY_CAPABILITIES:
             Status = AtaPdoQueryCapabilities(DevExt, Irp, IoStack);
@@ -608,13 +620,19 @@ AtaPdoPnp(
             Status = AtaPdoQueryId(DevExt, Irp, IoStack);
             break;
 
+#ifndef SARCH_XBOX
+        /* No PnP requester on Xbox issues QUERY_DEVICE_TEXT to storage PDOs. */
         case IRP_MN_QUERY_DEVICE_TEXT:
             Status = AtaPdoQueryDeviceText(DevExt, Irp, IoStack);
             break;
+#endif
 
+#ifndef SARCH_XBOX
+        /* No pagefile/hibernation on Xbox. */
         case IRP_MN_DEVICE_USAGE_NOTIFICATION:
             Status = AtaPnpQueryDeviceUsageNotification(&DevExt->Common, Irp);
             break;
+#endif
 
         case IRP_MN_QUERY_DEVICE_RELATIONS:
         {
@@ -638,7 +656,6 @@ AtaPdoPnp(
     return Status;
 }
 
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 AtaDispatchPnp(
@@ -660,6 +677,7 @@ AtaPdoFreeDevice(
 {
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
     if (DevExt->Device.PowerIdleCounter)
     {
         PoRegisterDeviceForIdleDetection(DevExt->Common.Self,
@@ -667,6 +685,7 @@ AtaPdoFreeDevice(
                                          0,
                                          PowerDeviceD3);
     }
+#endif
 
     if (DevExt->GtfDataBuffer)
     {
@@ -735,6 +754,14 @@ AtaPdoCreateDevice(
     AtaPnpInitializeCommonExtension(&DevExt->Common, Pdo, ChanExt->Common.Flags & ~DO_IS_FDO);
     DevExt->Common.FdoExt = ChanExt;
     DevExt->TransferModeAllowedMask = MAXULONG;
+#ifdef SARCH_XBOX
+    /* AtaGetRegistryKey returns without setting *KeyValue when the device
+     * registry key doesn't exist (PnP enumeration is no-op'd on Xbox so
+     * \Enum is empty); leaving UserAllowedMask = 0 strands the device in
+     * PIO mode, costing a 6-9x IRQ multiplier on title DVD reads.  Seed
+     * the user mask with the same MAXULONG that AllowedMask carries. */
+    DevExt->TransferModeUserAllowedMask = MAXULONG;
+#endif
     DevExt->Device.SectorSize = ATA_MIN_SECTOR_SIZE;
     DevExt->Device.PortData = PortData;
     DevExt->Device.LocalBuffer = PortData->LocalBuffer;

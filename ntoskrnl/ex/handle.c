@@ -796,6 +796,9 @@ ExpAllocateHandleTableEntry(IN PHANDLE_TABLE HandleTable,
     return Entry;
 }
 
+/* Single-process Xbox creates handle tables only at boot (the kernel's
+ * global table + the system process), so this is INIT-only here.  NT
+ * creates them per-process at runtime, hence the guard. */
 PHANDLE_TABLE
 NTAPI
 ExCreateHandleTable(IN PEPROCESS Process OPTIONAL)
@@ -1074,6 +1077,14 @@ ExDupHandleTable(IN PEPROCESS Process,
                  IN PEX_DUPLICATE_HANDLE_CALLBACK DupHandleProcedure,
                  IN ULONG_PTR Mask)
 {
+#ifdef SARCH_XBOX
+    /* Process fork/dup never happens; only the title process exists. */
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(HandleTable);
+    UNREFERENCED_PARAMETER(DupHandleProcedure);
+    UNREFERENCED_PARAMETER(Mask);
+    return NULL;
+#else
     PHANDLE_TABLE NewTable;
     EXHANDLE Handle;
     PHANDLE_TABLE_ENTRY HandleTableEntry, NewEntry;
@@ -1182,6 +1193,7 @@ ExDupHandleTable(IN PEPROCESS Process,
     /* Leave the critical region we entered previously and return the table */
     KeLeaveCriticalRegion();
     return NewTable;
+#endif
 }
 
 BOOLEAN

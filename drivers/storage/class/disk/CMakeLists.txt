@@ -4,17 +4,31 @@ remove_definitions(-D_WIN32_WINNT=0x502)
 list(APPEND SOURCE
     data.c
     disk.c
-    diskwmi.c
     geometry.c
     pnp.c
     disk.h)
 
-add_library(disk MODULE ${SOURCE} disk.rc)
+if(NOT SARCH STREQUAL "xbox")
+    # Xbox: no WMI surface, no SMART IOCTLs, no failure-prediction reporting
+    # -- the whole file is dead. The single external caller in disk.c
+    # (DiskInitializeReregistration) is gated.
+    list(APPEND SOURCE diskwmi.c)
+endif()
 
-target_compile_definitions(disk PUBLIC
+# the disk class driver is linked into the kernel image as a static
+# library; ntoskrnl runs DiskDriverEntry via IoCreateDriver.
+add_library(disk ${SOURCE})
+
+# PRIVATE (not PUBLIC): must not leak into ntoskrnl's own compilation.
+target_compile_definitions(disk PRIVATE
     DEBUG_USE_KDPRINT
     _WIN32_WINNT=0x602
-    NTDDI_VERSION=0x06020000) # NTDDI_WIN8
+    NTDDI_VERSION=0x06020000 # NTDDI_WIN8
+    DriverEntry=DiskDriverEntry
+    # StorDebugPrint is a non-static definition in both disk and
+    # classpnp -- rename disk's copy so the two do not collide once both are
+    # folded into the kernel image.
+    StorDebugPrint=DiskStorDebugPrint)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_compile_options(disk PRIVATE -Wno-format -Wno-pointer-sign)
@@ -25,9 +39,6 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(disk PRIVATE -Wno-unused-but-set-variable)
 endif()
 
-set_module_type(disk kernelmodedriver)
 target_link_libraries(disk ntoskrnl_vista libcntpr wdmguid)
-add_importlibs(disk classpnp ntoskrnl hal)
-add_cd_file(TARGET disk DESTINATION reactos/system32/drivers NO_CAB FOR all)
+add_dependencies(disk psdk xdk bugcodes)
 add_registry_inf(disk_reg.inf)
-add_driver_inf(disk disk.inf)

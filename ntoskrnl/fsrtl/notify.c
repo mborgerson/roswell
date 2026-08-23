@@ -660,6 +660,13 @@ FsRtlNotifyCleanup(IN PNOTIFY_SYNC NotifySync,
                    IN PLIST_ENTRY NotifyList,
                    IN PVOID FsContext)
 {
+#ifdef SARCH_XBOX
+    /* The notify list is never populated, so cleanup is a no-op. */
+    UNREFERENCED_PARAMETER(NotifySync);
+    UNREFERENCED_PARAMETER(NotifyList);
+    UNREFERENCED_PARAMETER(FsContext);
+    return;
+#else
     PNOTIFY_CHANGE NotifyChange;
     PREAL_NOTIFY_SYNC RealNotifySync;
     PSECURITY_SUBJECT_CONTEXT _SEH2_VOLATILE SubjectContext = NULL;
@@ -722,6 +729,7 @@ FsRtlNotifyCleanup(IN PNOTIFY_SYNC NotifySync,
         }
     }
     _SEH2_END;
+#endif /* !SARCH_XBOX */
 }
 
 /*++
@@ -782,6 +790,21 @@ FsRtlNotifyFilterChangeDirectory(IN PNOTIFY_SYNC NotifySync,
                                  IN PSECURITY_SUBJECT_CONTEXT SubjectContext OPTIONAL,
                                  IN PFILTER_REPORT_CHANGE FilterCallback OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    /* Titles never subscribe to directory-change notifications. */
+    UNREFERENCED_PARAMETER(NotifySync);
+    UNREFERENCED_PARAMETER(NotifyList);
+    UNREFERENCED_PARAMETER(FsContext);
+    UNREFERENCED_PARAMETER(FullDirectoryName);
+    UNREFERENCED_PARAMETER(WatchTree);
+    UNREFERENCED_PARAMETER(IgnoreBuffer);
+    UNREFERENCED_PARAMETER(CompletionFilter);
+    UNREFERENCED_PARAMETER(NotifyIrp);
+    UNREFERENCED_PARAMETER(TraverseCallback);
+    UNREFERENCED_PARAMETER(SubjectContext);
+    UNREFERENCED_PARAMETER(FilterCallback);
+    return;
+#else
     ULONG SavedLength;
     PIO_STACK_LOCATION Stack;
     PNOTIFY_CHANGE NotifyChange = NULL;
@@ -949,6 +972,7 @@ HandleIRP:
         }
     }
     _SEH2_END;
+#endif /* !SARCH_XBOX */
 }
 
 /*++
@@ -1005,6 +1029,20 @@ FsRtlNotifyFilterReportChange(IN PNOTIFY_SYNC NotifySync,
                               IN PVOID TargetContext,
                               IN PVOID FilterContext)
 {
+#ifdef SARCH_XBOX
+    /* No subscribers; nothing to report. */
+    UNREFERENCED_PARAMETER(NotifySync);
+    UNREFERENCED_PARAMETER(NotifyList);
+    UNREFERENCED_PARAMETER(FullTargetName);
+    UNREFERENCED_PARAMETER(TargetNameOffset);
+    UNREFERENCED_PARAMETER(StreamName);
+    UNREFERENCED_PARAMETER(NormalizedParentName);
+    UNREFERENCED_PARAMETER(FilterMatch);
+    UNREFERENCED_PARAMETER(Action);
+    UNREFERENCED_PARAMETER(TargetContext);
+    UNREFERENCED_PARAMETER(FilterContext);
+    return;
+#else
     PIRP Irp;
     PVOID OutputBuffer;
     USHORT FullPosition;
@@ -1436,6 +1474,7 @@ FsRtlNotifyFilterReportChange(IN PNOTIFY_SYNC NotifySync,
         FsRtlNotifyReleaseFastMutex(RealNotifySync);
     }
     _SEH2_END;
+#endif /* !SARCH_XBOX */
 }
 
 /*++

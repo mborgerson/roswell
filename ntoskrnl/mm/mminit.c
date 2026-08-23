@@ -187,6 +187,7 @@ MiDbgDumpAddressSpace(VOID)
             "Non Paged Pool Expansion PTE Space");
 }
 
+#ifndef SARCH_XBOX
 CODE_SEG("INIT")
 NTSTATUS
 NTAPI
@@ -210,6 +211,7 @@ MmInitBsmThread(VOID)
     ZwClose(ThreadHandle);
     return Status;
 }
+#endif
 
 CODE_SEG("INIT")
 BOOLEAN
@@ -248,7 +250,10 @@ MmInitSystem(IN ULONG Phase,
     MiDbgDumpAddressSpace();
 
     MmInitGlobalKernelPageDirectory();
+#ifndef SARCH_XBOX
+    /* MC_USER trim is reachable only from the balance thread (gated off). */
     MmInitializeMemoryConsumer(MC_USER, MmTrimUserMemory);
+#endif
     MmInitializeRmapList();
     MmInitSectionImplementation();
     MmInitPagingFile();
@@ -290,10 +295,15 @@ MmInitSystem(IN ULONG Phase,
     /*
      * Unmap low memory
      */
+#ifndef SARCH_XBOX
+    /* Xbox has no pagefile -- balance manager only does periodic page-out
+     * trim and would be a no-op.  Skip thread creation; MmRequestPage and
+     * MmReleasePage memory-consumer APIs still work synchronously. */
     MiInitBalancerThread();
 
     /* Initialize the balance set manager */
     MmInitBsmThread();
+#endif
 
     /* Loop the boot loaded images (under lock) */
     ExAcquireResourceExclusiveLite(&PsLoadedModuleResource, TRUE);

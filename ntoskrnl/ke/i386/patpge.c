@@ -15,6 +15,19 @@
 #define PDE_BITS 10
 #define PTE_BITS 10
 
+/*
+ * The retail Xbox kernel reprograms IA32_PAT so PA1 and PA5 select
+ * write-combining instead of the power-on write-through:
+ *
+ *   PA0=WB  PA1=WC  PA2=UC- PA3=UC  PA4=WB  PA5=WC  PA6=UC- PA7=UC
+ *
+ * A contiguous-memory page with PWT set in its PTE then resolves to WC.
+ * This -- not a WC variable MTRR -- is how the Xbox grants write-combining
+ * to the GPU framebuffer and pushbuffer.
+ */
+#define MSR_IA32_PAT    0x277
+#define XBOX_IA32_PAT   0x0007010600070106ULL
+
 /* FUNCTIONS *****************************************************************/
 
 CODE_SEG("INIT")
@@ -60,8 +73,38 @@ VOID
 NTAPI
 KiInitializePAT(VOID)
 {
-    /* FIXME: Support this */
-    DPRINT("PAT support detected but not yet taken advantage of\n");
+    BOOLEAN Enable;
+    ULONG Cr0, Cr3, Cr4;
+
+    /*
+     * Changing PAT entries that already govern cached pages must run with
+     * interrupts off, caches in no-fill mode and TLBs flushed around the
+     * write, so no stale line or translation keeps the old memory type.
+     */
+    Enable = KeDisableInterrupts();
+
+    /* Drop global pages so the CR3 reloads flush the whole TLB, then enter
+     * no-fill cache mode (CR0.CD=1, CR0.NW=0). */
+    Cr4 = __readcr4();
+    __writecr4(Cr4 & ~CR4_PGE);
+    Cr3 = __readcr3();
+    Cr0 = __readcr0();
+    __writecr0((Cr0 & ~CR0_NW) | CR0_CD);
+    __wbinvd();
+    __writecr3(Cr3);
+
+    /* Install the Xbox PAT (write-combining at PA1 and PA5). */
+    __writemsr(MSR_IA32_PAT, XBOX_IA32_PAT);
+
+    /* Flush again, leave no-fill mode and restore CR0/CR4. */
+    __wbinvd();
+    __writecr3(Cr3);
+    __writecr0(Cr0);
+    __writecr4(Cr4);
+
+    KeRestoreInterrupts(Enable);
+
+    DPRINT1("IA32_PAT set to the Xbox configuration (WC at PA1/PA5)\n");
 }
 
 CODE_SEG("INIT")

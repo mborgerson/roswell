@@ -1,4 +1,11 @@
 
+if(SARCH STREQUAL "xbox")
+    add_subdirectory(csq)
+    add_subdirectory(ntoskrnl_vista)
+    add_subdirectory(sptilib)
+    return()
+endif()
+
 add_subdirectory(arbiter)
 add_subdirectory(aux_klib)
 add_subdirectory(copysup)

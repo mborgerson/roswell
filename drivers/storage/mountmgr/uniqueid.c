@@ -72,6 +72,14 @@ MountMgrUniqueIdChangeRoutine(IN PDEVICE_EXTENSION DeviceExtension,
                               IN PMOUNTDEV_UNIQUE_ID OldUniqueId,
                               IN PMOUNTDEV_UNIQUE_ID NewUniqueId)
 {
+#ifdef SARCH_XBOX
+    /* No volume replication on Xbox -- no remote database to resync.
+     * Stub drops ChangeRemoteDatabaseUniqueId + OpenRemoteDatabase
+     * chain (~2 KB resident). */
+    UNREFERENCED_PARAMETER(DeviceExtension);
+    UNREFERENCED_PARAMETER(OldUniqueId);
+    UNREFERENCED_PARAMETER(NewUniqueId);
+#else
     NTSTATUS Status;
     BOOLEAN ResyncNeeded;
     PUNIQUE_ID_REPLICATE DuplicateId;
@@ -212,6 +220,7 @@ MountMgrUniqueIdChangeRoutine(IN PDEVICE_EXTENSION DeviceExtension,
     ReleaseRemoteDatabaseSemaphore(DeviceExtension);
 
     return;
+#endif
 }
 
 /*

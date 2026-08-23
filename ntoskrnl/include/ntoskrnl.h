@@ -32,12 +32,23 @@
 #include <excpt.h>
 #include <ntdef.h>
 #include <ntifs.h>
+
+
 #include <wdmguid.h>
 #include <diskguid.h>
 #include <arc/arc.h>
 #include <mountmgr.h>
 #undef NTHALAPI
+#if defined(_NTHALDLL_)
+/* the HAL is linked into the kernel image (_NTHALDLL_ is set
+ * build-wide for the Xbox build) -- the kernel references HalXxx /
+ * KdComPortInUse directly, not as hal.dll imports.  Without this the hack
+ * below would force dllimport and orphan those references once the HAL is
+ * folded into ntoskrnl. */
+#define NTHALAPI
+#else
 #define NTHALAPI __declspec(dllimport)
+#endif
 #include <ndk/asm.h>
 #include <ndk/cctypes.h>
 #include <ndk/cmfuncs.h>

@@ -83,13 +83,16 @@ static const struct
 #define HW_FLAGS_SATA                0x0010
 } AmdControllerList[] =
 {
+#ifndef SARCH_XBOX
     { PCI_VEN_AMD,    PCI_DEV_AMD_756,        HW_FLAGS_UDMA4 },
     { PCI_VEN_AMD,    PCI_DEV_AMD_766,        HW_FLAGS_UDMA5 | HW_FLAGS_NO_PREFETCH },
     { PCI_VEN_AMD,    PCI_DEV_AMD_768,        HW_FLAGS_UDMA5 },
     { PCI_VEN_AMD,    PCI_DEV_AMD_8111,       HW_FLAGS_CHECK_SYSBOARD },
     { PCI_VEN_AMD,    PCI_DEV_AMD_CS5536,     HW_FLAGS_UDMA5 },
     { PCI_VEN_AMD,    PCI_DEV_AMD_CS5536_2,   HW_FLAGS_UDMA5 },
+#endif
     { PCI_VEN_NVIDIA, PCI_DEV_NFORCE_IDE,     HW_FLAGS_UDMA5 },
+#ifndef SARCH_XBOX
     { PCI_VEN_NVIDIA, PCI_DEV_NFORCE2_IDE,    0 },
     { PCI_VEN_NVIDIA, PCI_DEV_NFORCE2_IDE_2,  0 },
     { PCI_VEN_NVIDIA, PCI_DEV_NFORCE3_IDE,    0 },
@@ -118,6 +121,7 @@ static const struct
     { PCI_VEN_NVIDIA, PCI_DEV_MCP61_SATA_2,   HW_FLAGS_SATA },
     { PCI_VEN_NVIDIA, PCI_DEV_MCP61_SATA_3,   HW_FLAGS_SATA },
     { PCI_VEN_NVIDIA, PCI_DEV_MCP89_SATA,     HW_FLAGS_SATA },
+#endif
 };
 
 static const UCHAR AmdUdmaSettings[] =
@@ -373,12 +377,14 @@ AmdGetControllerProperties(
                 SupportedMode &= ~UDMA_MODES(5, 6);
         }
 
+#ifndef SARCH_XBOX
         if (Controller->Pci.VendorID == PCI_VEN_AMD)
         {
             Controller->ChannelEnableBits = AmdEnableBits;
             Controller->Start = AmdControllerStart;
         }
         else
+#endif
         {
             Controller->ChannelEnableBits = NvEnableBits;
         }
@@ -401,6 +407,7 @@ AmdGetControllerProperties(
             ChanData->SetTransferMode = AmdSetTransferMode;
 
             /* Check for 80-conductor cable */
+#ifndef SARCH_XBOX
             if (Controller->Pci.VendorID == PCI_VEN_AMD)
             {
                 UCHAR ConfigReg = PciRead8(Controller, AMD_REG_CONFIG_CR(AMD_CONFIG_BASE));
@@ -412,6 +419,7 @@ AmdGetControllerProperties(
                 }
             }
             else
+#endif
             {
                 USHORT UdmaTimReg = PciRead16(Controller, AMD_REG_UDMA(NV_CONFIG_BASE, i));
 

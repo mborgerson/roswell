@@ -16,8 +16,10 @@
 EXTERN @KiSwapContextEntry@8:PROC
 EXTERN @KiSwapContextExit@8:PROC
 EXTERN @KiRetireDpcList@4:PROC
+#ifndef SARCH_XBOX
 EXTERN @KiEnterV86Mode@4:PROC
 EXTERN @KiExitV86Mode@4:PROC
+#endif
 EXTERN _KeI386FxsrPresent:DWORD
 
 /* FUNCTIONS ****************************************************************/
@@ -187,6 +189,7 @@ VirtualSpace:
 
     ret 8
 
+#ifndef SARCH_XBOX
 /* FIXFIX: Move to C code ****/
 PUBLIC _Ki386SetupAndExitToV86Mode@4
 _Ki386SetupAndExitToV86Mode@4:
@@ -208,6 +211,7 @@ PUBLIC @Ki386BiosCallReturnAddress@4
     add esp, (12 + KTRAP_FRAME_LENGTH + NPX_FRAME_LENGTH + 16)
     popad
     ret 4
+#endif
 
 PUBLIC _FrRestore
 PUBLIC @Ke386LoadFpuState@4

@@ -1,0 +1,168 @@
+/*
+ * Kernel API regression suite driver. Each test_*.c file exports a
+ * test_group_t named g_group_<name>. This file enumerates them, emits
+ * a TAP 14 stream, and reboots when done.
+ */
+
+#include "harness.h"
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+const char *g_fail_file;
+int          g_fail_line;
+char         g_fail_what[160];
+
+void test_record_failure(const char *file, int line, const char *fmt, ...)
+{
+    g_fail_file = file;
+    g_fail_line = line;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_fail_what, sizeof(g_fail_what), fmt, ap);
+    va_end(ap);
+}
+
+DECLARE_GROUP(rtl_status);
+DECLARE_GROUP(rtl_string);
+DECLARE_GROUP(rtl_time);
+DECLARE_GROUP(ke_event);
+DECLARE_GROUP(ke_semaphore);
+DECLARE_GROUP(ke_time);
+DECLARE_GROUP(ex_pool);
+DECLARE_GROUP(mm_contig);
+DECLARE_GROUP(io_file);
+DECLARE_GROUP(io_dvd);
+DECLARE_GROUP(hal_data);
+DECLARE_GROUP(ob_types);
+DECLARE_GROUP(ps_thread);
+DECLARE_GROUP(ke_wait_apc);
+DECLARE_GROUP(mm_virtual);
+DECLARE_GROUP(io_dirmask);
+DECLARE_GROUP(ob_named);
+DECLARE_GROUP(io_bad_ptr);
+DECLARE_GROUP(mm_bigpool);
+DECLARE_GROUP(io_cc_write);
+DECLARE_GROUP(io_storage);
+DECLARE_GROUP(io_complete);
+DECLARE_GROUP(xe_sections);
+DECLARE_GROUP(mm_vmcontract);
+DECLARE_GROUP(mm_cache);
+DECLARE_GROUP(io_mdl);
+DECLARE_GROUP(mm_pressure);
+
+static const test_group_t *const GROUPS[] = {
+    &g_group_rtl_status,
+    &g_group_rtl_string,
+    &g_group_rtl_time,
+    &g_group_ke_event,
+    &g_group_ke_semaphore,
+    &g_group_ke_time,
+    &g_group_ex_pool,
+    &g_group_mm_contig,
+    &g_group_io_file,
+    &g_group_io_dvd,
+    &g_group_hal_data,
+    &g_group_ob_types,
+    &g_group_ps_thread,
+    &g_group_ke_wait_apc,
+    &g_group_mm_virtual,
+    &g_group_io_dirmask,
+    &g_group_ob_named,
+    &g_group_io_bad_ptr,
+    &g_group_mm_bigpool,
+    &g_group_io_cc_write,
+    &g_group_io_storage,
+    &g_group_io_complete,
+    &g_group_xe_sections,
+    &g_group_mm_vmcontract,
+    &g_group_mm_cache,
+    &g_group_io_mdl,
+    /* Last: exhausts and recovers all of memory. */
+    &g_group_mm_pressure,
+};
+
+#define NGROUPS (sizeof(GROUPS)/sizeof(GROUPS[0]))
+
+static unsigned int total_tests(void)
+{
+    unsigned int n = 0;
+    for (unsigned int i = 0; i < NGROUPS; i++) n += (unsigned int)GROUPS[i]->count;
+    return n;
+}
+
+int main(void)
+{
+    /* Bracket the TAP stream so the runner can find start/end inside
+     * any kernel-side serial noise. */
+    tap_puts("== api-regression begin ==\n");
+
+    tap_version(14);
+    tap_plan(total_tests());
+
+    unsigned int idx = 0;
+    unsigned int passed = 0;
+    unsigned int failed = 0;
+
+    for (unsigned int g = 0; g < NGROUPS; g++) {
+        const test_group_t *grp = GROUPS[g];
+        for (unsigned int t = 0; t < grp->count; t++) {
+            idx++;
+            char desc[128];
+            snprintf(desc, sizeof(desc), "%s/%s",
+                     grp->group, grp->entries[t].name);
+
+            g_fail_file = NULL;
+            g_fail_line = 0;
+            g_fail_what[0] = 0;
+
+            bool ok = grp->entries[t].fn();
+            const char *todo = grp->entries[t].todo;
+            if (todo != NULL) {
+                /* Known gap: report, never fail the suite.  An
+                 * unexpected pass is worth seeing too. */
+                char tdesc[192];
+                snprintf(tdesc, sizeof(tdesc), "%s # TODO %s%s", desc,
+                         ok ? "unexpectedly passing: " : "", todo);
+                if (ok) tap_ok(idx, tdesc);
+                else {
+                    tap_not_ok(idx, tdesc);
+                    tap_diag_begin();
+                    if (g_fail_file) tap_diag_kv("at", "%s:%d", g_fail_file, g_fail_line);
+                    if (g_fail_what[0]) tap_diag_kv("message", "%s", g_fail_what);
+                    tap_diag_end();
+                }
+                passed++;  /* counted as not-failing either way */
+            } else if (ok) {
+                tap_ok(idx, desc);
+                passed++;
+            } else {
+                tap_not_ok(idx, desc);
+                tap_diag_begin();
+                if (g_fail_file) tap_diag_kv("at", "%s:%d", g_fail_file, g_fail_line);
+                if (g_fail_what[0]) tap_diag_kv("message", "%s", g_fail_what);
+                tap_diag_end();
+                failed++;
+            }
+        }
+    }
+
+    tap_comment("tests=%u passed=%u failed=%u", idx, passed, failed);
+    tap_puts(failed == 0 ? "== api-regression end PASS ==\n"
+                         : "== api-regression end FAIL ==\n");
+    tap_drain();
+
+    /* Tell the SMC to power off: register 0x02, bit 0x80 (SHUTDOWN).
+     * xemu maps this to qemu_system_shutdown_request, which exits the
+     * VM cleanly under both retail and nxkrnl. (HalReturnToFirmware
+     * with HalHaltRoutine differs across the two -- retail goes to SMC
+     * RESET when given the "halt" code, so the box reboots and the
+     * DVD title boots all over again.) */
+    LARGE_INTEGER d = { .QuadPart = -((LONGLONG)500 * 10000) };
+    KeDelayExecutionThread(KernelMode, FALSE, &d);
+    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
+    /* If the SMC write somehow didn't take, fall back to a busy loop so
+     * the runner's timeout still kills xemu. */
+    for (;;) { __asm__ __volatile__("hlt"); }
+    return 0;
+}

@@ -648,9 +648,11 @@ AtaPortDeviceProcessError(
 
     ASSERT_REQUEST(FailedRequest);
 
+#ifndef SARCH_XBOX
     if (FailedRequest->Flags & REQUEST_FLAG_NCQ)
         Status = AtaDeviceNcqRecovery(PortData, DevExt);
     else
+#endif
         Status = AtaDeviceGenericRecovery(PortData, DevExt);
 
     return Status;

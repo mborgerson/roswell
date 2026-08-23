@@ -24,6 +24,37 @@ SIZE_T MmSystemLockPagesCount;
 ULONG MiCacheOverride[MiNotMapped + 1];
 
 /* INTERNAL FUNCTIONS *********************************************************/
+#ifdef SARCH_XBOX
+static
+PVOID
+NTAPI
+MiMapLockedPagesInUserSpace(
+    _In_ PMDL Mdl,
+    _In_ PVOID StartVa,
+    _In_ MEMORY_CACHING_TYPE CacheType,
+    _In_opt_ PVOID BaseAddress)
+{
+    UNREFERENCED_PARAMETER(Mdl);
+    UNREFERENCED_PARAMETER(StartVa);
+    UNREFERENCED_PARAMETER(CacheType);
+    UNREFERENCED_PARAMETER(BaseAddress);
+    /* Kernel-only target: user-space MDL mapping is unreachable. */
+    ExRaiseStatus(STATUS_NOT_IMPLEMENTED);
+    return NULL;
+}
+
+static
+VOID
+NTAPI
+MiUnmapLockedPagesInUserSpace(
+    _In_ PVOID BaseAddress,
+    _In_ PMDL Mdl)
+{
+    UNREFERENCED_PARAMETER(BaseAddress);
+    UNREFERENCED_PARAMETER(Mdl);
+    /* Kernel-only target: user-space MDL mapping is unreachable. */
+}
+#else
 static
 PVOID
 NTAPI
@@ -367,6 +398,7 @@ MiUnmapLockedPagesInUserSpace(
     MmUnlockAddressSpace(&Process->Vm);
     ExFreePoolWithTag(Vad, 'ldaV');
 }
+#endif /* SARCH_XBOX */
 
 /* PUBLIC FUNCTIONS ***********************************************************/
 
@@ -1011,9 +1043,43 @@ MmProbeAndLockPages(IN PMDL Mdl,
     TotalPages = LockPages;
     StartAddress = Address;
 
-    /* Large pages not supported */
-    ASSERT(!MI_IS_PHYSICAL_ADDRESS(Address));
+    /* Xbox titles run with their low memory mapped by 4 MB PSE large
+     * pages (the flat Xbox memory model), so a buffer a driver hands to
+     * MmProbeAndLockPages can live in "physically resident" large-page VA.
+     * Stock ReactOS only ASSERTs here; real NT instead builds the MDL straight
+     * from the large-page PFNs -- these pages are never paged, so there is
+     * nothing to probe or lock.  Do the same and return.  (MmUnlockPages has a
+     * symmetric large-page short-circuit.) */
+    if (MI_IS_PHYSICAL_ADDRESS(StartAddress))
+    {
+        PMMPDE LargePde;
+        PVOID PageVa;
+        ULONG Page;
 
+        for (Page = 0; Page < TotalPages; Page++)
+        {
+            PageVa = (PVOID)((ULONG_PTR)StartAddress + ((ULONG_PTR)Page << PAGE_SHIFT));
+            LargePde = MiAddressToPde(PageVa);
+            ASSERT(LargePde->u.Hard.Valid && LargePde->u.Hard.LargePage);
+
+            /* PFN = large-page base + the page's offset within the 4 MB page
+             * (mirrors the large-page branch of MmGetPhysicalAddress). */
+            MdlPages[Page] = LargePde->u.Hard.PageFrameNumber +
+                (PFN_NUMBER)(((ULONG_PTR)PageVa & (PAGE_SIZE * PTE_PER_PAGE - 1)) >> PAGE_SHIFT);
+        }
+
+        Mdl->MdlFlags |= MDL_PAGES_LOCKED;
+        if (Operation != IoReadAccess) Mdl->MdlFlags |= MDL_WRITE_OPERATION;
+
+        /* Not tracked as process-locked pages (the pages are never paged). */
+        Mdl->Process = NULL;
+        return;
+    }
+
+#ifndef SARCH_XBOX
+    /* The probe loop guards against pageable / unmapped user-mode buffers.
+     * On Xbox there is no usermode and title low VA is direct-mapped via PSE
+     * large pages (already handled by the MI_IS_PHYSICAL_ADDRESS shortcut). */
     //
     // Now probe them
     //
@@ -1086,6 +1152,11 @@ MmProbeAndLockPages(IN PMDL Mdl,
         Mdl->Process = NULL;
         ExRaiseStatus(ProbeStatus);
     }
+#else
+    /* Nothing to probe on Xbox; suppress unused-variable warnings. */
+    (void)ProbeStatus;
+    (void)LockPages;
+#endif
 
     //
     // Get the PTE and PDE
@@ -1257,6 +1328,9 @@ MmProbeAndLockPages(IN PMDL Mdl,
             //
             if (MI_IS_PAGE_WRITEABLE(PointerPte) == FALSE)
             {
+#ifndef SARCH_XBOX
+                /* No copy-on-write pages on Xbox; fall through to the
+                 * STATUS_ACCESS_VIOLATION fail path. */
                 //
                 // Check if it's copy on write
                 //
@@ -1321,6 +1395,7 @@ MmProbeAndLockPages(IN PMDL Mdl,
                         continue;
                     }
                 }
+#endif
 
                 //
                 // Fail, since we won't allow this
@@ -1335,6 +1410,21 @@ MmProbeAndLockPages(IN PMDL Mdl,
         //
         PageFrameIndex = PFN_FROM_PTE(PointerPte);
         Pfn1 = MiGetPfnEntry(PageFrameIndex);
+#ifdef SARCH_XBOX
+        /* MMIO is PSE-mapped on Xbox and short-circuited by
+         * MI_IS_PHYSICAL_ADDRESS above; we never reach here with a
+         * non-PFN page. */
+        ASSERT(Pfn1 != NULL);
+        ASSERT(CurrentProcess == NULL || UsePfnLock == FALSE);
+        MiReferenceProbedPageAndBumpLockCount(Pfn1);
+#ifdef NXK_MM_PHYS
+        /* MDL-locked pages are DMA targets: the device captures the
+         * physical address, so the relocating contiguous allocator must
+         * not move the frame until MmUnlockPages.  Owner is recomputed
+         * from the PTE on unlock. */
+        NxkPageSupplySetOwner(PageFrameIndex, 0);
+#endif
+#else
         if (Pfn1)
         {
             /* Either this is for kernel-mode, or the working set is held */
@@ -1353,6 +1443,7 @@ MmProbeAndLockPages(IN PMDL Mdl,
             //
             Mdl->MdlFlags |= MDL_IO_SPACE;
         }
+#endif
 
         //
         // Write the page and move on
@@ -1480,6 +1571,49 @@ MmUnlockPages(IN PMDL Mdl)
     //
     if (Flags & MDL_DESCRIBES_AWE) ASSERT(FALSE);
 
+    /* MDLs built by the large-page (physically resident) path in
+     * MmProbeAndLockPages were never PFN-ref-counted -- the pages are never
+     * paged -- so there is nothing to dereference.  Just drop the lock flag.
+     * (Symmetric with the MI_IS_PHYSICAL_ADDRESS path there.) */
+    if (MI_IS_PHYSICAL_ADDRESS(Base))
+    {
+        Mdl->MdlFlags &= ~MDL_PAGES_LOCKED;
+        return;
+    }
+
+#ifdef NXK_MM_PHYS
+    /* DMA is done with these frames: restore their relocatability if
+     * the originating PTE still maps them (decommit during the IO
+     * leaves the owner cleared, which is the safe direction). */
+    {
+        PPFN_NUMBER P = (PPFN_NUMBER)(Mdl + 1);
+        ULONG_PTR Va = (ULONG_PTR)Mdl->StartVa;
+        PFN_NUMBER N = PageCount;
+        KIRQL OldIrql2 = MiAcquirePfnLock();
+        while (N--)
+        {
+            if (*P != LIST_HEAD)
+            {
+                PMMPTE PteAddr = MiAddressToPte((PVOID)Va);
+                PMMPDE PdeAddr = MiAddressToPde((PVOID)Va);
+                if ((PdeAddr->u.Hard.Valid) && !(PdeAddr->u.Hard.LargePage) &&
+                    (PteAddr->u.Hard.Valid) &&
+                    (PteAddr->u.Hard.PageFrameNumber == *P))
+                {
+                    NxkPageSupplySetOwner(*P, (ULONG_PTR)PteAddr);
+                }
+            }
+            P++;
+            Va += PAGE_SIZE;
+        }
+        MiReleasePfnLock(OldIrql2);
+    }
+#endif
+
+#ifndef SARCH_XBOX
+    /* MDL_IO_SPACE is set when MmProbeAndLockPages walks a non-PFN page;
+     * on Xbox MMIO is PSE-mapped and caught by MI_IS_PHYSICAL_ADDRESS, so
+     * the flag never gets set in the first place. */
     //
     // Check if the buffer is mapped I/O space
     //
@@ -1533,6 +1667,7 @@ MmUnlockPages(IN PMDL Mdl)
         Mdl->MdlFlags &= ~MDL_PAGES_LOCKED;
         return;
     }
+#endif
 
     //
     // Check if we have a process
@@ -1632,6 +1767,14 @@ MmMapLockedPagesWithReservedMapping(
     _In_ PMDL Mdl,
     _In_ MEMORY_CACHING_TYPE CacheType)
 {
+#ifdef SARCH_XBOX
+    /* No folded driver consumers; MmAllocateMappingAddress is also dead. */
+    UNREFERENCED_PARAMETER(MappingAddress);
+    UNREFERENCED_PARAMETER(PoolTag);
+    UNREFERENCED_PARAMETER(Mdl);
+    UNREFERENCED_PARAMETER(CacheType);
+    return NULL;
+#else
     PPFN_NUMBER MdlPages, LastPage;
     PFN_COUNT PageCount;
     BOOLEAN IsIoMapping;
@@ -1739,6 +1882,7 @@ MmMapLockedPagesWithReservedMapping(
 
     // Return the mapped address
     return (PVOID)((ULONG_PTR)MappingAddress + Mdl->ByteOffset);
+#endif
 }
 
 /*
@@ -1751,6 +1895,13 @@ MmUnmapReservedMapping(
     _In_ ULONG PoolTag,
     _In_ PMDL Mdl)
 {
+#ifdef SARCH_XBOX
+    /* Counterpart to MmMapLockedPagesWithReservedMapping; both are dead. */
+    UNREFERENCED_PARAMETER(BaseAddress);
+    UNREFERENCED_PARAMETER(PoolTag);
+    UNREFERENCED_PARAMETER(Mdl);
+    return;
+#else
     PVOID Base;
     PFN_COUNT PageCount, ExtraPageCount;
     PPFN_NUMBER MdlPages;
@@ -1840,6 +1991,7 @@ MmUnmapReservedMapping(
     Mdl->MdlFlags &= ~(MDL_MAPPED_TO_SYSTEM_VA |
                        MDL_PARTIAL_HAS_BEEN_MAPPED |
                        MDL_FREE_EXTRA_PTES);
+#endif
 }
 
 /*

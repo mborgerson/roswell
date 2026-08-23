@@ -42,6 +42,17 @@
 #include <ndk/sefuncs.h>
 #include <ndk/umfuncs.h>
 
+#ifdef SARCH_XBOX
+/* Zw == Nt on Xbox (single mode, PreviousMode folds to KernelMode);
+ * bind the names this library uses straight to the Nt implementations
+ * (prototypes above, from the NDK).  Mirrors the block in
+ * sdk/include/xdk/zwfuncs.h. */
+#define ZwContinue          NtContinue
+#define ZwRaiseException    NtRaiseException
+#define ZwTerminateProcess  NtTerminateProcess
+#define ZwTerminateThread   NtTerminateThread
+#endif
+
 /* SEH support with PSEH */
 #include <pseh/pseh2.h>
 

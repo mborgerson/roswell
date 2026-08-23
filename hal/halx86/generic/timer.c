@@ -25,8 +25,18 @@ ULONG HalpPerfCounterCutoff;
 BOOLEAN HalpClockSetMSRate;
 ULONG HalpCurrentTimeIncrement;
 ULONG HalpCurrentRollOver;
+#if defined(SARCH_XBOX)
+/* The Xbox kernel ticks the clock at 1 kHz (1 ms per tick), and titles read
+ * KeTickCount expecting that rate.  ReactOS's NT default ticks at 15 ms
+ * (HalpLargestClockMS=15), so a title's `now - last > 1000` for "one second
+ * elapsed" fires every 15 seconds.  Set the rollover to slot 0 (1 ms / 10000
+ * 100ns increment) to match Xbox semantics. */
+ULONG HalpNextMSRate = 1;
+ULONG HalpLargestClockMS = 1;
+#else
 ULONG HalpNextMSRate = 14;
 ULONG HalpLargestClockMS = 15;
+#endif
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
@@ -159,6 +169,7 @@ HalpClockInterruptHandler(IN PKTRAP_FRAME TrapFrame)
     KiEoiHelper(TrapFrame);
 }
 
+#ifndef SARCH_XBOX
 VOID
 FASTCALL
 HalpProfileInterruptHandler(IN PKTRAP_FRAME TrapFrame)
@@ -198,6 +209,7 @@ HalpProfileInterruptHandler(IN PKTRAP_FRAME TrapFrame)
     /* Spurious, just end the interrupt */
     KiEoiHelper(TrapFrame);
 }
+#endif /* !SARCH_XBOX */
 #endif /* !_MINIHAL_ */
 
 #endif /* _M_IX86 */

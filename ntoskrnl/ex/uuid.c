@@ -68,6 +68,11 @@ ExpUuidInitialization(VOID)
 static NTSTATUS
 ExpUuidLoadSequenceNumber(PULONG Sequence)
 {
+#ifdef SARCH_XBOX
+    /* No persistence on Xbox; let the caller pick a random seed. */
+    UNREFERENCED_PARAMETER(Sequence);
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     UCHAR ValueBuffer[VALUE_BUFFER_SIZE];
     PKEY_VALUE_PARTIAL_INFORMATION ValueInfo;
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -117,6 +122,7 @@ ExpUuidLoadSequenceNumber(PULONG Sequence)
     DPRINT("Loaded sequence %lx\n", *Sequence);
 
     return STATUS_SUCCESS;
+#endif
 }
 #undef VALUE_BUFFER_SIZE
 
@@ -126,6 +132,11 @@ ExpUuidLoadSequenceNumber(PULONG Sequence)
 static NTSTATUS
 ExpUuidSaveSequenceNumber(PULONG Sequence)
 {
+#ifdef SARCH_XBOX
+    /* No persistence on Xbox. */
+    UNREFERENCED_PARAMETER(Sequence);
+    return STATUS_SUCCESS;
+#else
     OBJECT_ATTRIBUTES ObjectAttributes;
     UNICODE_STRING KeyName, ValueName;
     HANDLE KeyHandle;
@@ -163,6 +174,7 @@ ExpUuidSaveSequenceNumber(PULONG Sequence)
     }
 
     return Status;
+#endif
 }
 
 /*
@@ -379,6 +391,11 @@ NTSTATUS
 NTAPI
 ExUuidCreate(OUT UUID *Uuid)
 {
+#ifdef SARCH_XBOX
+    /* No UUID consumers on a fixed-hardware single-process target. */
+    UNREFERENCED_PARAMETER(Uuid);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     NTSTATUS Status;
     LONG AllocatedCount;
     LARGE_INTEGER Time;
@@ -450,6 +467,7 @@ ExUuidCreate(OUT UUID *Uuid)
     Uuid->Data3 = ((Time.HighPart >> 16) & 0x0FFF) | 0x1000;
 
     return Status;
+#endif
 }
 
 /*

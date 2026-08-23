@@ -9,6 +9,53 @@
 
 #include "pciidex.h"
 
+#ifdef SARCH_XBOX
+
+/* Xbox MCPX is a PATA NVIDIA controller with no ACPI bus filter. */
+
+BOOLEAN
+AtaAcpiGetTimingMode(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Out_ PIDE_ACPI_TIMING_MODE_BLOCK TimingMode)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(TimingMode);
+    return FALSE;
+}
+
+NTSTATUS
+AtaAcpiSetTimingMode(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ PIDE_ACPI_TIMING_MODE_BLOCK TimingMode,
+    _In_opt_ PIDENTIFY_DEVICE_DATA IdBlock1,
+    _In_opt_ PIDENTIFY_DEVICE_DATA IdBlock2)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(TimingMode);
+    UNREFERENCED_PARAMETER(IdBlock1);
+    UNREFERENCED_PARAMETER(IdBlock2);
+    return STATUS_NOT_SUPPORTED;
+}
+
+PVOID
+AtaAcpiGetTaskFile(
+    _In_ PDEVICE_OBJECT DeviceObject)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    return NULL;
+}
+
+VOID
+AtaAcpiSetDeviceData(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ PIDENTIFY_DEVICE_DATA IdBlock)
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(IdBlock);
+}
+
+#else
+
 #include <acpiioct.h>
 
 /* FUNCTIONS ******************************************************************/
@@ -335,3 +382,5 @@ AtaAcpiSetDeviceData(
 
     ExFreePoolWithTag(InputBuffer, TAG_PCIIDEX);
 }
+
+#endif /* SARCH_XBOX */

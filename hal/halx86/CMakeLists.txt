@@ -3,13 +3,34 @@ add_definitions(
     -D_NTHALDLL_
     -D_NTHAL_)
 
+# for the Xbox build the HAL is linked into the kernel image (halxbox
+# is a static library, not a separate hal.dll), so its references to the
+# kernel's own API (NTKERNELAPI / NTSYSAPI) must be direct symbols, not _imp_
+# thunks.
+if(SARCH STREQUAL "xbox")
+    add_definitions(-D_NTSYSTEM_)
+endif()
+
 include_directories(
     include
     ${REACTOS_SOURCE_DIR}/ntoskrnl/include
     ${REACTOS_SOURCE_DIR}/sdk/include/reactos/libs/fast486)
 
 function(add_hal _halname)
-    cmake_parse_arguments(_haldata "" "" "SOURCES;COMPONENTS" ${ARGN})
+    cmake_parse_arguments(_haldata "STATICLIB" "" "SOURCES;COMPONENTS" ${ARGN})
+
+    if(_haldata_STATICLIB)
+        # build the HAL as a static library of its component objects,
+        # linked directly into ntoskrnl -- the Xbox kernel is one image, with
+        # no separate hal.dll.  No spec2def / importlib / module-type / cd-file.
+        foreach(_component ${_haldata_COMPONENTS})
+            list(APPEND _hal_objects "$<TARGET_OBJECTS:lib_hal_${_component}>")
+        endforeach()
+        add_library(${_halname} ${_hal_objects})
+        set_target_properties(${_halname} PROPERTIES LINKER_LANGUAGE C)
+        add_dependencies(${_halname} psdk asm)
+        return()
+    endif()
 
     # Handle the spec file for the dll name
     spec2def(${_halname}.dll ../hal.spec ADD_IMPORTLIB)
@@ -40,6 +61,20 @@ function(add_hal _halname)
     endif()
 endfunction()
 
+if(ARCH STREQUAL "i386" AND SARCH STREQUAL "xbox")
+    # halxbox COMPONENTS = xbox + up; neither references lib_hal_generic,
+    # and the rest of the HAL variants (hal, halacpi, halaacpi, halapic,
+    # halmacpi, halpc98) aren't reachable from the flash image, so we
+    # also skip their component objects (acpi, apic, smp, legacy, pc98,
+    # pic, generic).
+    include(up.cmake)
+    include(pcidata.cmake)
+    include(xbox.cmake)
+    remove_definitions(-DSARCH_XBOX)
+    add_hal(halxbox COMPONENTS xbox up STATICLIB)
+    return()
+endif()
+
 # The components
 include(generic.cmake)
 include(acpi.cmake)
@@ -63,7 +98,7 @@ if(ARCH STREQUAL "i386")
     add_hal(halacpi SOURCES acpi/halacpi.rc COMPONENTS generic acpi up pic)
     add_hal(halaacpi SOURCES apic/halaacpi.rc COMPONENTS generic acpi up apic)
     add_hal(halapic SOURCES apic/halapic.rc COMPONENTS generic legacy up apic)
-    add_hal(halxbox SOURCES xbox/halxbox.rc COMPONENTS xbox up)
+    add_hal(halxbox COMPONENTS xbox up STATICLIB)
     add_hal(halpc98 SOURCES pc98/halpc98.rc COMPONENTS pc98 up)
 
     add_hal(halmacpi SOURCES smp/halmacpi.rc COMPONENTS generic acpi smp apic)

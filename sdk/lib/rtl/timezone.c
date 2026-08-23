@@ -22,6 +22,11 @@ NTSTATUS
 NTAPI
 RtlQueryTimeZoneInformation(PRTL_TIME_ZONE_INFORMATION TimeZoneInformation)
 {
+#ifdef SARCH_XBOX
+    /* No registry on Xbox; ex/time.c falls back to UTC when this fails. */
+    UNREFERENCED_PARAMETER(TimeZoneInformation);
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     RTL_QUERY_REGISTRY_TABLE QueryTable[8];
     UNICODE_STRING StandardName;
     UNICODE_STRING DaylightName;
@@ -77,6 +82,7 @@ RtlQueryTimeZoneInformation(PRTL_TIME_ZONE_INFORMATION TimeZoneInformation)
                                     NULL);
 
     return Status;
+#endif
 }
 
 
@@ -87,6 +93,10 @@ NTSTATUS
 NTAPI
 RtlSetTimeZoneInformation(PRTL_TIME_ZONE_INFORMATION TimeZoneInformation)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(TimeZoneInformation);
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     SIZE_T Length;
     NTSTATUS Status;
 
@@ -170,6 +180,7 @@ RtlSetTimeZoneInformation(PRTL_TIME_ZONE_INFORMATION TimeZoneInformation)
                                    sizeof(SYSTEMTIME));
 
     return Status;
+#endif
 }
 
 /* EOF */

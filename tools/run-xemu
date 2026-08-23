@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# run-xemu -- launch xemu booting from our flash image (build/flash.bin),
+# which contains nxldr + xz(xboxkrnl).
+#
+# Required environment:
+#   NXKRNL_XEMU     path to the xemu binary
+#   NXKRNL_HDD      Xbox HDD qcow2 image (xemu-dashboard's is fine)
+#   NXKRNL_ROM_DIR  only with --official: dir holding bios.bin / mcpx.bin /
+#                   eeprom.bin
+#
+set -euo pipefail
+
+: "${NXKRNL_XEMU:?path to the xemu (qemu-system-i386) binary}"
+: "${NXKRNL_HDD:?Xbox HDD qcow2 image}"
+XEMU="$NXKRNL_XEMU"
+HDD="$NXKRNL_HDD"
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUNDIR="$REPO/build/run"
+
+flash="$REPO/build/flash.bin"
+kernel=nxkrnl          # nxkrnl | official  (just for the config file name)
+gdb=0
+serial=""
+debugcon=""
+trace=""
+dvd=""
+
+# Xbox RAM size in MB: 64 (retail) | 128 (devkit).  The release kernel
+# (split image, retail base) runs on both; the DBG kernel needs 128.
+mem=128
+
+usage() {
+	cat <<'EOF'
+usage: run-xemu [options]
+  --official      boot the retail Xbox flash (bios.bin) instead of ours
+  --flash PATH    boot the flash image at PATH instead of build/flash.bin
+  --gdb           expose the GDB stub on tcp::1234 and start halted (-S)
+  --serial DEST   attach the LPC debug UART; DEST is a QEMU -serial target
+                  (e.g. stdio, file:boot.log, tcp:127.0.0.1:5558)
+  --debugcon DEST wire xemu's isa-debugcon (port 0xE9) to a chardev; works
+                  on both nxkrnl and retail since it doesn't need a kernel
+                  driver (e.g. file:debugcon.log, stdio)
+  --trace LOG     enable `in_asm,nochain` tracing to LOG (input to
+                  tools/cov-analyze.py); produces multi-MB output, so kill
+                  xemu when the workload of interest finishes
+  --dvd ISO       attach ISO as the DVD drive
+  --mem MB        Xbox RAM size: 64 (retail) or 128 (devkit; default)
+  -h, --help      show this message
+EOF
+}
+
+flash_set=0
+official=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--official)   official=1 ;;
+		--flash)      flash="${2:?--flash needs a path}"; flash_set=1; shift ;;
+		--gdb)        gdb=1 ;;
+		--serial)     serial="${2:?--serial needs a target}"; shift ;;
+		--debugcon)   debugcon="${2:?--debugcon needs a target}"; shift ;;
+		--trace)      trace="${2:?--trace needs a log path}"; shift ;;
+		--dvd)        dvd="${2:?--dvd needs an ISO path}"; shift ;;
+		--mem)        mem="${2:?--mem needs 64 or 128}"; shift ;;
+		-h|--help)    usage; exit 0 ;;
+		*) echo "run-xemu: unknown option '$1'" >&2; usage >&2; exit 2 ;;
+	esac
+	shift
+done
+
+if [ "$official" = 1 ] && [ "$flash_set" = 1 ]; then
+	echo "run-xemu: --official and --flash are mutually exclusive" >&2
+	exit 2
+fi
+
+# nxldr boots have their own reset path and don't need the MCPX bootrom or
+# a pre-baked eeprom; xemu generates a default eeprom when the path is empty.
+# --official is the only mode that uses NXKRNL_ROM_DIR.
+if [ "$official" = 1 ]; then
+	: "${NXKRNL_ROM_DIR:?--official: dir with bios.bin / mcpx.bin / eeprom.bin}"
+	kernel=official
+	flashrom="$NXKRNL_ROM_DIR/bios.bin"
+	bootrom="$NXKRNL_ROM_DIR/mcpx.bin"
+	eeprom="$NXKRNL_ROM_DIR/eeprom.bin"
+else
+	flashrom="$flash"
+	bootrom=""
+	eeprom=""
+fi
+
+required=( "$XEMU" "$flashrom" "$HDD" )
+[ -n "$bootrom" ] && required+=( "$bootrom" )
+[ -n "$eeprom" ]  && required+=( "$eeprom" )
+for f in "${required[@]}"; do
+	[ -e "$f" ] || { echo "run-xemu: missing required file: $f" >&2; exit 1; }
+done
+
+mkdir -p "$RUNDIR"
+config="$RUNDIR/xemu-$kernel-$mem.toml"
+{
+	echo "[general]"
+	echo "show_welcome = false"
+	echo "skip_boot_anim = true"
+	echo
+	echo "[sys]"
+	echo "mem_limit = '$mem'"
+	echo
+	echo "[sys.files]"
+	echo "bootrom_path = '$bootrom'"
+	echo "flashrom_path = '$flashrom'"
+	echo "eeprom_path = '$eeprom'"
+	echo "hdd_path = '$HDD'"
+	[ -n "$dvd" ] && echo "dvd_path = '$dvd'"
+	echo
+	echo "[net]"
+	echo "enable = true"
+} > "$config"
+
+# -snapshot: discard all drive writes to a throwaway overlay so a title's
+# FATX writes (e.g. Halo decompressing maps onto the cache partition) never
+# touch the disk image -- every boot starts pristine.
+cmd=( "$XEMU" -config_path "$config" -snapshot )
+[ "$gdb" = 1 ]      && cmd+=( -gdb tcp::1234 -S )
+[ -n "$serial" ]    && cmd+=( -device lpc47m157 -serial "$serial" )
+[ -n "$debugcon" ]  && cmd+=( -debugcon "$debugcon" )
+[ -n "$trace" ]     && cmd+=( -d in_asm,nochain -D "$trace" )
+
+echo "run-xemu: booting flash $flashrom" >&2
+printf '+ %s\n' "${cmd[*]}" >&2
+exec "${cmd[@]}"

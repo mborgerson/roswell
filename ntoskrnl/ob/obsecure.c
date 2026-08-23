@@ -21,6 +21,13 @@ ObAssignObjectSecurityDescriptor(IN PVOID Object,
                                  IN PSECURITY_DESCRIPTOR SecurityDescriptor OPTIONAL,
                                  IN POOL_TYPE PoolType)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; never assign any SD. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(PoolType);
+    return STATUS_SUCCESS;
+#else
     POBJECT_HEADER ObjectHeader;
     NTSTATUS Status;
     PSECURITY_DESCRIPTOR NewSd;
@@ -53,12 +60,18 @@ ObAssignObjectSecurityDescriptor(IN PVOID Object,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
 NTAPI
 ObDeassignSecurity(IN OUT PSECURITY_DESCRIPTOR *SecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; nothing to release. */
+    *SecurityDescriptor = NULL;
+    return STATUS_SUCCESS;
+#else
     EX_FAST_REF FastRef;
     ULONG Count;
     PSECURITY_DESCRIPTOR OldSecurityDescriptor;
@@ -78,6 +91,7 @@ ObDeassignSecurity(IN OUT PSECURITY_DESCRIPTOR *SecurityDescriptor)
 
     /* All done */
     return STATUS_SUCCESS;
+#endif
 }
 
 NTSTATUS
@@ -88,6 +102,15 @@ ObQuerySecurityDescriptorInfo(IN PVOID Object,
                               IN OUT PULONG Length,
                               IN PSECURITY_DESCRIPTOR *OutputSecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; never query. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(SecurityInformation);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(OutputSecurityDescriptor);
+    if (Length) *Length = 0;
+    return STATUS_SUCCESS;
+#else
     POBJECT_HEADER ObjectHeader;
     NTSTATUS Status;
     PSECURITY_DESCRIPTOR ObjectSd;
@@ -110,6 +133,7 @@ ObQuerySecurityDescriptorInfo(IN PVOID Object,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -121,6 +145,16 @@ ObSetSecurityDescriptorInfo(IN PVOID Object,
                             IN POOL_TYPE PoolType,
                             IN PGENERIC_MAPPING GenericMapping)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; never set. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(SecurityInformation);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(OutputSecurityDescriptor);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(GenericMapping);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     POBJECT_HEADER ObjectHeader;
     PSECURITY_DESCRIPTOR OldDescriptor, NewDescriptor, CachedDescriptor;
@@ -196,6 +230,7 @@ ObSetSecurityDescriptorInfo(IN PVOID Object,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 BOOLEAN
@@ -208,6 +243,17 @@ ObCheckCreateObjectAccess(IN PVOID Object,
                           IN KPROCESSOR_MODE AccessMode,
                           OUT PNTSTATUS AccessStatus)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; grant create. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(CreateAccess);
+    UNREFERENCED_PARAMETER(AccessState);
+    UNREFERENCED_PARAMETER(ComponentName);
+    UNREFERENCED_PARAMETER(LockHeld);
+    UNREFERENCED_PARAMETER(AccessMode);
+    *AccessStatus = STATUS_SUCCESS;
+    return TRUE;
+#else
     POBJECT_HEADER ObjectHeader;
     POBJECT_TYPE ObjectType;
     PSECURITY_DESCRIPTOR SecurityDescriptor = NULL;
@@ -260,6 +306,7 @@ ObCheckCreateObjectAccess(IN PVOID Object,
     SeUnlockSubjectContext(&AccessState->SubjectSecurityContext);
     ObReleaseObjectSecurity(SecurityDescriptor, SdAllocated);
     return Result;
+#endif /* SARCH_XBOX */
 }
 
 BOOLEAN
@@ -271,6 +318,16 @@ ObpCheckTraverseAccess(IN PVOID Object,
                        IN KPROCESSOR_MODE AccessMode,
                        OUT PNTSTATUS AccessStatus)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; everything runs in kernel mode. Grant traverse. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(TraverseAccess);
+    UNREFERENCED_PARAMETER(AccessState);
+    UNREFERENCED_PARAMETER(LockHeld);
+    UNREFERENCED_PARAMETER(AccessMode);
+    *AccessStatus = STATUS_SUCCESS;
+    return TRUE;
+#else
     POBJECT_HEADER ObjectHeader;
     POBJECT_TYPE ObjectType;
     PSECURITY_DESCRIPTOR SecurityDescriptor = NULL;
@@ -333,6 +390,7 @@ ObpCheckTraverseAccess(IN PVOID Object,
     SeUnlockSubjectContext(&AccessState->SubjectSecurityContext);
     ObReleaseObjectSecurity(SecurityDescriptor, SdAllocated);
     return Result;
+#endif /* SARCH_XBOX */
 }
 
 BOOLEAN
@@ -343,6 +401,15 @@ ObpCheckObjectReference(IN PVOID Object,
                         IN KPROCESSOR_MODE AccessMode,
                         OUT PNTSTATUS AccessStatus)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; grant access. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(AccessState);
+    UNREFERENCED_PARAMETER(LockHeld);
+    UNREFERENCED_PARAMETER(AccessMode);
+    *AccessStatus = STATUS_SUCCESS;
+    return TRUE;
+#else
     POBJECT_HEADER ObjectHeader;
     POBJECT_TYPE ObjectType;
     PSECURITY_DESCRIPTOR SecurityDescriptor = NULL;
@@ -409,6 +476,7 @@ ObpCheckObjectReference(IN PVOID Object,
     SeUnlockSubjectContext(&AccessState->SubjectSecurityContext);
     ObReleaseObjectSecurity(SecurityDescriptor, SdAllocated);
     return Result;
+#endif /* SARCH_XBOX */
 }
 
 /*++
@@ -444,6 +512,15 @@ ObCheckObjectAccess(IN PVOID Object,
                     IN KPROCESSOR_MODE AccessMode,
                     OUT PNTSTATUS ReturnedStatus)
 {
+#ifdef SARCH_XBOX
+    /* No SRM / DACL evaluation; grant everything. */
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(AccessState);
+    UNREFERENCED_PARAMETER(LockHeld);
+    UNREFERENCED_PARAMETER(AccessMode);
+    *ReturnedStatus = STATUS_SUCCESS;
+    return TRUE;
+#else
     POBJECT_HEADER ObjectHeader;
     POBJECT_TYPE ObjectType;
     PSECURITY_DESCRIPTOR SecurityDescriptor = NULL;
@@ -518,6 +595,7 @@ ObCheckObjectAccess(IN PVOID Object,
     SeUnlockSubjectContext(&AccessState->SubjectSecurityContext);
     ObReleaseObjectSecurity(SecurityDescriptor, SdAllocated);
     return Result;
+#endif /* SARCH_XBOX */
 }
 
 /* PUBLIC FUNCTIONS **********************************************************/
@@ -552,6 +630,14 @@ ObAssignSecurity(IN PACCESS_STATE AccessState,
                  IN PVOID Object,
                  IN POBJECT_TYPE Type)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; never assign any SD. */
+    UNREFERENCED_PARAMETER(AccessState);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(Type);
+    return STATUS_SUCCESS;
+#else
     PSECURITY_DESCRIPTOR NewDescriptor;
     NTSTATUS Status;
     KIRQL CalloutIrql;
@@ -584,6 +670,7 @@ ObAssignSecurity(IN PACCESS_STATE AccessState,
 
     /* Return to caller */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*++
@@ -612,6 +699,13 @@ ObGetObjectSecurity(IN PVOID Object,
                     OUT PSECURITY_DESCRIPTOR *SecurityDescriptor,
                     OUT PBOOLEAN MemoryAllocated)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; no SDs are ever cached on objects. */
+    UNREFERENCED_PARAMETER(Object);
+    *SecurityDescriptor = NULL;
+    *MemoryAllocated = FALSE;
+    return STATUS_SUCCESS;
+#else
     POBJECT_HEADER Header;
     POBJECT_TYPE Type;
     ULONG Length = 0;
@@ -685,6 +779,7 @@ ObGetObjectSecurity(IN PVOID Object,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*++
@@ -709,6 +804,11 @@ NTAPI
 ObReleaseObjectSecurity(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
                         IN BOOLEAN MemoryAllocated)
 {
+#ifdef SARCH_XBOX
+    /* No SRM; ObGetObjectSecurity always hands back NULL on Xbox. */
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(MemoryAllocated);
+#else
     PAGED_CODE();
 
     /* Nothing to do in this case */
@@ -725,6 +825,7 @@ ObReleaseObjectSecurity(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
         /* Otherwise this means we used an internal descriptor */
         ObDereferenceSecurityDescriptor(SecurityDescriptor, 1);
     }
+#endif
 }
 
 /*++
@@ -806,6 +907,15 @@ NtQuerySecurityObject(IN HANDLE Handle,
                       IN ULONG Length,
                       OUT PULONG ResultLength)
 {
+#ifdef SARCH_XBOX
+    /* No security manager; titles never query SDs. */
+    UNREFERENCED_PARAMETER(Handle);
+    UNREFERENCED_PARAMETER(SecurityInformation);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(ResultLength);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     PVOID Object;
     POBJECT_HEADER Header;
@@ -876,6 +986,7 @@ NtQuerySecurityObject(IN HANDLE Handle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*++
@@ -904,6 +1015,13 @@ NtSetSecurityObject(IN HANDLE Handle,
                     IN SECURITY_INFORMATION SecurityInformation,
                     IN PSECURITY_DESCRIPTOR SecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* No security manager; titles never set SDs. */
+    UNREFERENCED_PARAMETER(Handle);
+    UNREFERENCED_PARAMETER(SecurityInformation);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     PVOID Object;
     SECURITY_DESCRIPTOR_RELATIVE *CapturedDescriptor;
@@ -973,6 +1091,7 @@ NtSetSecurityObject(IN HANDLE Handle,
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*++

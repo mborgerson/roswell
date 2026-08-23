@@ -15,6 +15,7 @@
 
 /* GLOBALS ******************************************************************/
 
+#if DBG
 const char* MajorFunctionNames[] =
 {
     "IRP_MJ_CREATE",
@@ -47,6 +48,10 @@ const char* MajorFunctionNames[] =
     "IRP_MJ_PNP",
     "IRP_MJ_MAXIMUM_FUNCTION"
 };
+#else
+/* Release: only referenced by a DPRINT that compiles to dead code. */
+const char* MajorFunctionNames[1] = { "" };
+#endif
 
 static LONG QueueCount = 0;
 
@@ -80,11 +85,18 @@ VfatLockControl(
         return STATUS_INVALID_PARAMETER;
     }
 
+#ifdef SARCH_XBOX
+    /* Titles never issue IRP_MJ_LOCK_CONTROL (no lock entry points on the
+     * Xbox ABI); fail the request like the FsRtlProcessFileLock stub did. */
+    Status = STATUS_INVALID_DEVICE_REQUEST;
+    return Status;
+#else
     IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
     Status = FsRtlProcessFileLock(&Fcb->FileLock,
                                   IrpContext->Irp,
                                   NULL);
     return Status;
+#endif
 }
 
 static

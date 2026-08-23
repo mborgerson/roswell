@@ -26,6 +26,7 @@
 
 /*** PRIVATE *****************************************************************/
 
+#ifndef SARCH_XBOX
 static NTSTATUS
 PdoQueryDeviceText(
     IN PDEVICE_OBJECT DeviceObject,
@@ -135,6 +136,7 @@ PdoQueryId(
 
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 
 static NTSTATUS
@@ -379,6 +381,15 @@ PdoQueryResourceRequirements(
     IN PIRP Irp,
     PIO_STACK_LOCATION IrpSp)
 {
+#ifdef SARCH_XBOX
+    /* PCI resources are fixed by the chipset at boot; arbitration never runs.
+     * IRP_MN_QUERY_RESOURCE_REQUIREMENTS is handled by the Xbox device-tree
+     * shim before it reaches the bus driver. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(IrpSp);
+    Irp->IoStatus.Information = 0;
+    return STATUS_NOT_SUPPORTED;
+#else
     PPDO_DEVICE_EXTENSION DeviceExtension;
     PCI_COMMON_CONFIG PciConfig;
     PIO_RESOURCE_REQUIREMENTS_LIST ResourceList;
@@ -695,6 +706,7 @@ PdoQueryResourceRequirements(
     Irp->IoStatus.Information = (ULONG_PTR)ResourceList;
 
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 
@@ -704,6 +716,14 @@ PdoQueryResources(
     IN PIRP Irp,
     PIO_STACK_LOCATION IrpSp)
 {
+#ifdef SARCH_XBOX
+    /* PCI resources are fixed by the chipset at boot; the devtree shim handles
+     * IRP_MN_QUERY_RESOURCES before it reaches the bus driver. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(IrpSp);
+    Irp->IoStatus.Information = 0;
+    return STATUS_NOT_SUPPORTED;
+#else
     PPDO_DEVICE_EXTENSION DeviceExtension;
     PCI_COMMON_CONFIG PciConfig;
     PCM_RESOURCE_LIST ResourceList;
@@ -949,6 +969,7 @@ PdoQueryResources(
     Irp->IoStatus.Information = (ULONG_PTR)ResourceList;
 
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 
@@ -1322,6 +1343,14 @@ PdoStartDevice(
     IN PIRP Irp,
     PIO_STACK_LOCATION IrpSp)
 {
+#ifdef SARCH_XBOX
+    /* Chipset programs the PCI command register and IRQ line at boot; no PnP
+     * arbitration ever runs on Xbox. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(Irp);
+    UNREFERENCED_PARAMETER(IrpSp);
+    return STATUS_SUCCESS;
+#else
     PCM_RESOURCE_LIST RawResList = IrpSp->Parameters.StartDevice.AllocatedResources;
     PCM_FULL_RESOURCE_DESCRIPTOR RawFullDesc;
     PCM_PARTIAL_RESOURCE_DESCRIPTOR RawPartialDesc;
@@ -1407,6 +1436,7 @@ PdoStartDevice(
     }
 
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 static NTSTATUS
@@ -1522,6 +1552,7 @@ PdoPnpControl(
 
     switch (IrpSp->MinorFunction)
     {
+#ifndef SARCH_XBOX
         case IRP_MN_DEVICE_USAGE_NOTIFICATION:
             DPRINT("Unimplemented IRP_MN_DEVICE_USAGE_NOTIFICATION received\n");
             break;
@@ -1537,16 +1568,22 @@ PdoPnpControl(
         case IRP_MN_QUERY_CAPABILITIES:
             Status = PdoQueryCapabilities(DeviceObject, Irp, IrpSp);
             break;
+#endif
 
         case IRP_MN_QUERY_DEVICE_RELATIONS:
             Status = PdoQueryDeviceRelations(DeviceObject, Irp, IrpSp);
             break;
 
+#ifndef SARCH_XBOX
         case IRP_MN_QUERY_DEVICE_TEXT:
             DPRINT("IRP_MN_QUERY_DEVICE_TEXT received\n");
             Status = PdoQueryDeviceText(DeviceObject, Irp, IrpSp);
             break;
+#endif
 
+#ifndef SARCH_XBOX
+        /* Never sent on the static device tree; the ID strings are not
+         * created on Xbox (see FdoQueryBusRelations). */
         case IRP_MN_QUERY_ID:
             DPRINT("IRP_MN_QUERY_ID received\n");
             Status = PdoQueryId(DeviceObject, Irp, IrpSp);
@@ -1560,20 +1597,24 @@ PdoPnpControl(
             DPRINT("IRP_MN_QUERY_RESOURCE_REQUIREMENTS received\n");
             Status = PdoQueryResourceRequirements(DeviceObject, Irp, IrpSp);
             break;
+#endif
 
         case IRP_MN_QUERY_RESOURCES:
             DPRINT("IRP_MN_QUERY_RESOURCES received\n");
             Status = PdoQueryResources(DeviceObject, Irp, IrpSp);
             break;
 
+#ifndef SARCH_XBOX
         case IRP_MN_SET_LOCK:
             DPRINT("Unimplemented IRP_MN_SET_LOCK received\n");
             break;
+#endif
 
         case IRP_MN_START_DEVICE:
             Status = PdoStartDevice(DeviceObject, Irp, IrpSp);
             break;
 
+#ifndef SARCH_XBOX
         case IRP_MN_QUERY_STOP_DEVICE:
         case IRP_MN_CANCEL_STOP_DEVICE:
         case IRP_MN_STOP_DEVICE:
@@ -1604,6 +1645,7 @@ PdoPnpControl(
             /* Nothing to do */
             Irp->IoStatus.Status = Status;
             break;
+#endif
 
         default:
             DPRINT1("Unknown IOCTL 0x%lx\n", IrpSp->MinorFunction);

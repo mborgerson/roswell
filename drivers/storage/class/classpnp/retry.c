@@ -62,12 +62,16 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
 
     if (fdoData->InterpretSenseInfo != NULL) {
 
+#ifndef SARCH_XBOX
         SCSI_REQUEST_BLOCK tempSrb = { 0 };
+#endif
         PSCSI_REQUEST_BLOCK srbPtr = (PSCSI_REQUEST_BLOCK)Pkt->Srb;
 
         // SAL annotation and ClassInitializeEx() both validate this
         NT_ASSERT(fdoData->InterpretSenseInfo->Interpret != NULL);
 
+#ifndef SARCH_XBOX
+        /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
         //
         // If class driver does not support extended SRB and this is
         // an extended SRB, convert to legacy SRB and pass to class
@@ -79,6 +83,7 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
             ClasspConvertToScsiRequestBlock(&tempSrb, (PSTORAGE_REQUEST_BLOCK)Pkt->Srb);
             srbPtr = &tempSrb;
         }
+#endif
 
         shouldRetry = fdoData->InterpretSenseInfo->Interpret(Pkt->Fdo,
                                                              Pkt->OriginalIrp,
@@ -114,6 +119,10 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
                                              &additionalSenseCode,
                                              &additionalSenseQual);
 
+#ifndef SARCH_XBOX
+        /* MEDIUM_REMOVAL is only emitted by the gated-out ejection-lock
+         * IOCTLs; MODE_SENSE / MODE_SENSE10 only from the gated SCSI
+         * mode-sense IOCTLs. */
         if (pCdb->MEDIA_REMOVAL.OperationCode == SCSIOP_MEDIUM_REMOVAL) {
 
             ULONG retryIntervalSeconds = 0;
@@ -222,7 +231,9 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
             }
 
         }
-        else if ((pCdb->CDB10.OperationCode == SCSIOP_READ_CAPACITY) ||
+        else
+#endif /* !SARCH_XBOX */
+        if ((pCdb->CDB10.OperationCode == SCSIOP_READ_CAPACITY) ||
                  (pCdb->CDB16.OperationCode == SCSIOP_READ_CAPACITY16)) {
 
             ULONG retryIntervalSeconds = 0;
@@ -336,7 +347,10 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
                 Pkt->RetryIn100nsUnits *= 1000 * 1000 * 10;
             }
 
-        } else if (ClasspIsOffloadDataTransferCommand(pCdb)) {
+        }
+#ifndef SARCH_XBOX
+        /* Offload data-transfer (ODX) IOCTLs are gated out on Xbox. */
+        else if (ClasspIsOffloadDataTransferCommand(pCdb)) {
 
             ULONG retryIntervalSeconds = 0;
 
@@ -433,6 +447,7 @@ BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET Pkt)
             }
 
         }
+#endif /* !SARCH_XBOX */
         else {
             TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL, "Unhandled SRB Function %xh in error path for packet %p (did miniport change Srb.Cdb.OperationCode ?)", (ULONG)pCdb->CDB10.OperationCode, Pkt));
         }

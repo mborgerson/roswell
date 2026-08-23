@@ -197,6 +197,10 @@ SataSetTransferMode(
     NOTHING;
 }
 
+#ifndef SARCH_XBOX
+/* The fixed MCPX controller always matches the AMD/NVIDIA chipset path,
+ * which installs its own SetTransferMode; the generic ACPI/BIOS timing
+ * fallback can never be selected. */
 static
 VOID
 AtaAcpiFindModeForCycleTime(
@@ -426,6 +430,7 @@ PciIdeGenericSetTransferMode(
     else
         PciIdeBiosSetTransferMode(ChanData, DeviceList);
 }
+#endif /* SARCH_XBOX */
 
 static
 CODE_SEG("PAGE")
@@ -641,12 +646,14 @@ PciIdeControllerInitDma(
 
         INFO("CH %lu: %p DMA 0x%02X\n", ChanData->Channel, ChanData->Regs.Dma, DmaStatus);
 
+#ifndef SARCH_XBOX
         /* We look at the primary channel status register to determine the simplex mode */
         if ((i == 0) && (Controller->MaxChannels > 1))
         {
             if (DmaStatus & PCIIDE_DMA_STATUS_SIMPLEX)
                 Controller->Flags |= CTRL_FLAG_IS_SIMPLEX;
         }
+#endif
 
         /* The status bits 5:6 are set by the BIOS firmware at boot */
         if (DmaStatus & PCIIDE_DMA_STATUS_DRIVE0_DMA_CAPABLE)
@@ -1105,7 +1112,11 @@ PciIdeCreateChannelData(
         ChanData->LoadTaskFile = PataLoadTaskFile;
         ChanData->SaveTaskFile = PataSaveTaskFile;
         ChanData->ReadStatus = PataReadStatus;
+#ifndef SARCH_XBOX
+        /* The chipset-specific properties routine always overrides this
+         * default before any timing programming can happen. */
         ChanData->SetTransferMode = PciIdeGenericSetTransferMode;
+#endif
         ChanData->TransferModeSupported = PIO_ALL | SWDMA_ALL | MWDMA_ALL | UDMA_ALL;
 
         KeInitializeDpc(&ChanData->PollingTimerDpc, PataPollingTimerDpc, ChanData);
@@ -1129,6 +1140,19 @@ PciIdeGetControllerProperties(
     Controller->MaxChannels = MAX_IDE_CHANNEL;
 
     /* Match the controller through the PCI ID */
+#ifdef SARCH_XBOX
+    /* MCPX southbridge is the only PCI IDE controller on Xbox; it presents
+     * as VEN_NVIDIA and dispatches through the AMD/NVIDIA shared path. */
+    if (Controller->Pci.VendorID == PCI_VEN_AMD ||
+        Controller->Pci.VendorID == PCI_VEN_NVIDIA)
+    {
+        Status = AmdGetControllerProperties(Controller);
+    }
+    else
+    {
+        Status = STATUS_NO_MATCH;
+    }
+#else
     switch (Controller->Pci.VendorID)
     {
         case PCI_VEN_ATI:
@@ -1165,7 +1189,9 @@ PciIdeGetControllerProperties(
             Status = STATUS_NO_MATCH;
             break;
     }
+#endif
 
+#ifndef SARCH_XBOX
     /* Try to use the generic PCI IDE minidriver */
     if (Status == STATUS_NO_MATCH)
     {
@@ -1194,6 +1220,7 @@ PciIdeGetControllerProperties(
             ChanData->ChanInfo &= ~CHANNEL_FLAG_IO32;
         }
     }
+#endif
 
     if (!NT_SUCCESS(Status))
         return Status;
@@ -1231,6 +1258,7 @@ PciIdeGetControllerProperties(
         }
     }
 
+#ifndef SARCH_XBOX
     if (Controller->Flags & CTRL_FLAG_IS_SIMPLEX)
     {
         WARN("Sync access for hardware is required\n");
@@ -1239,6 +1267,7 @@ PciIdeGetControllerProperties(
         if (!Controller->HwSyncObject)
             return STATUS_INSUFFICIENT_RESOURCES;
     }
+#endif
 
     return STATUS_SUCCESS;
 }

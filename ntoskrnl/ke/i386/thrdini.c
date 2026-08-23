@@ -255,6 +255,7 @@ KiInitializeContextThread(IN PKTHREAD Thread,
     Thread->KernelStack = (PVOID)CtxSwitchFrame;
 }
 
+DECLSPEC_NOINLINE
 DECLSPEC_NORETURN
 VOID
 KiIdleLoop(VOID)
@@ -315,8 +316,14 @@ KiIdleLoop(VOID)
         }
         else
         {
+#ifdef SARCH_XBOX
+            /* Single-CPU console, no Po power-state machine -- halt
+             * until the next interrupt fires. */
+            __asm__ __volatile__("sti; hlt");
+#else
             /* Continue staying idle. Note the HAL returns with interrupts on */
             Prcb->PowerState.IdleFunction(&Prcb->PowerState);
+#endif
         }
     }
 }
@@ -363,6 +370,19 @@ KiSwapContextExit(IN PKTHREAD OldThread,
 
     /* Set the TEB */
     KiSetTebBase((PKPCR)Pcr, &NewThread->Teb->NtTib);
+
+    /* if the new thread is a registered title thread, refresh
+     * Pcr->NtTib.StackBase (= fs:[0x04]) with its per-thread Xbox TLS-pointer
+     * value.  Xbox titles use that slot as the base of an emutls-style
+     * pointer table (`mov fs:[0x4], %ecx; mov (%ecx,%eax,4), %eax`); without
+     * the per-switch restore the title's TLS is gone the first time a worker
+     * thread is rescheduled.  Lookup is lock-free and hits the no-op fast
+     * path for non-title threads (kernel workers, the idle loop).  See
+     * ntoskrnl/xbe.c XeRestoreTlsFsBase. */
+    {
+        extern VOID XeRestoreTlsFsBase(PKTHREAD NewThread);
+        XeRestoreTlsFsBase(NewThread);
+    }
 
     /* Set new TSS fields */
     Pcr->TSS->Esp0 = (ULONG_PTR)NewThread->InitialStack;

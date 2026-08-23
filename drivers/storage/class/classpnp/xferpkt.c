@@ -225,6 +225,8 @@ NTSTATUS InitializeTransferPackets(PDEVICE_OBJECT Fdo)
     //
 
     if (NT_SUCCESS(status))  {
+#ifndef SARCH_XBOX
+        /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
         if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
             ULONG ByteSize = 0;
 
@@ -263,7 +265,9 @@ NTSTATUS InitializeTransferPackets(PDEVICE_OBJECT Fdo)
             } else {
                 NT_ASSERT(FALSE);
             }
-        } else {
+        } else
+#endif /* !SARCH_XBOX */
+        {
             fdoData->SrbTemplate = ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(SCSI_REQUEST_BLOCK), '-brs');
             if (fdoData->SrbTemplate == NULL) {
                 status = STATUS_INSUFFICIENT_RESOURCES;
@@ -351,6 +355,8 @@ PTRANSFER_PACKET NewTransferPacket(PDEVICE_OBJECT Fdo)
         } else {
             RtlZeroMemory(newPkt, sizeof(TRANSFER_PACKET));
             newPkt->AllocateNode = KeGetCurrentNodeNumber();
+#ifndef SARCH_XBOX
+            /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
             if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
 #if (NTDDI_VERSION >= NTDDI_WINBLUE)
                 if ((fdoExt->MiniportDescriptor != NULL) &&
@@ -382,7 +388,9 @@ PTRANSFER_PACKET NewTransferPacket(PDEVICE_OBJECT Fdo)
                                     SrbExDataTypeScsiCdb16
                                     );
 #endif
-            } else {
+            } else
+#endif /* !SARCH_XBOX */
+            {
 #ifdef _MSC_VER
 #pragma prefast(suppress:6014, "The allocated memory that Pkt->Srb points to will be freed in DestroyTransferPacket().")
 #endif
@@ -747,10 +755,14 @@ VOID SetupReadWriteTransferPacket(  PTRANSFER_PACKET Pkt,
      *  Tell lower drivers to sort the SRBs by the logical block address
      *  so that disk seeks are minimized.
      */
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -777,12 +789,16 @@ VOID SetupReadWriteTransferPacket(  PTRANSFER_PACKET Pkt,
      */
     pCdb = SrbGetCdb(Pkt->Srb);
     if (pCdb) {
+#ifndef SARCH_XBOX
+        /* Xbox disks fit in 32-bit LBA; 16-byte CDB path never taken. */
         if (TEST_FLAG(fdoExt->DeviceFlags, DEV_USE_16BYTE_CDB)) {
             REVERSE_BYTES_QUAD(&pCdb->CDB16.LogicalBlock, &logicalBlockAddr);
             REVERSE_BYTES(&pCdb->CDB16.TransferLength, &numTransferBlocks);
             pCdb->CDB16.OperationCode = (majorFunc==IRP_MJ_READ) ? SCSIOP_READ16 : SCSIOP_WRITE16;
             SrbSetCdbLength(Pkt->Srb, 16);
-        } else {
+        } else
+#endif
+        {
             pCdb->CDB10.LogicalBlockByte0 = ((PFOUR_BYTE)&logicalBlockAddr.LowPart)->Byte3;
             pCdb->CDB10.LogicalBlockByte1 = ((PFOUR_BYTE)&logicalBlockAddr.LowPart)->Byte2;
             pCdb->CDB10.LogicalBlockByte2 = ((PFOUR_BYTE)&logicalBlockAddr.LowPart)->Byte1;
@@ -1324,10 +1340,14 @@ VOID SetupEjectionTransferPacket(   TRANSFER_PACKET *Pkt,
 
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1379,10 +1399,14 @@ VOID SetupModeSenseTransferPacket(TRANSFER_PACKET *Pkt,
 
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1435,10 +1459,14 @@ VOID SetupModeSelectTransferPacket(TRANSFER_PACKET *Pkt,
     PCDB pCdb;
     ULONG srbLength;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1490,10 +1518,14 @@ VOID SetupDriveCapacityTransferPacket(   TRANSFER_PACKET *Pkt,
     ULONG srbLength;
     ULONG timeoutValue = fdoExt->TimeOutValue;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1512,13 +1544,19 @@ VOID SetupDriveCapacityTransferPacket(   TRANSFER_PACKET *Pkt,
 
     pCdb = SrbGetCdb(Pkt->Srb);
     if (pCdb) {
+#ifndef SARCH_XBOX
+        /* Xbox disks fit in 32-bit LBA; READ_CAPACITY16 path never taken. */
         if (Use16ByteCdb == TRUE) {
             NT_ASSERT(ReadCapacityBufferLen >= sizeof(READ_CAPACITY_DATA_EX));
             SrbSetCdbLength(Pkt->Srb, 16);
             pCdb->CDB16.OperationCode = SCSIOP_READ_CAPACITY16;
             REVERSE_BYTES(&pCdb->CDB16.TransferLength, &ReadCapacityBufferLen);
             pCdb->AsByte[1] = 0x10; // Service Action
-        } else {
+        } else
+#else
+        UNREFERENCED_PARAMETER(Use16ByteCdb);
+#endif
+        {
             SrbSetCdbLength(Pkt->Srb, 10);
             pCdb->CDB10.OperationCode = SCSIOP_READ_CAPACITY;
         }
@@ -1742,10 +1780,14 @@ Return Value:
     fdoExt = Pkt->Fdo->DeviceExtension;
     fdoData = fdoExt->PrivateFdoData;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1839,10 +1881,14 @@ Return Value:
     fdoExt = Pkt->Fdo->DeviceExtension;
     fdoData = fdoExt->PrivateFdoData;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -1940,10 +1986,14 @@ Return Value:
     fdoExt = Pkt->Fdo->DeviceExtension;
     fdoData = fdoExt->PrivateFdoData;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks
@@ -2038,10 +2088,14 @@ Return Value:
     fdoExt = Pkt->Fdo->DeviceExtension;
     fdoData = fdoExt->PrivateFdoData;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExt->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbLength = ((PSTORAGE_REQUEST_BLOCK) fdoData->SrbTemplate)->SrbLength;
         NT_ASSERT(((PSTORAGE_REQUEST_BLOCK) Pkt->Srb)->SrbLength >= srbLength);
-    } else {
+    } else
+#endif
+    {
         srbLength = fdoData->SrbTemplate->Length;
     }
     RtlCopyMemory(Pkt->Srb, fdoData->SrbTemplate, srbLength); // copies _contents_ of SRB blocks

@@ -269,7 +269,7 @@ MiAllocatePagesForMdl(IN PHYSICAL_ADDRESS LowAddress,
             /* FIXME: This check should be smarter */
             Page = 0;
             if (MmAvailablePages != 0)
-                Page = MiRemoveAnyPage(0);
+                Page = NxkPageSupplyTakeAny(0);
 
             if (Page == 0)
             {
@@ -568,6 +568,13 @@ MmDereferencePage(PFN_NUMBER Pfn)
     PMMPFN Pfn1;
     DPRINT("MmDereferencePage(PhysicalAddress %x)\n", Pfn << PAGE_SHIFT);
 
+#ifdef NXK_MM_PHYS
+    /* Single-reference pages (the only users left); straight back to
+     * the supply. */
+    NxkPageSupplyReturn(Pfn);
+    return;
+#endif
+
     MI_ASSERT_PFN_LOCK_HELD();
 
     Pfn1 = MiGetPfnEntry(Pfn);
@@ -593,7 +600,7 @@ MmDereferencePage(PFN_NUMBER Pfn)
 
         /* Bring it back into the free list */
         DPRINT("Legacy free: %lx\n", Pfn);
-        MiInsertPageInFreeList(Pfn);
+        NxkPageSupplyReturn(Pfn);
     }
 }
 
@@ -604,6 +611,15 @@ MmAllocPage(ULONG Type)
     PFN_NUMBER PfnOffset;
     PMMPFN Pfn1;
     KIRQL OldIrql;
+
+#ifdef NXK_MM_PHYS
+    /* Page identity lives in the nxmm array; no MMPFN setup. */
+    UNREFERENCED_PARAMETER(Type);
+    OldIrql = MiAcquirePfnLock();
+    PfnOffset = NxkPageSupplyTakeZero(0);
+    MiReleasePfnLock(OldIrql);
+    return PfnOffset;
+#endif
 
     OldIrql = MiAcquirePfnLock();
 
@@ -621,7 +637,7 @@ MmAllocPage(ULONG Type)
     }
 #endif
 
-    PfnOffset = MiRemoveZeroPage(MI_GET_NEXT_COLOR());
+    PfnOffset = NxkPageSupplyTakeZero(MI_GET_NEXT_COLOR());
     if (!PfnOffset)
     {
         MiReleasePfnLock(OldIrql);

@@ -58,8 +58,8 @@
 @ stdcall ExAcquireResourceExclusiveLite(ptr long)
 @ stdcall ExAcquireResourceSharedLite(ptr long)
 @ fastcall ExAcquireRundownProtection(ptr) ExfAcquireRundownProtection
-@ fastcall ExAcquireRundownProtectionCacheAware(ptr) ExfAcquireRundownProtectionCacheAware
-@ fastcall ExAcquireRundownProtectionCacheAwareEx(ptr long) ExfAcquireRundownProtectionCacheAwareEx
+@ fastcall ExAcquireRundownProtectionCacheAware(ptr)
+@ fastcall ExAcquireRundownProtectionCacheAwareEx(ptr long)
 @ fastcall ExAcquireRundownProtectionEx(ptr long) ExfAcquireRundownProtectionEx
 @ stdcall ExAcquireSharedStarveExclusive(ptr long)
 @ stdcall ExAcquireSharedWaitForExclusive(ptr long)
@@ -129,7 +129,7 @@
 @ stdcall ExRaiseHardError(long long long ptr long ptr)
 @ stdcall ExRaiseStatus(long) RtlRaiseStatus
 @ fastcall ExReInitializeRundownProtection(ptr) ExfReInitializeRundownProtection
-@ fastcall ExReInitializeRundownProtectionCacheAware(ptr) ExfReInitializeRundownProtectionCacheAware
+@ fastcall ExReInitializeRundownProtectionCacheAware(ptr)
 @ stdcall ExRegisterCallback(ptr ptr ptr)
 @ stdcall ExReinitializeResourceLite(ptr)
 @ stdcall -arch=x86_64 ExReleaseFastMutex(ptr)
@@ -139,11 +139,11 @@
 @ stdcall ExReleaseResourceForThreadLite(ptr long)
 @ fastcall ExReleaseResourceLite(ptr)
 @ fastcall ExReleaseRundownProtection(ptr) ExfReleaseRundownProtection
-@ fastcall ExReleaseRundownProtectionCacheAware(ptr) ExfReleaseRundownProtectionCacheAware
-@ fastcall ExReleaseRundownProtectionCacheAwareEx(ptr long) ExfReleaseRundownProtectionCacheAwareEx
+@ fastcall ExReleaseRundownProtectionCacheAware(ptr)
+@ fastcall ExReleaseRundownProtectionCacheAwareEx(ptr long)
 @ fastcall ExReleaseRundownProtectionEx(ptr long) ExfReleaseRundownProtectionEx
 @ fastcall ExRundownCompleted(ptr) ExfRundownCompleted
-@ fastcall ExRundownCompletedCacheAware(ptr) ExfRundownCompletedCacheAware
+@ fastcall ExRundownCompletedCacheAware(ptr)
 @ extern ExSemaphoreObjectType
 @ stdcall ExSetResourceOwnerPointer(ptr ptr)
 @ stdcall ExSetTimerResolution(long long)
@@ -155,7 +155,7 @@
 @ stdcall ExUuidCreate(ptr)
 @ stdcall ExVerifySuite(long)
 @ fastcall ExWaitForRundownProtectionRelease(ptr) ExfWaitForRundownProtectionRelease
-@ fastcall ExWaitForRundownProtectionReleaseCacheAware(ptr) ExfWaitForRundownProtectionReleaseCacheAware
+@ fastcall ExWaitForRundownProtectionReleaseCacheAware(ptr)
 @ extern ExWindowStationObjectType
 @ fastcall ExfAcquirePushLockExclusive(ptr)
 @ fastcall ExfAcquirePushLockShared(ptr)
@@ -579,7 +579,7 @@
 @ stdcall KeDeregisterNmiCallback(ptr)
 @ stdcall KeDetachProcess()
 @ stdcall KeDisconnectInterrupt(ptr)
-@ stdcall KeEnterCriticalRegion() _KeEnterCriticalRegion
+@ stdcall KeEnterCriticalRegion()
 @ stdcall KeEnterGuardedRegion() _KeEnterGuardedRegion
 @ stdcall KeEnterKernelDebugger()
 ;@ stdcall -arch=x86_64 KeExpandKernelStackAndCallout(ptr ptr double)
@@ -629,7 +629,7 @@
 @ stdcall -arch=i386,arm KeIsExecutingDpc()
 @ stdcall KeIsWaitListEmpty(ptr)
 ;@ cdecl -arch=x86_64 KeLastBranchMSR()
-@ stdcall KeLeaveCriticalRegion() _KeLeaveCriticalRegion
+@ stdcall KeLeaveCriticalRegion()
 @ stdcall KeLeaveGuardedRegion() _KeLeaveGuardedRegion
 @ extern KeLoaderBlock
 @ cdecl -arch=x86_64 -private KeLowerIrql(long) KxLowerIrql
@@ -1655,3 +1655,97 @@
 @ stdcall -arch=arm __rt_udiv()
 @ stdcall -arch=arm __rt_udiv64()
 @ stdcall -arch=arm __rt_srsh()
+
+; --- HAL exports, part of the unified kernel image ----------------
+; The Xbox kernel is one image: the HAL is linked into it (halxbox is a
+; static library).  These are
+; real kernel exports, satisfied by the in-kernel HAL.  Generated from
+; hal/hal.spec (i386 subset; the partition Io* exports are already kernel
+; exports and the KdComPortInUse data export is omitted).
+@ fastcall -arch=i386 ExAcquireFastMutex(ptr)
+@ fastcall -arch=i386 ExReleaseFastMutex(ptr)
+@ fastcall -arch=i386 ExTryToAcquireFastMutex(ptr)
+@ stdcall HalAcquireDisplayOwnership(ptr)
+@ stdcall HalAdjustResourceList(ptr)
+@ stdcall HalAllProcessorsStarted()
+@ stdcall HalAllocateAdapterChannel(ptr ptr long ptr)
+@ stdcall HalAllocateCommonBuffer(ptr long ptr long)
+@ stdcall HalAllocateCrashDumpRegisters(ptr ptr)
+@ stdcall HalAssignSlotResources(ptr ptr ptr ptr long long long ptr)
+@ stdcall -arch=i386,arm HalBeginSystemInterrupt(long long ptr)
+@ stdcall HalCalibratePerformanceCounter(ptr long long)
+@ fastcall HalClearSoftwareInterrupt(long)
+@ stdcall HalDisableSystemInterrupt(long long)
+@ stdcall HalDisplayString(str)
+@ stdcall HalEnableSystemInterrupt(long long long)
+@ stdcall -arch=i386,arm HalEndSystemInterrupt(long long)
+@ stdcall HalFlushCommonBuffer(long long long long long)
+@ stdcall HalFreeCommonBuffer(ptr long long long ptr long)
+@ stdcall HalGetAdapter(ptr ptr)
+@ stdcall HalGetBusData(long long long ptr long)
+@ stdcall HalGetBusDataByOffset(long long long ptr long long)
+@ stdcall HalGetEnvironmentVariable(str long str)
+@ stdcall HalGetInterruptVector(long long long long ptr ptr)
+@ stdcall -arch=i386,x86_64 HalHandleNMI(ptr)
+@ stdcall HalInitSystem(long ptr)
+@ stdcall HalInitializeProcessor(long ptr)
+@ stdcall HalMakeBeep(long)
+@ stdcall HalProcessorIdle()
+@ stdcall HalQueryDisplayParameters(ptr ptr ptr ptr)
+@ stdcall HalQueryRealTimeClock(ptr)
+@ stdcall HalReadDmaCounter(ptr)
+@ stdcall HalReportResourceUsage()
+@ stdcall HalRequestIpi(long)
+@ fastcall HalRequestSoftwareInterrupt(long)
+@ stdcall HalReturnToFirmware(long)
+@ stdcall HalSetBusData(long long long ptr long)
+@ stdcall HalSetBusDataByOffset(long long long ptr long long)
+@ stdcall HalSetDisplayParameters(long long)
+@ stdcall HalSetEnvironmentVariable(str str)
+@ stdcall HalSetProfileInterval(long)
+@ stdcall HalSetRealTimeClock(ptr)
+@ stdcall HalSetTimeIncrement(long)
+@ stdcall HalStartNextProcessor(ptr ptr)
+@ stdcall HalStartProfileInterrupt(long)
+@ stdcall HalStopProfileInterrupt(long)
+@ fastcall HalSystemVectorDispatchEntry(long long long)
+@ stdcall HalTranslateBusAddress(long long long long ptr ptr)
+@ stdcall IoFlushAdapterBuffers(ptr ptr ptr ptr long long)
+@ stdcall IoFreeAdapterChannel(ptr)
+@ stdcall IoFreeMapRegisters(ptr ptr long)
+@ stdcall IoMapTransfer(ptr ptr ptr ptr ptr long)
+@ fastcall -arch=i386,arm KeAcquireInStackQueuedSpinLock(ptr ptr)
+@ fastcall -arch=i386,arm KeAcquireInStackQueuedSpinLockRaiseToSynch(ptr ptr)
+@ fastcall -arch=i386,arm KeAcquireQueuedSpinLock(ptr)
+@ fastcall -arch=i386,arm KeAcquireQueuedSpinLockRaiseToSynch(ptr)
+@ stdcall -arch=i386,arm KeAcquireSpinLock(ptr ptr)
+@ fastcall -arch=i386,arm KeAcquireSpinLockRaiseToSynch(ptr)
+@ stdcall KeFlushWriteBuffer()
+@ stdcall -arch=i386,arm KeGetCurrentIrql()
+@ stdcall -arch=i386,arm KeLowerIrql(long)
+@ stdcall KeQueryPerformanceCounter(ptr)
+@ stdcall -arch=i386,arm KeRaiseIrql(long ptr)
+@ stdcall -arch=i386,arm KeRaiseIrqlToDpcLevel()
+@ stdcall -arch=i386,arm KeRaiseIrqlToSynchLevel()
+@ fastcall -arch=i386,arm KeReleaseInStackQueuedSpinLock(ptr)
+@ fastcall -arch=i386,arm KeReleaseQueuedSpinLock(ptr long)
+@ stdcall -arch=i386,arm KeReleaseSpinLock(ptr long)
+@ stdcall KeStallExecutionProcessor(long)
+@ fastcall -arch=i386,arm KeTryToAcquireQueuedSpinLock(long ptr)
+@ fastcall -arch=i386,arm KeTryToAcquireQueuedSpinLockRaiseToSynch(long ptr)
+@ fastcall -arch=i386,arm KfAcquireSpinLock(ptr)
+@ fastcall -arch=i386,arm KfLowerIrql(long)
+@ fastcall -arch=i386,arm KfRaiseIrql(long)
+@ fastcall -arch=i386,arm KfReleaseSpinLock(ptr long)
+@ stdcall -arch=i386,arm READ_PORT_BUFFER_UCHAR(ptr ptr long)
+@ stdcall -arch=i386,arm READ_PORT_BUFFER_ULONG(ptr ptr long)
+@ stdcall -arch=i386,arm READ_PORT_BUFFER_USHORT(ptr ptr long)
+@ stdcall -arch=i386,arm READ_PORT_UCHAR(ptr)
+@ stdcall -arch=i386,arm READ_PORT_ULONG(ptr)
+@ stdcall -arch=i386,arm READ_PORT_USHORT(ptr)
+@ stdcall -arch=i386,arm WRITE_PORT_BUFFER_UCHAR(ptr ptr long)
+@ stdcall -arch=i386,arm WRITE_PORT_BUFFER_ULONG(ptr ptr long)
+@ stdcall -arch=i386,arm WRITE_PORT_BUFFER_USHORT(ptr ptr long)
+@ stdcall -arch=i386,arm WRITE_PORT_UCHAR(ptr long)
+@ stdcall -arch=i386,arm WRITE_PORT_ULONG(ptr long)
+@ stdcall -arch=i386,arm WRITE_PORT_USHORT(ptr long)

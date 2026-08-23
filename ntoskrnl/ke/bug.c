@@ -492,6 +492,18 @@ VOID
 NTAPI
 KiBugCheckDebugBreak(IN ULONG StatusCode)
 {
+#ifdef SARCH_XBOX
+    /* No in-kernel debugger to break to on Xbox.  The original SEH-wrapped
+     * DbgBreakPointWithStatus path emits int 3 then catches the breakpoint
+     * via _SEH2_EXCEPT -- PSEH3's unwind invokes NtContinue, which deref's
+     * Thread->TrapFrame (NULL on kernel system threads) and triple-faults.
+     * FIRST (pre-bluescreen) returns so flow reaches KiDisplayBlueScreen;
+     * SECOND (post-bluescreen) halts in place of the int3 + ASSERT(FALSE)
+     * tail, since both hit the same cascade. */
+    if (StatusCode == DBG_STATUS_BUGCHECK_FIRST) return;
+    _disable();
+    while (TRUE) { __halt(); }
+#else
     /*
      * Wrap this in SEH so we don't crash if
      * there is no debugger or if it disconnected
@@ -511,6 +523,7 @@ DoBreak:
 
     /* Break again if this wasn't first try */
     if (StatusCode != DBG_STATUS_BUGCHECK_FIRST) goto DoBreak;
+#endif
 }
 
 PCHAR
@@ -618,6 +631,13 @@ KiDisplayBlueScreen(IN ULONG MessageId,
     ULONG BugCheckCode = (ULONG)KiBugCheckData[0];
     BOOLEAN Enable = TRUE;
     CHAR AnsiName[107];
+
+    /* Serial copy of the screen header: bugchecks must be diagnosable
+     * from logs alone. */
+    DPRINT1("BUGCHECK %08lx (%p, %p, %p, %p)\n",
+            BugCheckCode, (PVOID)KiBugCheckData[1],
+            (PVOID)KiBugCheckData[2], (PVOID)KiBugCheckData[3],
+            (PVOID)KiBugCheckData[4]);
 
     /* Enable headless support for bugcheck */
     HeadlessDispatch(HeadlessCmdStartBugCheck,
@@ -752,14 +772,20 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
         HalReturnToFirmware(HalRebootRoutine);
     }
 
-    /* Save the IRQL and set hardware trigger */
+#ifndef SARCH_XBOX
+    /* Save the IRQL and set hardware trigger -- both are read by KD only */
     Prcb->DebuggerSavedIRQL = KeGetCurrentIrql();
     InterlockedIncrement((PLONG)&KiHardwareTrigger);
+#endif
 
     /* Capture the CPU Context */
     RtlCaptureContext(&Prcb->ProcessorState.ContextFrame);
     KiSaveProcessorControlState(&Prcb->ProcessorState);
+#ifndef SARCH_XBOX
+    /* Snapshot the context for the later KD save-back; no KD on Xbox so
+     * the round-trip into the local Context is wasted there. */
     Context = Prcb->ProcessorState.ContextFrame;
+#endif
 
     /* FIXME: Call the Watchdog if it's registered */
 
@@ -769,11 +795,13 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
         /* These bug checks already have detailed messages, keep them */
         case UNEXPECTED_KERNEL_MODE_TRAP:
         case DRIVER_CORRUPTED_EXPOOL:
+#ifndef SARCH_XBOX
         case ACPI_BIOS_ERROR:
         case ACPI_BIOS_FATAL_ERROR:
         case THREAD_STUCK_IN_DEVICE_DRIVER:
         case DATA_BUS_ERROR:
         case FAT_FILE_SYSTEM:
+#endif
         case NO_MORE_SYSTEM_PTES:
         case INACCESSIBLE_BOOT_DEVICE:
 
@@ -790,6 +818,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             MessageId = KMODE_EXCEPTION_NOT_HANDLED;
             break;
 
+#ifndef SARCH_XBOX
         /* File-system errors */
         case NTFS_FILE_SYSTEM:
 
@@ -803,6 +832,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             /* Use generic corruption message */
             MessageId = DRIVER_CORRUPTED_EXPOOL;
             break;
+#endif
 
         /* Check if this is a signature check failure */
         case STATUS_SYSTEM_IMAGE_BAD_SIGNATURE:
@@ -854,6 +884,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
         /* Wrong IRQL */
         case IRQL_NOT_LESS_OR_EQUAL:
         {
+#ifndef SARCH_XBOX
             /*
              * The NT kernel has 3 special sections:
              * MISYSPTE, POOLMI and POOLCODE. The bug check code can
@@ -910,10 +941,13 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
 
             /* Clear Pc so we don't look it up later */
             Pc = NULL;
+#endif /* SARCH_XBOX: no third-party drivers to blame */
             break;
         }
 
-        /* Hard error */
+#ifndef SARCH_XBOX
+        /* Hard error -- raised from usermode hard-error paths that
+         * don't exist on Xbox. */
         case FATAL_UNHANDLED_HARD_ERROR:
         {
             /* Copy bug check data from hard error */
@@ -930,10 +964,12 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             HardErrMessage = (PCHAR)BugCheckParameter4;
             break;
         }
+#endif
 
         /* Page fault */
         case PAGE_FAULT_IN_NONPAGED_AREA:
         {
+#ifndef SARCH_XBOX
             /* Assume no driver */
             DriverBase = NULL;
 
@@ -993,9 +1029,11 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
                         DRIVER_UNLOADED_WITHOUT_CANCELLING_PENDING_OPERATIONS;
                 }
             }
+#endif /* SARCH_XBOX: no special pool, no unloaded drivers */
             break;
         }
 
+#ifndef SARCH_XBOX
         /* Check if the driver forgot to unlock pages */
         case DRIVER_LEFT_LOCKED_PAGES_IN_PROCESS:
 
@@ -1017,6 +1055,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             /* The name is in Parameter 3 */
             KiBugCheckDriver = (PVOID)BugCheckParameter3;
             break;
+#endif
 
         /* Anything else */
         default:
@@ -1042,6 +1081,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
         }
     }
 
+#ifndef SARCH_XBOX
     /* Check if we need to save the context for KD */
     if (!KdPitchDebugger) KdDebuggerDataBlock.SavedContext = (ULONG_PTR)&Context;
 
@@ -1079,6 +1119,7 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             KiBugCheckDebugBreak(DBG_STATUS_BUGCHECK_FIRST);
         }
     }
+#endif /* SARCH_XBOX: no attached kernel debugger */
 
     /* Raise IRQL to HIGH_LEVEL */
     _disable();
@@ -1118,8 +1159,10 @@ KeBugCheckWithTf(IN ULONG BugCheckCode,
             InbvDisplayString("\r\n");
         }
 
-        /* Save the context */
+#ifndef SARCH_XBOX
+        /* Save the context (needed by KD/crash-dump readers, both absent on Xbox) */
         Prcb->ProcessorState.ContextFrame = Context;
+#endif
 
         /* FIXME: Support Triage Dump */
 

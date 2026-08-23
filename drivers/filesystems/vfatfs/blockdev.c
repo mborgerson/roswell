@@ -118,6 +118,9 @@ again:
         Status = IoStatus.Status;
     }
 
+#ifndef SARCH_XBOX
+    /* FATX volumes are fixed media; the storage stack never sets
+     * DO_VERIFY_VOLUME, so the verify-and-retry arm is unreachable. */
     if (Status == STATUS_VERIFY_REQUIRED)
     {
         PDEVICE_OBJECT DeviceToVerify;
@@ -135,6 +138,7 @@ again:
             goto again;
         }
     }
+#endif
 
     if (!NT_SUCCESS(Status))
     {
@@ -224,6 +228,8 @@ again:
         Status = IrpContext->Irp->IoStatus.Status;
     }
 
+#ifndef SARCH_XBOX
+    /* DO_VERIFY_VOLUME unreachable on Xbox (fixed media); see above. */
     if (Status == STATUS_VERIFY_REQUIRED)
     {
         PDEVICE_OBJECT DeviceToVerify;
@@ -241,6 +247,7 @@ again:
             goto again;
         }
     }
+#endif
 
     DPRINT("%x\n", Status);
     return Status;
@@ -301,6 +308,8 @@ again:
         Status = IoStatus.Status;
     }
 
+#ifndef SARCH_XBOX
+    /* DO_VERIFY_VOLUME unreachable on Xbox (fixed media); see above. */
     if (Status == STATUS_VERIFY_REQUIRED)
     {
         PDEVICE_OBJECT DeviceToVerify;
@@ -318,6 +327,7 @@ again:
             goto again;
         }
     }
+#endif
 
     if (!NT_SUCCESS(Status))
     {
@@ -405,6 +415,8 @@ again:
         Status = IrpContext->Irp->IoStatus.Status;
     }
 
+#ifndef SARCH_XBOX
+    /* DO_VERIFY_VOLUME unreachable on Xbox (fixed media); see above. */
     if (Status == STATUS_VERIFY_REQUIRED)
     {
         PDEVICE_OBJECT DeviceToVerify;
@@ -422,6 +434,7 @@ again:
             goto again;
         }
     }
+#endif
 
     return Status;
 }
@@ -486,6 +499,8 @@ again:
         Status = IoStatus.Status;
     }
 
+#ifndef SARCH_XBOX
+    /* DO_VERIFY_VOLUME unreachable on Xbox (fixed media); see above. */
     if (Status == STATUS_VERIFY_REQUIRED)
     {
         PDEVICE_OBJECT DeviceToVerify;
@@ -504,6 +519,7 @@ again:
             goto again;
         }
     }
+#endif
 
     if (OutputBufferSize)
     {

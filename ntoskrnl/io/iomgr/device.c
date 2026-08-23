@@ -725,6 +725,7 @@ IopVerifyDeviceObjectOnStack(IN PDEVICE_OBJECT BaseDeviceObject,
     return Result;
 }
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI
 IopCreateSecurityDescriptorPerType(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
@@ -773,6 +774,7 @@ IopCreateSecurityDescriptorPerType(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
     /* Done */
     return Status;
 }
+#endif
 
 PSECURITY_DESCRIPTOR
 NTAPI
@@ -795,6 +797,21 @@ IopCreateDefaultDeviceSecurityDescriptor(IN DEVICE_TYPE DeviceType,
     if (OutputFlags) *OutputFlags = 0;
 
     *OutputDacl = NULL;
+
+#ifdef SARCH_XBOX
+    /* No SRM on Xbox; SePublic* DACLs are NULL stubs.  Return the input
+       SD unchanged -- caller treats it as "use whatever was passed in". */
+    UNREFERENCED_PARAMETER(DeviceType);
+    UNREFERENCED_PARAMETER(DeviceCharacteristics);
+    UNREFERENCED_PARAMETER(HasDeviceName);
+    UNREFERENCED_PARAMETER(Dacl);
+    UNREFERENCED_PARAMETER(AceId);
+    UNREFERENCED_PARAMETER(Status);
+    UNREFERENCED_PARAMETER(Ace);
+    UNREFERENCED_PARAMETER(AdminsSet);
+    UNREFERENCED_PARAMETER(WorldSet);
+    return SecurityDescriptor;
+#else
 
     /* For FSD, easy use SePublicDefaultUnrestrictedDacl */
     if (DeviceType == FILE_DEVICE_TAPE_FILE_SYSTEM ||
@@ -887,6 +904,7 @@ Quit:
     }
 
     return SecurityDescriptor;
+#endif /* SARCH_XBOX */
 }
 
 /* PUBLIC FUNCTIONS ***********************************************************/
@@ -1130,8 +1148,10 @@ IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
     DeviceObjectExtension->Type = IO_TYPE_DEVICE_OBJECT_EXTENSION;
     DeviceObjectExtension->Size = 0;
 
+#ifndef SARCH_XBOX
     /* Initialize with Power Manager */
     PoInitializeDeviceObject(DeviceObjectExtension);
+#endif
 
     /* Link the Object and Extension */
     DeviceObjectExtension->DeviceObject = CreatedDeviceObject;
@@ -1229,8 +1249,10 @@ IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
     CreatedDeviceObject->DriverObject = DriverObject;
     IopEditDeviceList(DriverObject, CreatedDeviceObject, IopAdd);
 
+#ifndef SARCH_XBOX
     /* Link with the power manager */
     if (CreatedDeviceObject->Vpb) PoVolumeDevice(CreatedDeviceObject);
+#endif
 
     /* Close the temporary handle and return to caller */
     ObCloseHandle(TempHandle, KernelMode);
@@ -1279,8 +1301,10 @@ IoDeleteDevice(IN PDEVICE_OBJECT DeviceObject)
     /* Set the pending delete flag */
     IoGetDevObjExtension(DeviceObject)->ExtensionFlags |= DOE_DELETE_PENDING;
 
+#ifndef SARCH_XBOX
     /* Unlink with the power manager */
     if (DeviceObject->Vpb) PoRemoveVolumeDevice(DeviceObject);
+#endif
 
     /* Check if the device object can be unloaded */
     if (!DeviceObject->ReferenceCount) IopUnloadDevice(DeviceObject);
@@ -1672,6 +1696,11 @@ NTSTATUS
 NTAPI
 IoRegisterLastChanceShutdownNotification(IN PDEVICE_OBJECT DeviceObject)
 {
+#ifdef SARCH_XBOX
+    /* No IRP-based shutdown chain on Xbox; titles use HalRegisterShutdownNotification. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    return STATUS_SUCCESS;
+#else
     PSHUTDOWN_ENTRY Entry;
 
     /* Allocate the shutdown entry */
@@ -1694,6 +1723,7 @@ IoRegisterLastChanceShutdownNotification(IN PDEVICE_OBJECT DeviceObject)
     /* Set the shutdown registered flag */
     DeviceObject->Flags |= DO_SHUTDOWN_REGISTERED;
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
@@ -1703,6 +1733,10 @@ NTSTATUS
 NTAPI
 IoRegisterShutdownNotification(PDEVICE_OBJECT DeviceObject)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DeviceObject);
+    return STATUS_SUCCESS;
+#else
     PSHUTDOWN_ENTRY Entry;
 
     /* Allocate the shutdown entry */
@@ -1725,6 +1759,7 @@ IoRegisterShutdownNotification(PDEVICE_OBJECT DeviceObject)
     /* Set the shutdown registered flag */
     DeviceObject->Flags |= DO_SHUTDOWN_REGISTERED;
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
@@ -1734,6 +1769,11 @@ VOID
 NTAPI
 IoUnregisterShutdownNotification(PDEVICE_OBJECT DeviceObject)
 {
+#ifdef SARCH_XBOX
+    /* Mirror IoRegisterShutdownNotification's no-op behaviour. */
+    DeviceObject->Flags &= ~DO_SHUTDOWN_REGISTERED;
+    return;
+#else
     PSHUTDOWN_ENTRY ShutdownEntry;
     PLIST_ENTRY NextEntry;
     KIRQL OldIrql;
@@ -1798,6 +1838,7 @@ IoUnregisterShutdownNotification(PDEVICE_OBJECT DeviceObject)
 
     /* Release the shutdown lock */
     KeReleaseSpinLock(&ShutdownListLock, OldIrql);
+#endif
 }
 
 /*

@@ -17,12 +17,17 @@
 /* WDK HAL Compilation hack */
 #include <excpt.h>
 #include <ntdef.h>
-#ifndef _MINIHAL_
-#undef NTSYSAPI
-#define NTSYSAPI __declspec(dllimport)
-#else
+#if defined(_MINIHAL_) || defined(_NTSYSTEM_)
+/* The in-kernel HAL (built with _NTSYSTEM_ and linked into the kernel
+ * image, not a separate hal.dll) and the minihal reference the kernel's own
+ * NTSYSAPI routines directly, not as hal.dll-style imports.  Without this the
+ * hack below would force dllimport and orphan e.g. RtlAssert / Zw* when the
+ * HAL is folded into ntoskrnl. */
 #undef NTSYSAPI
 #define NTSYSAPI
+#else
+#undef NTSYSAPI
+#define NTSYSAPI __declspec(dllimport)
 #endif
 
 /* IFS/DDK/NDK Headers */

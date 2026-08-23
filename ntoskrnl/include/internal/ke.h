@@ -466,7 +466,8 @@ KeInitThread(
     IN PVOID StartContext,
     IN PCONTEXT Context,
     IN PVOID Teb,
-    IN PKPROCESS Process
+    IN PKPROCESS Process,
+    IN SIZE_T StackSize  /* 0 means KERNEL_STACK_SIZE */
 );
 
 VOID
@@ -1046,6 +1047,11 @@ KiQuantumEnd(
     VOID
 );
 
+/* The idle thread parks here for the system's lifetime.  Never inline:
+ * the only direct caller is in the INIT section, and an inlined copy
+ * would leave the idle thread executing pages that
+ * MiFreeInitializationCode discards. */
+DECLSPEC_NOINLINE
 DECLSPEC_NORETURN
 VOID
 KiIdleLoop(

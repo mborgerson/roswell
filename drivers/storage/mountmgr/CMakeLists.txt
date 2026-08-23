@@ -9,9 +9,10 @@ list(APPEND SOURCE
     uniqueid.c
     mntmgr.h)
 
-add_library(mountmgr MODULE ${SOURCE} mountmgr.rc)
+# the mount manager is linked into the kernel image as a static
+# library; ntoskrnl runs MountmgrDriverEntry via IoCreateDriver.
+add_library(mountmgr ${SOURCE})
 target_link_libraries(mountmgr wdmguid ioevent memcmp)
-set_module_type(mountmgr kernelmodedriver)
-add_importlibs(mountmgr ntoskrnl hal)
 add_pch(mountmgr mntmgr.h SOURCE)
-add_cd_file(TARGET mountmgr DESTINATION reactos/system32/drivers NO_CAB FOR all)
+target_compile_definitions(mountmgr PRIVATE DriverEntry=MountmgrDriverEntry)
+add_dependencies(mountmgr psdk xdk bugcodes)

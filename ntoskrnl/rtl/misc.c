@@ -86,6 +86,11 @@ BOOLEAN
 NTAPI
 RtlGetNtProductType(OUT PNT_PRODUCT_TYPE ProductType)
 {
+#ifdef SARCH_XBOX
+    /* Product type is fixed; no registry on Xbox. */
+    *ProductType = NtProductWinNt;
+    return TRUE;
+#else
     HANDLE Key;
     BOOLEAN Success;
     ULONG ReturnedLength;
@@ -203,6 +208,7 @@ Exit:
 
     ExFreePoolWithTag(BufferKey, PRODUCT_TAG);
     return Success;
+#endif
 }
 
 #if !defined(_M_IX86)

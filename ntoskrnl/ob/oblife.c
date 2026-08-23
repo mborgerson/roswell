@@ -183,6 +183,7 @@ ObpDeleteObject(IN PVOID Object,
         RtlInitEmptyUnicodeString(&NameInfo->Name, NULL, 0);
     }
 
+#ifndef SARCH_XBOX
     /* Check if we have a security descriptor */
     if (Header->SecurityDescriptor)
     {
@@ -198,6 +199,7 @@ ObpDeleteObject(IN PVOID Object,
                                                NULL);
         ObpCalloutEnd(CalloutIrql, "Security", ObjectType, Object);
     }
+#endif
 
     /* Check if we have a delete procedure */
     if (ObjectType->TypeInfo.DeleteProcedure)
@@ -378,6 +380,43 @@ ObpCaptureObjectName(IN OUT PUNICODE_STRING CapturedName,
                      IN KPROCESSOR_MODE AccessMode,
                      IN BOOLEAN UseLookaside)
 {
+#ifdef SARCH_XBOX
+    /* Kernel-only callers; skip the usermode probe + SEH. */
+    NTSTATUS Status = STATUS_SUCCESS;
+    ULONG StringLength;
+    PWCHAR StringBuffer = NULL;
+    UNICODE_STRING LocalName;
+    PAGED_CODE();
+    UNREFERENCED_PARAMETER(AccessMode);
+
+    RtlInitEmptyUnicodeString(CapturedName, NULL, 0);
+    LocalName = *ObjectName;
+    StringLength = LocalName.Length;
+    if (StringLength)
+    {
+        if ((StringLength & (sizeof(WCHAR) - 1)) ||
+            (StringLength == (MAXUSHORT - sizeof(UNICODE_NULL) + 1)))
+        {
+            Status = STATUS_OBJECT_NAME_INVALID;
+        }
+        else
+        {
+            StringBuffer = ObpAllocateObjectNameBuffer(StringLength,
+                                                      UseLookaside,
+                                                      CapturedName);
+            if (!StringBuffer)
+            {
+                Status = STATUS_INSUFFICIENT_RESOURCES;
+            }
+            else
+            {
+                RtlCopyMemory(StringBuffer, LocalName.Buffer, StringLength);
+                StringBuffer[StringLength / sizeof(WCHAR)] = UNICODE_NULL;
+            }
+        }
+    }
+    return Status;
+#else
     NTSTATUS Status = STATUS_SUCCESS;
     ULONG StringLength;
     PWCHAR _SEH2_VOLATILE StringBuffer = NULL;
@@ -448,6 +487,7 @@ ObpCaptureObjectName(IN OUT PUNICODE_STRING CapturedName,
 
     /* Return */
     return Status;
+#endif
 }
 
 NTSTATUS
@@ -469,6 +509,30 @@ ObpCaptureObjectCreateInformation(IN POBJECT_ATTRIBUTES ObjectAttributes,
     /* Zero out the Capture Data */
     RtlZeroMemory(ObjectCreateInfo, sizeof(OBJECT_CREATE_INFORMATION));
 
+#ifdef SARCH_XBOX
+    /* Kernel-only callers; no probes or SD/QoS capture. */
+    UNREFERENCED_PARAMETER(SdCharge);
+    UNREFERENCED_PARAMETER(QuotaInfoSize);
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(SecurityQos);
+    if (ObjectAttributes)
+    {
+        if ((ObjectAttributes->Length != sizeof(OBJECT_ATTRIBUTES)) ||
+            (ObjectAttributes->Attributes & ~OBJ_VALID_KERNEL_ATTRIBUTES))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ObjectCreateInfo->RootDirectory = ObjectAttributes->RootDirectory;
+        ObjectCreateInfo->Attributes =
+            ObjectAttributes->Attributes & OBJ_VALID_KERNEL_ATTRIBUTES;
+        LocalObjectName = ObjectAttributes->ObjectName;
+    }
+    else
+    {
+        LocalObjectName = NULL;
+    }
+#else
     /* SEH everything here for protection */
     _SEH2_TRY
     {
@@ -567,6 +631,7 @@ ObpCaptureObjectCreateInformation(IN POBJECT_ATTRIBUTES ObjectAttributes,
         _SEH2_YIELD(return _SEH2_GetExceptionCode());
     }
     _SEH2_END;
+#endif
 
     /* Now check if the Object Attributes had an Object Name */
     if (LocalObjectName)
@@ -654,6 +719,10 @@ ObpAllocateObject(IN POBJECT_CREATE_INFORMATION ObjectCreateInfo,
     else
     {
         /* Check if we have quota */
+#ifdef SARCH_XBOX
+        /* Single (system) process; only OBJ_EXCLUSIVE triggers quota. */
+        if (ObjectCreateInfo->Attributes & OBJ_EXCLUSIVE)
+#else
         if ((((ObjectCreateInfo->PagedPoolCharge !=
                ObjectType->TypeInfo.DefaultPagedPoolCharge) ||
               (ObjectCreateInfo->NonPagedPoolCharge !=
@@ -661,6 +730,7 @@ ObpAllocateObject(IN POBJECT_CREATE_INFORMATION ObjectCreateInfo,
               (ObjectCreateInfo->SecurityDescriptorCharge > 2048)) &&
              (PsGetCurrentProcess() != PsInitialSystemProcess)) ||
             (ObjectCreateInfo->Attributes & OBJ_EXCLUSIVE))
+#endif
         {
             /* Set quota size */
             QuotaSize = sizeof(OBJECT_HEADER_QUOTA_INFO);
@@ -951,6 +1021,14 @@ ObQueryTypeInfo(
     _In_ ULONG Length,
     _Out_ PULONG ReturnLength)
 {
+#ifdef SARCH_XBOX
+    /* Only NtQueryObject calls this; it is stubbed on Xbox. */
+    UNREFERENCED_PARAMETER(ObjectType);
+    UNREFERENCED_PARAMETER(ObjectTypeInfo);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(ReturnLength);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     NTSTATUS Status = STATUS_SUCCESS;
     PWSTR InfoBuffer;
 
@@ -1029,6 +1107,7 @@ ObQueryTypeInfo(
 
     /* Return status to caller */
     return Status;
+#endif
 }
 
 
@@ -1412,6 +1491,9 @@ ObDeleteCapturedInsertInfo(IN PVOID Object)
     }
 }
 
+/* Object types are never deleted; the Type type carries no delete
+ * procedure on Xbox. */
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 ObpDeleteObjectType(IN PVOID Object)
@@ -1429,6 +1511,7 @@ ObpDeleteObjectType(IN PVOID Object)
     /* Delete our main mutex */
     ExDeleteResourceLite(&ObjectType->Mutex);
 }
+#endif
 
 /*++
 * @name ObMakeTemporaryObject
@@ -1569,6 +1652,14 @@ NtQueryObject(IN HANDLE ObjectHandle,
               IN ULONG Length,
               OUT PULONG ResultLength OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ObjectHandle);
+    UNREFERENCED_PARAMETER(ObjectInformationClass);
+    UNREFERENCED_PARAMETER(ObjectInformation);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(ResultLength);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     OBJECT_HANDLE_INFORMATION HandleInfo;
     POBJECT_HEADER ObjectHeader = NULL;
     POBJECT_HANDLE_ATTRIBUTE_INFORMATION HandleFlags;
@@ -1794,6 +1885,7 @@ NtQueryObject(IN HANDLE ObjectHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*++
@@ -1826,6 +1918,13 @@ NtSetInformationObject(IN HANDLE ObjectHandle,
                        IN PVOID ObjectInformation,
                        IN ULONG Length)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ObjectHandle);
+    UNREFERENCED_PARAMETER(ObjectInformationClass);
+    UNREFERENCED_PARAMETER(ObjectInformation);
+    UNREFERENCED_PARAMETER(Length);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     NTSTATUS Status;
     OBP_SET_HANDLE_ATTRIBUTES_CONTEXT Context;
     PVOID ObjectTable;
@@ -1961,6 +2060,7 @@ NtSetInformationObject(IN HANDLE ObjectHandle,
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /* EOF */

@@ -69,6 +69,8 @@ VfatCleanupFile(
         pFcb->OpenHandleCount--;
         DeviceExt->OpenHandleCount--;
 
+#ifndef SARCH_XBOX
+        /* No lock entry points on the Xbox ABI; no file lock can exist. */
         if (!vfatFCBIsDirectory(pFcb) &&
             FsRtlAreThereCurrentFileLocks(&pFcb->FileLock))
         {
@@ -78,6 +80,7 @@ VfatCleanupFile(
                                IoGetRequestorProcess(IrpContext->Irp),
                                NULL);
         }
+#endif
 
         if (BooleanFlagOn(pFcb->Flags, FCB_IS_DIRTY))
         {

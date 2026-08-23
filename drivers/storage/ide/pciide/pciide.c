@@ -10,7 +10,12 @@
 
 #define NDEBUG
 #include <debug.h>
+#include <ndk/section_attribs.h>
 
+#ifndef SARCH_XBOX
+/* The bus extension stores this legacy miniport callback set but never
+ * invokes it: controller matching goes through the internal chipset
+ * properties path instead. */
 IDE_CHANNEL_STATE NTAPI
 PciIdeChannelEnabled(
 	IN PVOID DeviceExtension,
@@ -84,7 +89,9 @@ PciIdeGetControllerProperties(
 
 	return STATUS_SUCCESS;
 }
+#endif /* SARCH_XBOX */
 
+CODE_SEG("INIT")
 NTSTATUS NTAPI
 DriverEntry(
 	IN PDRIVER_OBJECT DriverObject,
@@ -95,7 +102,11 @@ DriverEntry(
 	Status = PciIdeXInitialize(
 		DriverObject,
 		RegistryPath,
+#ifdef SARCH_XBOX
+		NULL,
+#else
 		PciIdeGetControllerProperties,
+#endif
 		0);
 
 	return Status;

@@ -180,6 +180,13 @@ HalpRegisterInternalBusHandlers(VOID)
         Bus->TranslateBusAddress = HalpTranslateSystemBusAddress;
     }
 
+#ifndef SARCH_XBOX
+    /* No HalGetBusData(Cmos)/HalSetBusData(Cmos) caller exists; the RTC
+     * goes through HalQueryRealTimeClock/HalSetRealTimeClock directly.
+     * Skipping the registration lets the linker drop HalpcGetCmosData /
+     * HalpcSetCmosData; an unregistered bus just fails the handler
+     * lookup. */
+
     /* Allocate the CMOS bus */
     Bus = HalpAllocateBusHandler(InterfaceTypeUndefined,
                                  Cmos,
@@ -207,6 +214,7 @@ HalpRegisterInternalBusHandlers(VOID)
         Bus->GetBusData = HalpcGetCmosData;
         Bus->SetBusData = HalpcSetCmosData;
     }
+#endif
 
     /* Allocate ISA bus */
     Bus = HalpAllocateBusHandler(Isa,
@@ -234,6 +242,11 @@ NTSTATUS
 NTAPI
 HalpMarkChipsetDecode(BOOLEAN OverrideEnable)
 {
+#ifdef SARCH_XBOX
+    /* No PnP BIOS / chipset-decode registry path on Xbox. */
+    UNREFERENCED_PARAMETER(OverrideEnable);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     UNICODE_STRING KeyString;
     ULONG Data = OverrideEnable;
@@ -275,6 +288,7 @@ HalpMarkChipsetDecode(BOOLEAN OverrideEnable)
 
     /* Return status */
     return Status;
+#endif
 }
 
 CODE_SEG("INIT")
@@ -298,9 +312,19 @@ HalpAllocateAndInitPciBusHandler(IN ULONG PciType,
     /* Set it up */
     Bus->GetBusData = HalpGetPCIData;
     Bus->SetBusData = HalpSetPCIData;
+#ifndef SARCH_XBOX
+    /* Xbox never reaches the PnP-bus dispatch surface: the HAL PnP root device
+     * is created but never enumerated (see HalpDispatchPnp body gate), no
+     * scsiport/floppy/pci.sys driver ships, and HalAssignSlotResources /
+     * HalAdjustResourceList / HalGetInterruptVector(Isa) callers are gated
+     * out elsewhere.  Skipping these address-taken assignments lets the
+     * linker drop HalpAssignPCISlotResources / HalpAdjustPCIResourceList /
+     * HalpGetPCIIntOnISABus / HalpGetISAFixedPCIIrq / HalpPCI{Pin2ISALine,
+     * ISALine2Pin}. */
     Bus->GetInterruptVector = HalpGetPCIIntOnISABus;
     Bus->AdjustResourceList = HalpAdjustPCIResourceList;
     Bus->AssignSlotResources = HalpAssignPCISlotResources;
+#endif
     Bus->BusAddresses->Dma.Limit = 0;
 
     /* Get our custom bus data */
@@ -311,10 +335,14 @@ HalpAllocateAndInitPciBusHandler(IN ULONG PciType,
     BusData->CommonData.Version = PCI_DATA_VERSION;
     BusData->CommonData.ReadConfig = HalpReadPCIConfig;
     BusData->CommonData.WriteConfig = HalpWritePCIConfig;
+#ifndef SARCH_XBOX
     BusData->CommonData.Pin2Line = HalpPCIPin2ISALine;
     BusData->CommonData.Line2Pin = HalpPCIISALine2Pin;
+#endif
     BusData->MaxDevice = PCI_MAX_DEVICES;
+#ifndef SARCH_XBOX
     BusData->GetIrqRange = HalpGetISAFixedPCIIrq;
+#endif
 
     /* Initialize the bitmap */
     RtlInitializeBitMap(&BusData->DeviceConfigured, BusData->ConfiguredBits, 256);
@@ -335,7 +363,8 @@ HalpAllocateAndInitPciBusHandler(IN ULONG PciType,
             BusData->Config.Type1.Data = PCI_TYPE1_DATA_PORT;
             break;
 
-        /* Type 2 PCI Bus */
+#ifndef SARCH_XBOX
+        /* Type 2 PCI Bus -- CardBus, not on Xbox (MCPX is Type 1 only) */
         case 2:
 
             /* Copy the Type 1 handler data */
@@ -351,6 +380,7 @@ HalpAllocateAndInitPciBusHandler(IN ULONG PciType,
             /* Only 16 devices supported, not 32 */
             BusData->MaxDevice = 16;
             break;
+#endif
 
         default:
 
@@ -432,6 +462,11 @@ HalpGetChipHacks(IN USHORT VendorId,
                  IN UCHAR RevisionId,
                  IN PULONG HackFlags)
 {
+#ifdef SARCH_XBOX
+    /* No configuration manager; NV2A/MCPX has no PC HAL hack entries. */
+    *HackFlags = 0;
+    return STATUS_SUCCESS;
+#else
     UNICODE_STRING KeyName, ValueName;
     NTSTATUS Status;
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -486,6 +521,7 @@ HalpGetChipHacks(IN USHORT VendorId,
     /* Close the handle and return */
     ZwClose(KeyHandle);
     return Status;
+#endif
 }
 
 CODE_SEG("INIT")
@@ -1097,6 +1133,22 @@ HalpInitializePciBus(VOID)
     /* Now build correct address range informaiton */
     HalpFixupPciSupportedRanges(PciRegistryInfo->NoBuses);
 
+#ifdef SARCH_XBOX
+    /* Skip the boot-debug PCI dump on Xbox: NV2A/MCPX is fixed silicon, the
+     * dump's vendor/device-string lookup is stubbed (pci_classes.c +
+     * pci_vendors.c are not linked), and HalpIsRecognizedCard /
+     * HalpGetChipHacks are dead chains for non-PC systems.  Dropping the
+     * loop lets the linker prune HalpDebugPciDumpBus / HalpIsIdeDevice /
+     * HalpIsRecognizedCard / HalpGetChipHacks + their callees. */
+    UNREFERENCED_PARAMETER(j);
+    UNREFERENCED_PARAMETER(k);
+    UNREFERENCED_PARAMETER(BusHandler);
+    UNREFERENCED_PARAMETER(PciSlot);
+    UNREFERENCED_PARAMETER(HackFlags);
+    UNREFERENCED_PARAMETER(ExtendedAddressDecoding);
+    UNREFERENCED_PARAMETER(Status);
+    UNREFERENCED_PARAMETER(PciData);
+#else
     /* Loop every bus */
     DbgPrint("\n====== PCI BUS HARDWARE DETECTION =======\n\n");
     PciSlot.u.bits.Reserved = 0;
@@ -1244,15 +1296,19 @@ HalpInitializePciBus(VOID)
         }
     }
 
+#endif /* !SARCH_XBOX */
+
     /* Initialize NMI Crash Flag */
     HalpGetNMICrashFlag();
 
     /* Free the registry data */
     ExFreePoolWithTag(PciRegistryInfo, TAG_HAL);
 
+#ifndef SARCH_XBOX
     /* Tell PnP if this hard supports correct decoding */
     HalpMarkChipsetDecode(ExtendedAddressDecoding);
     DbgPrint("====== PCI BUS DETECTION COMPLETE =======\n\n");
+#endif
 #endif
 }
 
@@ -1271,6 +1327,13 @@ VOID
 NTAPI
 HalpRegisterKdSupportFunctions(VOID)
 {
+#ifndef SARCH_XBOX
+    /* The kernel debugger over PCI isn't reachable on Xbox (KD goes
+     * through the LPC UART) and nothing else calls these function
+     * pointers. Leaving the assignments out lets the linker drop
+     * HalpSetupPciDeviceForDebugging/HalpReleasePciDeviceForDebugging
+     * (already INIT, but anchored a tail) and the resident
+     * HalpMap/UnmapPhysicalMemory64 helpers (~3 KB in .text). */
     /* Register PCI Device Functions */
     KdSetupPciDeviceForDebugging = HalpSetupPciDeviceForDebugging;
     KdReleasePciDeviceforDebugging = HalpReleasePciDeviceForDebugging;
@@ -1288,6 +1351,7 @@ HalpRegisterKdSupportFunctions(VOID)
 
     /* Register ACPI stub */
     KdCheckPowerButton = HalpCheckPowerButton;
+#endif
 }
 #endif // _MINIHAL_
 

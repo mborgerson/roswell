@@ -220,6 +220,14 @@ HeadlessDispatch(
     OUT PSIZE_T OutputBufferSize
 );
 
+#ifdef SARCH_XBOX
+/* No EMS terminal; ex/hdlsterm.c is unlinked and every dispatch
+   constant-folds away at the call site. */
+#define HeadlessDispatch(Command, In, InSize, Out, OutSize) \
+    ((VOID)(In), (VOID)(InSize), (VOID)(Out), (VOID)(OutSize), \
+     STATUS_NOT_SUPPORTED)
+#endif
+
 //
 // Global variables accessible from all of Hdl
 //

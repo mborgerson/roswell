@@ -235,9 +235,11 @@ AtaPortIdentifyDevice(
         return DEV_STATUS_NO_DEVICE;
 
     /* Power up the device if needed */
+#ifndef SARCH_XBOX
     Status = AtaPortCheckDevicePowerState(PortData, DevExt);
     if (Status == STATUS_ADAPTER_HARDWARE_ERROR)
         return DEV_STATUS_FAILED;
+#endif
 
     /*
      * Try the known device type first.

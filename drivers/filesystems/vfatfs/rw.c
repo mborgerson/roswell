@@ -564,6 +564,8 @@ VfatCommonRead(
     Length = IrpContext->Stack->Parameters.Read.Length;
     BytesPerSector = IrpContext->DeviceExt->FatInfo.BytesPerSector;
 
+#ifndef SARCH_XBOX
+    /* No lock entry points on the Xbox ABI; no file lock can exist. */
     if (!PagingIo &&
         FsRtlAreThereCurrentFileLocks(&Fcb->FileLock))
     {
@@ -572,6 +574,7 @@ VfatCommonRead(
             return STATUS_FILE_LOCK_CONFLICT;
         }
     }
+#endif
 
     Buffer = VfatGetUserBuffer(IrpContext->Irp, PagingIo);
 
@@ -1041,6 +1044,8 @@ VfatWrite(
         }
     }
 
+#ifndef SARCH_XBOX
+    /* No file lock can exist; see above. */
     if (!PagingIo &&
         FsRtlAreThereCurrentFileLocks(&Fcb->FileLock))
     {
@@ -1050,6 +1055,7 @@ VfatWrite(
             goto ByeBye;
         }
     }
+#endif
 
     if (!CanWait && !IsVolume)
     {

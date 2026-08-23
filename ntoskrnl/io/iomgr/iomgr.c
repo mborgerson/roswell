@@ -13,6 +13,10 @@
 #define NDEBUG
 #include <debug.h>
 
+#ifdef SARCH_XBOX
+#include "internal/nx-devtree.h"
+#endif
+
 ULONG IopTraceLevel = 0;
 BOOLEAN PnpSystemInit = FALSE;
 
@@ -34,7 +38,9 @@ WmiInitialize(
 
 POBJECT_TYPE IoDeviceObjectType = NULL;
 POBJECT_TYPE IoFileObjectType = NULL;
+#ifndef SARCH_XBOX
 extern POBJECT_TYPE IoControllerObjectType;
+#endif
 BOOLEAN IoCountOperations = TRUE;
 ULONG IoReadOperationCount = 0;
 LARGE_INTEGER IoReadTransferCount = {{0, 0}};
@@ -260,6 +266,7 @@ IopCreateObjectTypes(VOID)
                                        NULL,
                                        &IoAdapterObjectType))) return FALSE;
 
+#ifndef SARCH_XBOX
     /* Do the Controller Type */
     RtlInitUnicodeString(&Name, L"Controller");
     ObjectTypeInitializer.DefaultNonPagedPoolCharge = sizeof(CONTROLLER_OBJECT);
@@ -267,6 +274,7 @@ IopCreateObjectTypes(VOID)
                                        &ObjectTypeInitializer,
                                        NULL,
                                        &IoControllerObjectType))) return FALSE;
+#endif
 
     /* Do the Device Type */
     RtlInitUnicodeString(&Name, L"Device");
@@ -313,7 +321,11 @@ IopCreateObjectTypes(VOID)
     ObjectTypeInitializer.CloseProcedure = IopCloseFile;
     ObjectTypeInitializer.DeleteProcedure = IopDeleteFile;
     ObjectTypeInitializer.SecurityProcedure = IopGetSetSecurityObject;
+#ifndef SARCH_XBOX
+    /* Only ObQueryNameString consults this, and nothing on this
+     * configuration queries file-object names. */
     ObjectTypeInitializer.QueryNameProcedure = IopQueryName;
+#endif
     ObjectTypeInitializer.ParseProcedure = IopParseFile;
     ObjectTypeInitializer.UseDefaultObject = FALSE;
     if (!NT_SUCCESS(ObCreateObjectType(&Name,
@@ -395,6 +407,12 @@ BOOLEAN
 NTAPI
 IopMarkBootPartition(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
+#ifdef SARCH_XBOX
+    /* nxldr always sets the INRAM mode bit; the boot device is a fabricated
+     * ARC name that no FSD-mount has touched yet, so skip the open. */
+    UNREFERENCED_PARAMETER(LoaderBlock);
+    return TRUE;
+#else
     OBJECT_ATTRIBUTES ObjectAttributes;
     STRING DeviceString;
     CHAR Buffer[256];
@@ -403,6 +421,14 @@ IopMarkBootPartition(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     HANDLE FileHandle;
     IO_STATUS_BLOCK IoStatusBlock;
     PFILE_OBJECT FileObject;
+
+    /* RAM-resident (INRAM) boots have no real boot device to open: the
+     * kernel reads nothing from ArcBootDeviceName -- the system hive and NLS
+     * are embedded and the title mounts FATX itself.  Skip the open so we
+     * don't 0x7B when there is no CDROM media.  InitWinPEModeType's
+     * 0x80000000 bit is the INRAM marker set by ExpInitializationPhase1. */
+    extern ULONG InitWinPEModeType;
+    if (InitWinPEModeType & 0x80000000) return TRUE;
 
     /* Build the ARC device name */
     sprintf(Buffer, "\\ArcName\\%s", LoaderBlock->ArcBootDeviceName);
@@ -458,6 +484,7 @@ IopMarkBootPartition(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     NtClose(FileHandle);
     ObDereferenceObject(FileObject);
     return TRUE;
+#endif
 }
 
 CODE_SEG("INIT")
@@ -496,8 +523,10 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     KeInitializeSpinLock(&ShutdownListLock);
     KeInitializeSpinLock(&IopLogListLock);
 
+#ifndef SARCH_XBOX
     /* Initialize PnP notifications */
     PiInitializeNotifications();
+#endif
 
     /* Initialize the reserve IRP */
     if (!IopInitializeReserveIrp(&IopReserveIrpAllocator))
@@ -532,24 +561,44 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         return FALSE;
     }
 
-    /* Initialize PnP manager */
+#ifdef SARCH_XBOX
+    /* Build the root PnP driver + PDO + DeviceNode that PoInitSystem
+     * (BootPhase=1) and IopInitializeSystemDrivers reach through
+     * IopRootDeviceNode.  Replaces IopInitializePlugPlayServices on the
+     * Xbox build (which is gone with pnpmgr/pnpinit.c). */
+    {
+        NTSTATUS NxkStatus = NxkInitRootDeviceNode();
+        if (!NT_SUCCESS(NxkStatus))
+            KeBugCheckEx(PHASE1_INITIALIZATION_FAILED, NxkStatus, 0, 0, 0);
+    }
+#else
+    /* Initialize PnP manager. */
     IopInitializePlugPlayServices();
+#endif
 
+#ifndef SARCH_XBOX
     /* Initialize SHIM engine */
     ApphelpCacheInitialize();
+#endif
 
+#ifndef SARCH_XBOX
     /* Initialize WMI */
     WmiInitialize();
+#endif
 
+#ifndef SARCH_XBOX
     /* Initialize HAL Root Bus Driver */
     HalInitPnpDriver();
+#endif
 
+#ifndef SARCH_XBOX
     /* Reenumerate what HAL has added (synchronously)
      * This function call should eventually become a 2nd stage of the PnP initialization */
     PiQueueDeviceAction(IopRootDeviceNode->PhysicalDeviceObject,
                         PiActionEnumRootDevices,
                         NULL,
                         NULL);
+#endif
 
     /* Make loader block available for the whole kernel */
     IopLoaderBlock = LoaderBlock;
@@ -557,15 +606,29 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Load boot start drivers */
     IopInitializeBootDrivers();
 
+#ifdef SARCH_XBOX
+    /* PnP enumeration is no-op'd on Xbox; the folded drivers' DriverEntry
+     * has already published their primary FDOs but left
+     * DO_DEVICE_INITIALIZING set.  Clear it before any IRP can land. */
+    NxkClearDeviceInitFlags();
+
+    /* Log the static device tree, then drive AddDevice + START for every
+     * driver-bound entry and walk the storage stack. */
+    NxkInitDeviceTree();
+    NxkDriveDeviceTree();
+#endif
+
     /* Call back drivers that asked for */
     IopReinitializeBootDrivers();
 
+#ifndef SARCH_XBOX
     /* Check if this was a ramdisk boot */
     if (!_strnicmp(LoaderBlock->ArcBootDeviceName, "ramdisk(0)", 10))
     {
         /* Initialize the ramdisk driver */
         IopStartRamdisk(LoaderBlock);
     }
+#endif
 
     /* No one should need loader block any longer */
     IopLoaderBlock = NULL;
@@ -633,13 +696,10 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         return FALSE;
     }
 
-    /* Load the System DLL and its entrypoints */
-    Status = PsLocateSystemDll();
-    if (!NT_SUCCESS(Status))
-    {
-        DPRINT1("PsLocateSystemDll failed: %lx\n", Status);
-        return FALSE;
-    }
+    /* ntdll is the user-mode system DLL.  nxkrnl has no user mode --
+     * the title runs as a kernel thread (xbe) -- so ntdll is neither mapped
+     * nor staged.  PsLocateSystemDll / PspInitializeSystemDll are left in
+     * place but uncalled. */
 
     /* Return success */
     return TRUE;

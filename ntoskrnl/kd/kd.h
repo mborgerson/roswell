@@ -125,7 +125,7 @@ extern CPPORT SerialPortInfo;
 extern ANSI_STRING KdpLogFileName;
 
 /* Init Functions for Native Providers */
-extern PKDP_INIT_ROUTINE InitRoutines[KdMax];
+extern PKDP_INIT_ROUTINE const InitRoutines[KdMax];
 
 /* Dispatch Tables for Native Providers */
 extern KD_DISPATCH_TABLE DispatchTable[KdMax];

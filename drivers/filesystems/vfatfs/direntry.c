@@ -38,6 +38,8 @@ vfatDirEntryGetFirstCluster(
     return  cluster;
 }
 
+#ifndef SARCH_XBOX
+/* Xbox only mounts FATX volumes; the FAT path is dead. */
 BOOLEAN
 FATIsDirectoryEmpty(
     PDEVICE_EXTENSION DeviceExt,
@@ -113,6 +115,7 @@ FATIsDirectoryEmpty(
 
     return TRUE;
 }
+#endif /* !SARCH_XBOX */
 
 BOOLEAN
 FATXIsDirectoryEmpty(
@@ -181,6 +184,7 @@ FATXIsDirectoryEmpty(
     return TRUE;
 }
 
+#ifndef SARCH_XBOX
 NTSTATUS
 FATGetNextDirEntry(
     PVOID *pContext,
@@ -471,6 +475,7 @@ FATGetNextDirEntry(
 
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 NTSTATUS
 FATXGetNextDirEntry(
@@ -490,6 +495,11 @@ FATXGetNextDirEntry(
 
     UNREFERENCED_PARAMETER(First);
 
+#ifndef SARCH_XBOX
+    /* NT-compat synthesized dot entries.  FATX has no . / .. on disk;
+     * the retail kernel's enumeration returns none, so on Xbox the pair
+     * (and the +2 index bias it imposes on every real entry, undone in
+     * vfatInitFCBFromDirEntry) is dropped: indices are raw on-disk. */
     if (!vfatFCBIsRoot(pDirFcb))
     {
         /* need to add . and .. entries */
@@ -519,6 +529,7 @@ FATXGetNextDirEntry(
                 DirIndex -= 2;
         }
     }
+#endif
 
     Status = vfatFCBInitializeCacheFromVolume(DirContext->DeviceExt, pDirFcb);
     if (!NT_SUCCESS(Status))

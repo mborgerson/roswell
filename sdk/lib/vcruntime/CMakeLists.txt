@@ -49,10 +49,12 @@ list(APPEND VCRT_COMMON_SOURCES
     tlssup.c
 )
 
-# Common between vcstartup and vcruntime
-add_library(vcrt_common ${VCRT_COMMON_SOURCES})
-target_link_libraries(vcrt_common ${PSEH_LIB})
-add_dependencies(vcrt_common psdk)
+# Common between vcstartup and vcruntime -- kernel only needs setjmp below.
+if(NOT SARCH STREQUAL "xbox")
+    add_library(vcrt_common ${VCRT_COMMON_SOURCES})
+    target_link_libraries(vcrt_common ${PSEH_LIB})
+    add_dependencies(vcrt_common psdk)
+endif()
 
 if(${ARCH} STREQUAL "i386")
     list(APPEND VCRT_SETJMP_SOURCES
@@ -94,34 +96,36 @@ add_asm_files(vcrt_setjmp_asm ${VCRT_SETJMP_ASM_SOURCES})
 add_library(setjmp ${VCRT_SETJMP_SOURCES} ${vcrt_setjmp_asm})
 add_dependencies(setjmp psdk asm)
 
-list(APPEND VCRT_RUNTIME_SOURCES
-    ${vcrt_runtime_asm}
-    __std_terminate.c
-    __vcrt_init.c
-    purecall.cpp
-)
-
-if(${ARCH} STREQUAL "i386")
+if(NOT SARCH STREQUAL "xbox")
     list(APPEND VCRT_RUNTIME_SOURCES
-        i386/_chkesp_failed.c
+        ${vcrt_runtime_asm}
+        __std_terminate.c
+        __vcrt_init.c
+        purecall.cpp
     )
+
+    if(${ARCH} STREQUAL "i386")
+        list(APPEND VCRT_RUNTIME_SOURCES
+            i386/_chkesp_failed.c
+        )
+    endif()
+
+    # Runtime library (linked into ucrtbase)
+    add_library(vcruntime ${VCRT_RUNTIME_SOURCES} $<TARGET_OBJECTS:vcrt_common> $<TARGET_OBJECTS:setjmp>)
+    target_link_libraries(vcruntime ${PSEH_LIB})
+    target_include_directories(vcruntime INTERFACE inc)
+
+    list(APPEND VCRT_STARTUP_SOURCES
+        __acrt_initialize_stub.cpp
+        __scrt_uninitialize_crt.cpp
+        __vcrt_init_stubs.c
+        _onexit.c
+        atexit.c
+        mainCRTStartup.cpp
+        wmainCRTStartup.cpp
+    )
+
+    # Startup library (linked into executables, linking to ucrtbase)
+    add_library(vcstartup ${VCRT_STARTUP_SOURCES} $<TARGET_OBJECTS:vcrt_common>)
+    target_link_libraries(vcstartup ${PSEH_LIB} libucrtbase libkernel32)
 endif()
-
-# Runtime library (linked into ucrtbase)
-add_library(vcruntime ${VCRT_RUNTIME_SOURCES} $<TARGET_OBJECTS:vcrt_common> $<TARGET_OBJECTS:setjmp>)
-target_link_libraries(vcruntime ${PSEH_LIB})
-target_include_directories(vcruntime INTERFACE inc)
-
-list(APPEND VCRT_STARTUP_SOURCES
-    __acrt_initialize_stub.cpp
-    __scrt_uninitialize_crt.cpp
-    __vcrt_init_stubs.c
-    _onexit.c
-    atexit.c
-    mainCRTStartup.cpp
-    wmainCRTStartup.cpp
-)
-
-# Startup library (linked into executables, linking to ucrtbase)
-add_library(vcstartup ${VCRT_STARTUP_SOURCES} $<TARGET_OBJECTS:vcrt_common>)
-target_link_libraries(vcstartup ${PSEH_LIB} libucrtbase libkernel32)

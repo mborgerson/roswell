@@ -725,6 +725,11 @@ extern ULONG KeI386EFlagsOrMaskV86;
 extern BOOLEAN KeI386VirtualIntExtensions;
 extern KIDTENTRY KiIdt[MAXIMUM_IDTVECTOR+1];
 extern KDESCRIPTOR KiIdtDescriptor;
+#ifdef SARCH_XBOX
+extern UCHAR KiInitialTss[];
+extern KGDTENTRY KiGdt[];
+extern KDESCRIPTOR KiGdtDescriptor;
+#endif
 extern BOOLEAN KiI386PentiumLockErrataPresent;
 extern ULONG KeI386NpxPresent;
 extern ULONG KeI386XMMIPresent;

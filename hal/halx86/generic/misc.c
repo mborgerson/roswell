@@ -25,6 +25,9 @@ VOID
 NTAPI
 HalpReportSerialNumber(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No registry-driven hardware description on Xbox. */
+#else
     NTSTATUS Status;
     UNICODE_STRING KeyString;
     HANDLE Handle;
@@ -49,6 +52,7 @@ HalpReportSerialNumber(VOID)
         /* Close the handle */
         ZwClose(Handle);
     }
+#endif
 }
 
 CODE_SEG("INIT")
@@ -56,6 +60,10 @@ NTSTATUS
 NTAPI
 HalpMarkAcpiHal(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No PnP firmware-mapper key on Xbox; HAL is built without ACPI. */
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     UNICODE_STRING KeyString;
     HANDLE KeyHandle;
@@ -97,6 +105,7 @@ HalpMarkAcpiHal(VOID)
 
     /* Return status */
     return Status;
+#endif
 }
 
 NTSTATUS

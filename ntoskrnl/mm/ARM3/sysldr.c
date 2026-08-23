@@ -186,7 +186,7 @@ MiLoadImageSection(_Inout_ PSECTION *SectionPtr,
 #endif
 
         /* Grab a page */
-        PageFrameIndex = MiRemoveAnyPage(MI_GET_NEXT_COLOR());
+        PageFrameIndex = NxkPageSupplyTakeAny(MI_GET_NEXT_COLOR());
 
         /* Initialize its PFN entry */
         MiInitializePfn(PageFrameIndex, PointerPte, TRUE);
@@ -434,6 +434,13 @@ MmCallDllInitialize(
     _In_ PLDR_DATA_TABLE_ENTRY LdrEntry,
     _In_ PLIST_ENTRY ModuleListHead)
 {
+#ifdef SARCH_XBOX
+    /* No loadable system DLLs on Xbox; all drivers are folded into
+     * ntoskrnl, so DllInitialize is never called. */
+    UNREFERENCED_PARAMETER(LdrEntry);
+    UNREFERENCED_PARAMETER(ModuleListHead);
+    return STATUS_SUCCESS;
+#else
     UNICODE_STRING ServicesKeyName = RTL_CONSTANT_STRING(
         L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\");
     PMM_DLL_INITIALIZE DllInit;
@@ -491,6 +498,7 @@ MmCallDllInitialize(
 
     /* Return the DllInitialize status value */
     return Status;
+#endif
 }
 
 BOOLEAN
@@ -940,6 +948,15 @@ MiSnapThunk(IN PVOID DllBase,
     return Status;
 }
 
+#ifdef SARCH_XBOX
+/* Xbox: no dynamic driver load.  All drivers are folded into ntoskrnl
+ * (IopFoldedInDrivers); MmLoadSystemImage / MmUnloadSystemImage /
+ * MiResolveImageReferences are never exercised on a live boot.  Stub
+ * them to make their bodies (and the long tail of import-resolution
+ * helpers they pull in) GC out. */
+NTSTATUS NTAPI MmUnloadSystemImage(IN PVOID ImageHandle)
+{ (void)ImageHandle; return STATUS_SUCCESS; }
+#else
 NTSTATUS
 NTAPI
 MmUnloadSystemImage(IN PVOID ImageHandle)
@@ -1028,7 +1045,23 @@ Done:
     KeLeaveCriticalRegion();
     return STATUS_SUCCESS;
 }
+#endif /* SARCH_XBOX */
 
+#ifdef SARCH_XBOX
+NTSTATUS NTAPI
+MiResolveImageReferences(IN PVOID ImageBase,
+                         IN PUNICODE_STRING ImageFileDirectory,
+                         IN PUNICODE_STRING NamePrefix OPTIONAL,
+                         OUT PCHAR *MissingApi,
+                         OUT PWCHAR *MissingDriver,
+                         OUT PLOAD_IMPORTS *LoadImports)
+{
+    (void)ImageBase; (void)ImageFileDirectory; (void)NamePrefix;
+    (void)MissingApi; (void)MissingDriver;
+    if (LoadImports) *LoadImports = NULL;
+    return STATUS_NOT_IMPLEMENTED;
+}
+#else
 NTSTATUS
 NTAPI
 MiResolveImageReferences(IN PVOID ImageBase,
@@ -1144,7 +1177,12 @@ MiResolveImageReferences(IN PVOID ImageBase,
         }
 
         /* Check if this is a "core" import, which doesn't get referenced */
-        if (!(_strnicmp(ImportName, "ntoskrnl", sizeof("ntoskrnl") - 1)) ||
+        if (
+#ifdef SARCH_XBOX
+            !(_strnicmp(ImportName, "xboxkrnl", sizeof("xboxkrnl") - 1)) ||
+#else
+            !(_strnicmp(ImportName, "ntoskrnl", sizeof("ntoskrnl") - 1)) ||
+#endif
             !(_strnicmp(ImportName, "win32k", sizeof("win32k") - 1)) ||
             !(_strnicmp(ImportName, "hal", sizeof("hal") - 1)))
         {
@@ -1459,6 +1497,7 @@ Failure:
 
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 VOID
 NTAPI
@@ -1467,6 +1506,16 @@ MiFreeInitializationCode(IN PVOID InitStart,
 {
     PMMPTE PointerPte;
     PFN_NUMBER PagesFreed;
+
+#ifdef SARCH_XBOX
+    /* At the retail IMAGEBASE the freed pages sit in title-visible RAM;
+     * donate them to the title heap instead of NT's PFN free list (titles
+     * hardcode their contiguous pool right past the resident kernel).
+     * Returns FALSE when out of range (devkit layout) -- fall through to
+     * the NT free.  See xb/mm/init.c. */
+    extern BOOLEAN NxkMmTryDonateInitPages(PVOID Start, PVOID End);
+    if (NxkMmTryDonateInitPages(InitStart, InitEnd)) return;
+#endif
 
     /* Get the start PTE */
     PointerPte = MiAddressToPte(InitStart);
@@ -1922,7 +1971,11 @@ MiBuildImportsForBootDrivers(VOID)
     PLIST_ENTRY NextEntry, NextEntry2;
     PLDR_DATA_TABLE_ENTRY LdrEntry, KernelEntry, HalEntry, LdrEntry2, LastEntry;
     PLDR_DATA_TABLE_ENTRY* EntryArray;
+#ifdef SARCH_XBOX
+    UNICODE_STRING KernelName = RTL_CONSTANT_STRING(L"xboxkrnl.exe");
+#else
     UNICODE_STRING KernelName = RTL_CONSTANT_STRING(L"ntoskrnl.exe");
+#endif
     UNICODE_STRING HalName = RTL_CONSTANT_STRING(L"hal.dll");
     PLOAD_IMPORTS LoadedImports;
     ULONG LoadedImportsSize, ImportSize;
@@ -2437,6 +2490,10 @@ MiUseLargeDriverPage(IN ULONG NumberOfPtes,
     return FALSE;
 }
 
+#ifdef SARCH_XBOX
+/* Only MmInitSystem write-protects images on Xbox; the runtime
+   MmLoadSystemImage path is compiled out (drivers are folded in). */
+#endif
 VOID
 NTAPI
 MiSetSystemCodeProtection(
@@ -2476,6 +2533,10 @@ MiSetSystemCodeProtection(
     KeFlushEntireTb(TRUE, TRUE);
 }
 
+#ifdef SARCH_XBOX
+/* Only MmInitSystem write-protects images on Xbox; the runtime
+   MmLoadSystemImage path is compiled out (drivers are folded in). */
+#endif
 VOID
 NTAPI
 MiWriteProtectSystemImage(
@@ -2749,6 +2810,20 @@ MmVerifyImageIsOkForMpUse(
 }
 #endif // CONFIG_SMP
 
+#ifdef SARCH_XBOX
+/* Xbox has no MmLoadSystemImage (drivers are folded into ntoskrnl), so
+ * MmCheckSystemImage's two callers -- PsLocateSystemDll (gated under
+ * !SARCH_XBOX in psmgr.c) and the NT MmLoadSystemImage path (gated
+ * below) -- are both dead.  Stub the body so we don't drag in
+ * ZwCreateSection / ZwMapViewOfSection / ZwUnmapViewOfSection, which are
+ * otherwise reachable only through this function on Xbox. */
+NTSTATUS NTAPI
+MmCheckSystemImage(_In_ HANDLE ImageHandle)
+{
+    (void)ImageHandle;
+    return STATUS_NOT_IMPLEMENTED;
+}
+#else
 NTSTATUS
 NTAPI
 MmCheckSystemImage(
@@ -2863,6 +2938,7 @@ Fail:
     ZwClose(SectionHandle);
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 
 PVOID
@@ -2944,6 +3020,21 @@ LdrpInitSecurityCookie(PLDR_DATA_TABLE_ENTRY LdrEntry)
     return Cookie;
 }
 
+#ifdef SARCH_XBOX
+NTSTATUS NTAPI
+MmLoadSystemImage(IN PUNICODE_STRING FileName,
+                  IN PUNICODE_STRING NamePrefix OPTIONAL,
+                  IN PUNICODE_STRING LoadedName OPTIONAL,
+                  IN ULONG Flags,
+                  OUT PVOID *ModuleObject,
+                  OUT PVOID *ImageBaseAddress)
+{
+    (void)FileName; (void)NamePrefix; (void)LoadedName; (void)Flags;
+    if (ModuleObject) *ModuleObject = NULL;
+    if (ImageBaseAddress) *ImageBaseAddress = NULL;
+    return STATUS_NOT_IMPLEMENTED;
+}
+#else
 NTSTATUS
 NTAPI
 MmLoadSystemImage(IN PUNICODE_STRING FileName,
@@ -3522,6 +3613,7 @@ Quickie:
     ExFreePoolWithTag(Buffer, TAG_LDR_WSTR);
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 PLDR_DATA_TABLE_ENTRY
 NTAPI
@@ -3620,7 +3712,11 @@ MmGetSystemRoutineAddress(IN PUNICODE_STRING SystemRoutineName)
     PLIST_ENTRY NextEntry;
     PLDR_DATA_TABLE_ENTRY LdrEntry;
     BOOLEAN Found = FALSE;
+#ifdef SARCH_XBOX
+    UNICODE_STRING KernelName = RTL_CONSTANT_STRING(L"xboxkrnl.exe");
+#else
     UNICODE_STRING KernelName = RTL_CONSTANT_STRING(L"ntoskrnl.exe");
+#endif
     UNICODE_STRING HalName = RTL_CONSTANT_STRING(L"hal.dll");
     ULONG Modules = 0;
 

@@ -528,6 +528,16 @@ NTAPI
 IoAllocateErrorLogEntry(IN PVOID IoObject,
                         IN UCHAR EntrySize)
 {
+#ifdef SARCH_XBOX
+    /* No eventlog consumer on Xbox -- IopConnectLogPort would fail to
+     * connect to \Security\EventLog\Application. Returning NULL here
+     * makes IoWriteErrorLogEntry a no-op and lets the linker drop the
+     * worker chain (IopLogWorker, IopConnectLogPort, IopRestartLogWorker,
+     * IopLogDpcRoutine, ZwConnectPort + LPC plumbing). */
+    UNREFERENCED_PARAMETER(IoObject);
+    UNREFERENCED_PARAMETER(EntrySize);
+    return NULL;
+#else
     PERROR_LOG_ENTRY LogEntry;
     ULONG LogEntrySize;
     PDEVICE_OBJECT DeviceObject;
@@ -594,6 +604,7 @@ IoAllocateErrorLogEntry(IN PVOID IoObject,
 
     /* Return the entry data */
     return (PVOID)((ULONG_PTR)LogEntry + sizeof(ERROR_LOG_ENTRY));
+#endif
 }
 
 /*
@@ -627,6 +638,13 @@ VOID
 NTAPI
 IoWriteErrorLogEntry(IN PVOID ElEntry)
 {
+#ifdef SARCH_XBOX
+    /* IoAllocateErrorLogEntry always returns NULL on Xbox so callers
+     * never reach this -- but the compiler can't see that. Short-circuit
+     * here to drop the worker chain. */
+    UNREFERENCED_PARAMETER(ElEntry);
+    return;
+#else
     PERROR_LOG_ENTRY LogEntry;
     KIRQL Irql;
 
@@ -654,6 +672,7 @@ IoWriteErrorLogEntry(IN PVOID ElEntry)
 
     /* Release the lock and return */
     KeReleaseSpinLock(&IopLogListLock, Irql);
+#endif
 }
 
 /*

@@ -127,8 +127,13 @@ HalReportResourceUsage(VOID)
     RtlInitUnicodeString(&HalString, HalName);
     HalpReportResourceUsage(&HalString, InterfaceType);
 
+#ifndef SARCH_XBOX
+    /* No PCI-attached kernel debugger on Xbox -- KD goes through the LPC
+     * UART. Anchors HalpMapPhysicalMemory64{,Vista} + Unmap (~3 KB
+     * resident) and HalpRegisterPciDebuggingDeviceInfo (INIT). */
     /* Setup PCI debugging and Hibernation */
     HalpRegisterPciDebuggingDeviceInfo();
+#endif
 }
 
 /* EOF */

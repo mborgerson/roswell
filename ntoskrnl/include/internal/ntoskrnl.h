@@ -34,6 +34,12 @@
 //
 // Use inlined versions of fast/guarded mutex routines
 //
+/* wdm.h forwards these to the Exi* externs; the kernel-internal source
+ * needs to redirect them at our inlined _Ex* variants instead.  #undef
+ * silences the redefinition warning. */
+#undef  ExAcquireFastMutex
+#undef  ExReleaseFastMutex
+#undef  ExTryToAcquireFastMutex
 #define ExEnterCriticalRegionAndAcquireFastMutexUnsafe _ExEnterCriticalRegionAndAcquireFastMutexUnsafe
 #define ExReleaseFastMutexUnsafeAndLeaveCriticalRegion _ExReleaseFastMutexUnsafeAndLeaveCriticalRegion
 #define ExAcquireFastMutex _ExAcquireFastMutex
@@ -135,7 +141,15 @@ C_ASSERT(FIELD_OFFSET(KTHREAD, KernelTime) == FIELD_OFFSET(KTHREAD, SuspendApc.S
 C_ASSERT(FIELD_OFFSET(KTHREAD, TlsArray) == FIELD_OFFSET(KTHREAD, SuspendApc.SystemArgument1));
 C_ASSERT(FIELD_OFFSET(KTHREAD, LegoData) == FIELD_OFFSET(KTHREAD, SuspendApc.SystemArgument2));
 C_ASSERT(FIELD_OFFSET(KTHREAD, PowerState) == FIELD_OFFSET(KTHREAD, SuspendApc.Inserted) + 1);
-C_ASSERT(sizeof(KTHREAD) == 0x1B8);
+/* Upstream KTHREAD was 0x1B8 with 4 bytes of trailing pad; the appended
+ * XeXboxShadow[0x80] + XeXboxFs4 + XeStackSize fields slot into that pad and
+ * extend the struct to 0x240.  Pin XeXboxShadow + 0x28 == TlsData slot here so
+ * a later edit that moves the shadow can't silently break the shadow layout. */
+C_ASSERT(sizeof(KTHREAD) == 0x240);  /* XeBaseSeh fills the old trailing pad */
+C_ASSERT(FIELD_OFFSET(KTHREAD, XeBaseSeh) == 0x23C);
+C_ASSERT(FIELD_OFFSET(KTHREAD, XeXboxShadow) == 0x1B4);
+C_ASSERT(FIELD_OFFSET(KTHREAD, XeXboxFs4) == 0x234);
+C_ASSERT(FIELD_OFFSET(KTHREAD, XeStackSize) == 0x238);
 
 C_ASSERT(FIELD_OFFSET(KPROCESS, DirectoryTableBase) == KPROCESS_DIRECTORY_TABLE_BASE);
 

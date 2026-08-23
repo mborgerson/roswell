@@ -515,6 +515,10 @@ NtQueryDirectoryObject(IN HANDLE DirectoryHandle,
     /* Initialize lookup */
     ObpInitializeLookupContext(&LookupContext);
 
+#ifdef SARCH_XBOX
+    /* No usermode; Buffer/Context/ReturnLength are trusted in-kernel pointers. */
+    if (!RestartScan) SkipEntries = *Context;
+#else
     /* Check if we need to do any probing */
     if (PreviousMode != KernelMode)
     {
@@ -542,6 +546,7 @@ NtQueryDirectoryObject(IN HANDLE DirectoryHandle,
         /* This is kernel mode, save the context without probing, if needed */
         SkipEntries = *Context;
     }
+#endif
 
     /* Allocate a buffer */
     LocalBuffer = ExAllocatePoolWithTag(PagedPool,
@@ -711,6 +716,14 @@ Quickie:
         *Context = CurrentEntry;
     }
 
+#ifdef SARCH_XBOX
+    /* Buffer is a trusted in-kernel pointer; no SEH needed. */
+    RtlCopyMemory(Buffer,
+                  LocalBuffer,
+                  (TotalLength <= BufferLength) ?
+                  TotalLength : BufferLength);
+    if (ReturnLength) *ReturnLength = TotalLength;
+#else
     _SEH2_TRY
     {
         /* Copy the buffer */
@@ -728,6 +741,7 @@ Quickie:
         Status = _SEH2_GetExceptionCode();
     }
     _SEH2_END;
+#endif
 
     /* Unlock the directory */
     ObpReleaseDirectoryLock(Directory, &LookupContext);

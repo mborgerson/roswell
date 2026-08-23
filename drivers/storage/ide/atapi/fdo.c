@@ -296,11 +296,13 @@ AtaFdoStartDevice(
     if (ChannelInterface.Flags & ATA_CHANNEL_FLAG_PIO_FOR_LBA48_XFER)
         PortData->PortFlags |= PORT_FLAG_PIO_FOR_LBA48_XFER;
 
+#ifndef SARCH_XBOX
     if (ChannelInterface.HwSyncObject)
     {
         PortData->PortFlags |= PORT_FLAG_IS_SIMPLEX;
         PortData->HwSyncObject = ChannelInterface.HwSyncObject;
     }
+#endif
 
     /* Reserve PIO memory resources early. Storage drivers should not fail paging I/O operations */
     if (!(ChannelInterface.Flags & ATA_CHANNEL_FLAG_PIO_VIA_DMA) && !PortData->ReservedVaSpace)
@@ -346,6 +348,7 @@ AtaFdoStartDevice(
 
     AtaSetPortRegistryKey(ChanExt, DD_ATA_REG_MAX_TARGET_ID, PortData->MaxTargetId);
 
+#ifndef SARCH_XBOX
     Status = IoRegisterDeviceInterface(ChanExt->Common.Self,
                                        &GUID_DEVINTERFACE_STORAGEPORT,
                                        NULL,
@@ -361,6 +364,7 @@ AtaFdoStartDevice(
             ChanExt->StorageInterfaceName.Buffer = NULL;
         }
     }
+#endif
 
     *ChannelInterface.PortContext = PortData;
     *ChannelInterface.PortNotification = AtaPortNotification;
@@ -412,8 +416,10 @@ AtaFdoStopDevice(
 
     AtaFdoDetachChannel(ChanExt);
 
+#ifndef SARCH_XBOX
     if (ChanExt->StorageInterfaceName.Buffer)
         IoSetDeviceInterfaceState(&ChanExt->StorageInterfaceName, FALSE);
+#endif
 
     return STATUS_SUCCESS;
 }
@@ -430,6 +436,7 @@ AtaFdoRemoveDevice(
 
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
     if (ChanExt->StorageInterfaceName.Buffer)
     {
         IoSetDeviceInterfaceState(&ChanExt->StorageInterfaceName, FALSE);
@@ -437,6 +444,7 @@ AtaFdoRemoveDevice(
         RtlFreeUnicodeString(&ChanExt->StorageInterfaceName);
         ChanExt->StorageInterfaceName.Buffer = NULL;
     }
+#endif
 
     AtaFdoDestroyPortThread(ChanExt);
 
@@ -551,6 +559,11 @@ AtaFdoPnp(
             goto CompleteIrp;
         }
 
+#ifndef SARCH_XBOX
+        /* Xbox channels never stop / remove / surprise-remove and never
+         * receive pagefile/hibernation usage notifications. Gating drops
+         * AtaFdoStopDevice, AtaFdoRemoveDevice, and the usage-notification
+         * helper. */
         case IRP_MN_STOP_DEVICE:
             Status = AtaFdoStopDevice(ChanExt, Irp);
             break;
@@ -560,6 +573,7 @@ AtaFdoPnp(
             return AtaFdoRemoveDevice(ChanExt,
                                       Irp,
                                       (IoStack->MinorFunction == IRP_MN_REMOVE_DEVICE));
+#endif
 
         case IRP_MN_QUERY_PNP_DEVICE_STATE:
             Status = AtaPnpQueryPnpDeviceState(&ChanExt->Common, Irp);
@@ -578,6 +592,7 @@ AtaFdoPnp(
             break;
         }
 
+#ifndef SARCH_XBOX
         case IRP_MN_DEVICE_USAGE_NOTIFICATION:
             Status = AtaPnpQueryDeviceUsageNotification(&ChanExt->Common, Irp);
             break;
@@ -588,6 +603,7 @@ AtaFdoPnp(
         case IRP_MN_CANCEL_REMOVE_DEVICE:
             Irp->IoStatus.Status = STATUS_SUCCESS;
             break;
+#endif
 
         default:
             break;

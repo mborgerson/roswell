@@ -20,8 +20,13 @@ LIST_ENTRY ExpPagedLookasideListHead;
 KSPIN_LOCK ExpPagedLookasideListLock;
 LIST_ENTRY ExSystemLookasideListHead;
 LIST_ENTRY ExPoolLookasideListHead;
+#ifndef SARCH_XBOX
+/* The per-block-size pool lookasides are only consulted by the ReactOS pool
+ * allocator (mm/ARM3/expool.c), which nxpool replaces -- so on Xbox they are
+ * never read.  Drop the two arrays (~4.5 KB resident .bss). */
 GENERAL_LOOKASIDE ExpSmallNPagedPoolLookasideLists[NUMBER_POOL_LOOKASIDE_LISTS];
 GENERAL_LOOKASIDE ExpSmallPagedPoolLookasideLists[NUMBER_POOL_LOOKASIDE_LISTS];
+#endif
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
@@ -58,6 +63,7 @@ VOID
 NTAPI
 ExInitPoolLookasidePointers(VOID)
 {
+#ifndef SARCH_XBOX
     ULONG i;
     PKPRCB Prcb = KeGetCurrentPrcb();
     PGENERAL_LOOKASIDE Entry;
@@ -81,6 +87,7 @@ ExInitPoolLookasidePointers(VOID)
         Prcb->PPPagedLookasideList[i].P = Entry;
         Prcb->PPPagedLookasideList[i].L = Entry;
     }
+#endif
 }
 
 CODE_SEG("INIT")
@@ -88,7 +95,9 @@ VOID
 NTAPI
 ExpInitLookasideLists(VOID)
 {
+#ifndef SARCH_XBOX
     ULONG i;
+#endif
 
     /* Initialize locks and lists */
     InitializeListHead(&ExpNonPagedLookasideListHead);
@@ -98,6 +107,7 @@ ExpInitLookasideLists(VOID)
     KeInitializeSpinLock(&ExpNonPagedLookasideListLock);
     KeInitializeSpinLock(&ExpPagedLookasideListLock);
 
+#ifndef SARCH_XBOX
     /* Initialize the system lookaside lists */
     for (i = 0; i < NUMBER_POOL_LOOKASIDE_LISTS; i++)
     {
@@ -117,6 +127,7 @@ ExpInitLookasideLists(VOID)
                                         256,
                                         &ExPoolLookasideListHead);
     }
+#endif
 }
 
 /* PUBLIC FUNCTIONS **********************************************************/

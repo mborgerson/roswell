@@ -642,7 +642,6 @@ _Dispatch_type_(IRP_MJ_CLOSE)
 CODE_SEG("PAGE")
 DRIVER_DISPATCH_PAGED AtaDispatchCreateClose;
 
-CODE_SEG("PAGE")
 DRIVER_ADD_DEVICE AtaAddChannel;
 
 CODE_SEG("PAGE")
@@ -859,7 +858,6 @@ DRIVER_DISPATCH_RAISED AtaDispatchDeviceControl;
 IO_COMPLETION_ROUTINE AtaPdoCompletionRoutine;
 
 _Dispatch_type_(IRP_MJ_PNP)
-CODE_SEG("PAGE")
 DRIVER_DISPATCH_PAGED AtaDispatchPnp;
 
 CODE_SEG("PAGE")

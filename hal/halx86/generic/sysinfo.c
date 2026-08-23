@@ -13,6 +13,11 @@
 #define NDEBUG
 #include <debug.h>
 
+#ifndef SARCH_XBOX
+/* ACPI AMLI illegal-I/O-port table + its PCI-config callback, consumed only
+ * by the HalQueryAMLIIllegalIOPortAddresses case below.  Xbox has no AML
+ * interpreter to issue that query, so the table, the callback, and the whole
+ * HaliQuerySystemInformation dispatch are left out of the Xbox build. */
 HAL_AMLI_BAD_IO_ADDRESS_LIST HalAMLIBadIOAddressList[] =
 {
     { 0x0000, 0x10, 1, NULL }, // DMA controller
@@ -49,6 +54,7 @@ HaliHandlePCIConfigSpaceAccess(_In_ BOOLEAN IsRead,
     //ASSERT(FALSE);
     return STATUS_NOT_IMPLEMENTED;
 }
+#endif /* !SARCH_XBOX */
 
 NTSTATUS
 NTAPI
@@ -57,6 +63,18 @@ HaliQuerySystemInformation(IN HAL_QUERY_INFORMATION_CLASS InformationClass,
                            IN OUT PVOID Buffer,
                            OUT PULONG ReturnedLength)
 {
+#ifdef SARCH_XBOX
+    /* No HAL system-information class is implemented on Xbox -- every case
+     * below already falls to STATUS_NOT_IMPLEMENTED, and the one case that
+     * returns data (AMLI illegal I/O ports) is never queried without an AML
+     * interpreter.  Collapse the dispatch so its case strings and the AMLI
+     * table fall out of the image. */
+    UNREFERENCED_PARAMETER(InformationClass);
+    UNREFERENCED_PARAMETER(BufferSize);
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(ReturnedLength);
+    return STATUS_NOT_IMPLEMENTED;
+#else
 #define REPORT_THIS_CASE(X) case X: DPRINT1("Unhandled case: %s\n", #X); break
     switch (InformationClass)
     {
@@ -111,6 +129,7 @@ HaliQuerySystemInformation(IN HAL_QUERY_INFORMATION_CLASS InformationClass,
 
     UNIMPLEMENTED;
     return STATUS_NOT_IMPLEMENTED;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS

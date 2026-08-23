@@ -15,6 +15,19 @@
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+#ifdef SARCH_XBOX
+/* Stack swap is gated by WaitMode != KernelMode; on Xbox the stack
+ * swapper machinery never runs, so the candidate-list insert is dead
+ * weight in every inlined wait-block setup.
+ *
+ * Note: the WaitMode arms of KiCheckAlertability must NOT be folded the
+ * same way.  KeWaitForSingleObject/Multiple/DelayExecutionThread are
+ * exported: titles pass WaitMode = UserMode with Alertable = TRUE, and
+ * user-APC delivery during alertable waits is how overlapped IO completion
+ * routines run.  Dropping those arms starves async IO to one per clock tick. */
+#define KiCheckThreadStackSwap(t, w) FALSE
+#endif
+
 VOID
 FASTCALL
 KiWaitTest(IN PVOID ObjectPointer,
@@ -469,20 +482,19 @@ KeWaitForSingleObject(IN PVOID Object,
                 if ((CurrentObject->Header.SignalState > 0) ||
                     (Thread == CurrentObject->OwnerThread))
                 {
-                    /* Just unwait this guy and exit */
-                    if (CurrentObject->Header.SignalState != MINLONG)
+#ifndef SARCH_XBOX
+                    /* SignalState == MINLONG requires the same thread to
+                     * recursively acquire 2^31 times -- not reachable. */
+                    if (CurrentObject->Header.SignalState == MINLONG)
                     {
-                        /* It has a normal signal state. Unwait and return */
-                        KiSatisfyMutantWait(CurrentObject, Thread);
-                        WaitStatus = (NTSTATUS)Thread->WaitStatus;
-                        goto DontWait;
-                    }
-                    else
-                    {
-                        /* Raise an exception */
                         KiReleaseDispatcherLock(Thread->WaitIrql);
                         ExRaiseStatus(STATUS_MUTANT_LIMIT_EXCEEDED);
-                   }
+                    }
+#endif
+                    /* It has a normal signal state. Unwait and return */
+                    KiSatisfyMutantWait(CurrentObject, Thread);
+                    WaitStatus = (NTSTATUS)Thread->WaitStatus;
+                    goto DontWait;
                 }
             }
             else if (CurrentObject->Header.SignalState > 0)
@@ -684,21 +696,19 @@ KeWaitForMultipleObjects(IN ULONG Count,
                         if ((CurrentObject->Header.SignalState > 0) ||
                             (Thread == CurrentObject->OwnerThread))
                         {
-                            /* This is a Wait Any, so unwait this and exit */
-                            if (CurrentObject->Header.SignalState !=
+#ifndef SARCH_XBOX
+                            /* MINLONG requires 2^31 recursive acquires. */
+                            if (CurrentObject->Header.SignalState ==
                                 (LONG)MINLONG)
                             {
-                                /* Normal signal state, unwait it and return */
-                                KiSatisfyMutantWait(CurrentObject, Thread);
-                                WaitStatus = (NTSTATUS)Thread->WaitStatus | Index;
-                                goto DontWait;
-                            }
-                            else
-                            {
-                                /* Raise an exception (see wasm.ru) */
                                 KiReleaseDispatcherLock(Thread->WaitIrql);
                                 ExRaiseStatus(STATUS_MUTANT_LIMIT_EXCEEDED);
                             }
+#endif
+                            /* Normal signal state, unwait it and return */
+                            KiSatisfyMutantWait(CurrentObject, Thread);
+                            WaitStatus = (NTSTATUS)Thread->WaitStatus | Index;
+                            goto DontWait;
                         }
                     }
                     else if (CurrentObject->Header.SignalState > 0)
@@ -725,16 +735,18 @@ KeWaitForMultipleObjects(IN ULONG Count,
                     /* Check if we're dealing with a mutant again */
                     if (CurrentObject->Header.Type == MutantObject)
                     {
-                        /* Check if it has an invalid count */
+#ifndef SARCH_XBOX
+                        /* MINLONG requires 2^31 recursive acquires. */
                         if ((Thread == CurrentObject->OwnerThread) &&
                             (CurrentObject->Header.SignalState == (LONG)MINLONG))
                         {
-                            /* Raise an exception */
                             KiReleaseDispatcherLock(Thread->WaitIrql);
                             ExRaiseStatus(STATUS_MUTANT_LIMIT_EXCEEDED);
                         }
-                        else if ((CurrentObject->Header.SignalState <= 0) &&
-                                 (Thread != CurrentObject->OwnerThread))
+                        else
+#endif
+                        if ((CurrentObject->Header.SignalState <= 0) &&
+                            (Thread != CurrentObject->OwnerThread))
                         {
                             /* We don't own it, can't satisfy the wait */
                             break;

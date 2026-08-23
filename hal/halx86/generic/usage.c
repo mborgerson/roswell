@@ -604,6 +604,11 @@ VOID
 NTAPI
 HalpGetNMICrashFlag(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No configuration manager; NMI crash dump flag stays disabled. */
+    HalpNMIDumpFlag = 0;
+    return;
+#else
     UNICODE_STRING ValueName;
     UNICODE_STRING KeyName = RTL_CONSTANT_STRING(L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\CrashControl");
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -647,6 +652,7 @@ HalpGetNMICrashFlag(VOID)
         /* We're done */
         ZwClose(Handle);
     }
+#endif
 }
 #endif  /* !_MINIHAL_ */
 

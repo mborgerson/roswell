@@ -16,7 +16,9 @@ KDPC AtapCompletionDpc;
 
 static DRIVER_CANCEL AtaReqDeviceQueueCancelIo;
 static DRIVER_LIST_CONTROL AtaReqPreparePrdTable;
+#ifndef SARCH_XBOX
 static DRIVER_CONTROL AtaReqCallSendRequestSerialized;
+#endif
 
 static
 NTSTATUS
@@ -70,6 +72,7 @@ AtaSrbStatusToNtStatus(
     return STATUS_IO_DEVICE_ERROR;
 }
 
+#ifndef SARCH_XBOX
 static
 VOID
 AtaDeviceCheckPowerState(
@@ -107,6 +110,7 @@ AtaDeviceCheckPowerState(
         ERR("Failed to power up device '%s' %lx\n", DevExt->FriendlyName, Status);
     }
 }
+#endif
 
 static
 VOID
@@ -283,10 +287,12 @@ AtaReqCompleteRequest(
             }
         }
 
+#ifndef SARCH_XBOX
         if (Device->PortData->PortFlags & PORT_FLAG_IS_SIMPLEX)
         {
             IoFreeController(Device->PortData->HwSyncObject);
         }
+#endif
     }
 
     AtaReqReleaseResources(Device, Request);
@@ -684,14 +690,27 @@ AtaReqSendRequest(
     /* DMA transfer, get the S/G list for the MDL */
     if (Request->Flags & REQUEST_FLAG_PROGRAM_DMA)
     {
-        if (AtaReqGetScatterGatherList(Device->PortData, Request))
+        /* bus-master IDE descriptors must point at word-aligned
+         * memory (PciIdePreparePrdTable asserts this).  Title-supplied
+         * buffers are not guaranteed aligned -- the official Xbox kernel
+         * handles byte-aligned buffers transparently.  When the user
+         * buffer is odd-aligned, route the request through the existing
+         * PIO fallback so it doesn't trip the assertion.  Skipping the
+         * SG-list build for that case also avoids reserving DMA channel
+         * resources we won't use. */
+        BOOLEAN BufferMisaligned =
+            ((ULONG_PTR)Request->DataBuffer & ATA_MIN_BUFFER_ALIGNMENT) != 0;
+
+        if (!BufferMisaligned &&
+            AtaReqGetScatterGatherList(Device->PortData, Request))
             return;
 
         /* This channel can only perform DMA I/O and PIO is not supported */
         if (Device->DeviceFlags & DEVICE_PIO_VIA_DMA)
             goto CompleteNoMemory;
 
-        /* S/G list construction failed, attempt to fall back to PIO mode */
+        /* S/G list construction failed or buffer was misaligned --
+         * fall back to PIO mode */
         if (!AtaReqDmaTransferToPioTransfer(Request))
             goto CompleteNoMemory;
     }
@@ -723,6 +742,7 @@ CompleteNoMemory:
     AtaReqStartCompletionDpc(Request);
 }
 
+#ifndef SARCH_XBOX
 static
 IO_ALLOCATION_ACTION
 NTAPI
@@ -741,6 +761,7 @@ AtaReqCallSendRequestSerialized(
     AtaReqSendRequest(Request);
     return KeepObject;
 }
+#endif
 
 VOID
 NTAPI
@@ -909,6 +930,7 @@ AtaReqDispatchRequest(
 
     if (Success)
     {
+#ifndef SARCH_XBOX
         if (PortData->PortFlags & PORT_FLAG_IS_SIMPLEX)
         {
             IoAllocateController(PortData->HwSyncObject,
@@ -917,6 +939,7 @@ AtaReqDispatchRequest(
                                  Request);
         }
         else
+#endif
         {
             AtaReqSendRequest(Request);
         }
@@ -950,11 +973,13 @@ AtaReqTranslateRequest(
             break;
         }
 
+#ifndef SARCH_XBOX
         case SRB_FUNCTION_IO_CONTROL:
         {
             SrbStatus = AtaReqSmartIoControl(DevExt, Request, Srb);
             break;
         }
+#endif
 
         case SRB_FUNCTION_SHUTDOWN:
         case SRB_FUNCTION_FLUSH:
@@ -1137,7 +1162,9 @@ AtaReqDeviceQueueAddSrb(
 
     AtaReqDeviceQueueInsertSrb(Device, Srb, Irp);
 
+#ifndef SARCH_XBOX
     AtaDeviceCheckPowerState(Device);
+#endif
 
     /*
      * If the device queue is full or frozen,
@@ -1373,8 +1400,10 @@ AtaReqThawQueue(
     KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
     KeAcquireSpinLockAtDpcLevel(&Device->QueueLock);
 
+#ifndef SARCH_XBOX
     if (Device->FreeRequestsBitmap != Device->MaxRequestsBitmap)
         AtaDeviceCheckPowerState(Device);
+#endif
 
     PortData = Device->PortData;
     KeAcquireSpinLockAtDpcLevel(&PortData->QueueLock);
@@ -1687,6 +1716,7 @@ AtaPdoDispatchScsi(
             break;
         }
 
+#ifndef SARCH_XBOX
         case SRB_FUNCTION_IO_CONTROL:
         {
             if (AtaPdoHandleIoControl(DevExt, Srb, &Status))
@@ -1694,6 +1724,7 @@ AtaPdoDispatchScsi(
 
             __fallthrough;
         }
+#endif
         case SRB_FUNCTION_SHUTDOWN:
         case SRB_FUNCTION_FLUSH:
         case SRB_FUNCTION_EXECUTE_SCSI:

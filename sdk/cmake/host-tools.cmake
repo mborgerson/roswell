@@ -2,11 +2,24 @@
 include(ExternalProject)
 
 function(setup_host_tools)
-    list(APPEND HOST_TOOLS asmpp bin2c widl gendib cabman fatten hpp isohybrid mkhive mkisofs obj2bin spec2def geninc mkshelllink txt2nls utf16le xml2sdb)
-    if(NOT MSVC)
-        list(APPEND HOST_TOOLS pefixup)
-        if (ARCH STREQUAL "i386")
-            list(APPEND HOST_TOOLS rsym)
+    if(SARCH STREQUAL "xbox")
+        # Only what the flash/kernel build actually invokes.  Skipped:
+        # asmpp (no .asmpp uses), cabman/fatten/isohybrid/mkisofs (CD/
+        # image plumbing -- we gate the whole ISO subtree on SARCH=pc),
+        # gendib/mkshelllink/obj2bin/txt2nls/xml2sdb (resource/install
+        # plumbing), rsym (we build dwarf, NO_ROSSYM=TRUE), mkhive
+        # (SYSTEM hive -- no hive on Xbox).
+        list(APPEND HOST_TOOLS bin2c geninc hpp spec2def utf16le widl)
+        if(NOT MSVC)
+            list(APPEND HOST_TOOLS pefixup)
+        endif()
+    else()
+        list(APPEND HOST_TOOLS asmpp bin2c widl gendib cabman fatten hpp isohybrid mkisofs obj2bin spec2def geninc mkshelllink txt2nls utf16le xml2sdb mkhive)
+        if(NOT MSVC)
+            list(APPEND HOST_TOOLS pefixup)
+            if (ARCH STREQUAL "i386")
+                list(APPEND HOST_TOOLS rsym)
+            endif()
         endif()
     endif()
     if ((ARCH STREQUAL "amd64") AND (CMAKE_C_COMPILER_ID STREQUAL "GNU"))
@@ -98,6 +111,15 @@ function(setup_host_tools)
         set(HOST_BUILD_TYPE Debug)
     endif()
 
+    # Build only the host tools we actually invoke -- otherwise the
+    # sub-build's default `all` target builds the whole ReactOS host-side
+    # tree (dbghelp, every native-* tool, install plumbing) regardless of
+    # which ones we imported above.
+    set(_host_build_targets)
+    foreach(_tool ${HOST_TOOLS})
+        list(APPEND _host_build_targets --target ${_tool})
+    endforeach()
+
     ExternalProject_Add(host-tools
         SOURCE_DIR ${REACTOS_SOURCE_DIR}
         PREFIX ${REACTOS_BINARY_DIR}/host-tools
@@ -106,6 +128,12 @@ function(setup_host_tools)
         CMAKE_ARGS
             -UCMAKE_TOOLCHAIN_FILE
             -DARCH:STRING=${ARCH}
+            # pin SARCH=pc for the host-tools subbuild even when
+            # the outer build is SARCH=xbox -- the host tools (cabman,
+            # widl, spec2def, etc.) don't care about Xbox vs. PC, and our
+            # SARCH=xbox gating in sdk/lib/ etc. would skip libs the
+            # host-tools build still needs (cmlib for mkhive, etc.).
+            -DSARCH:STRING=pc
             -DCMAKE_INSTALL_PREFIX=${REACTOS_BINARY_DIR}/host-tools
             -DTOOLS_FOLDER=${REACTOS_BINARY_DIR}/host-tools/bin
             -DTARGET_COMPILER_ID=${CMAKE_C_COMPILER_ID}
@@ -113,6 +141,7 @@ function(setup_host_tools)
             -DCMAKE_BUILD_TYPE=${HOST_BUILD_TYPE}
             ${CMAKE_HOST_TOOLS_EXTRA_ARGS}
         BUILD_ALWAYS TRUE
+        BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> ${_host_build_targets}
         INSTALL_COMMAND ${CMAKE_COMMAND} -E true
         BUILD_BYPRODUCTS ${HOST_TOOLS_OUTPUT}
     )

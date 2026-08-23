@@ -61,7 +61,15 @@ extern UCHAR VidpTextColor;
 extern ULONG VidpCurrentX;
 extern ULONG VidpCurrentY;
 extern URECT VidpScrollRegion;
+#ifdef SARCH_XBOX
+extern const UCHAR VidpFontData[96 * BOOTCHAR_HEIGHT];
+/* Map to the printable-ASCII table; everything else renders as '?'. */
+#define VidpFontIndex(_Char) \
+    ((((_Char) >= 0x20) && ((_Char) < 0x80)) ? (_Char) - 0x20 : ('?' - 0x20))
+#else
 extern const UCHAR VidpFontData[256 * BOOTCHAR_HEIGHT];
+#define VidpFontIndex(_Char) (_Char)
+#endif
 extern const RGBQUAD VidpDefaultPalette[BV_MAX_COLORS];
 
 #define RGB(r, g, b)    ((RGBQUAD)(((UCHAR)(b) | ((USHORT)((UCHAR)(g))<<8)) | (((ULONG)(UCHAR)(r))<<16)))
@@ -73,10 +81,10 @@ extern const RGBQUAD VidpDefaultPalette[BV_MAX_COLORS];
 #define InitializePalette() InitPaletteWithTable((PULONG)VidpDefaultPalette, BV_MAX_COLORS)
 
 #ifdef CHAR_GEN_UPSIDE_DOWN
-# define GetFontPtr(_Char)  (&VidpFontData[(_Char) * BOOTCHAR_HEIGHT] + BOOTCHAR_HEIGHT - 1)
+# define GetFontPtr(_Char)  (&VidpFontData[VidpFontIndex(_Char) * BOOTCHAR_HEIGHT] + BOOTCHAR_HEIGHT - 1)
 # define FONT_PTR_DELTA     (-1)
 #else
-# define GetFontPtr(_Char)  (&VidpFontData[(_Char) * BOOTCHAR_HEIGHT])
+# define GetFontPtr(_Char)  (&VidpFontData[VidpFontIndex(_Char) * BOOTCHAR_HEIGHT])
 # define FONT_PTR_DELTA     (1)
 #endif
 

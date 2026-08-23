@@ -64,6 +64,18 @@ NTSTATUS
 NTAPI
 ObpCreateKernelObjectsSD(OUT PSECURITY_DESCRIPTOR *SecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* No DACL on Xbox; allocate just the SD header. */
+    PSECURITY_DESCRIPTOR Sd = ExAllocatePoolWithTag(PagedPool,
+                                                    sizeof(SECURITY_DESCRIPTOR),
+                                                    TAG_SD);
+    if (Sd == NULL)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    *SecurityDescriptor = Sd;
+    return RtlCreateSecurityDescriptor(Sd, SECURITY_DESCRIPTOR_REVISION);
+#else
     PSECURITY_DESCRIPTOR Sd = NULL;
     PACL Dacl;
     ULONG AclSize, SdSize;
@@ -128,6 +140,7 @@ done:
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 CODE_SEG("INIT")
@@ -274,7 +287,9 @@ ObInitSystem(VOID)
     ObjectTypeInitializer.GenericMapping = ObpTypeMapping;
     ObjectTypeInitializer.DefaultNonPagedPoolCharge = sizeof(OBJECT_TYPE);
     ObjectTypeInitializer.InvalidAttributes = OBJ_OPENLINK;
+#ifndef SARCH_XBOX
     ObjectTypeInitializer.DeleteProcedure = ObpDeleteObjectType;
+#endif
     ObCreateObjectType(&Name, &ObjectTypeInitializer, NULL, &ObpTypeObjectType);
 
     /* Create the Directory Type */

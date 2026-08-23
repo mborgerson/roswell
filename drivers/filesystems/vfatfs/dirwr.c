@@ -282,7 +282,9 @@ vfatFindDirSpace(
     }
 
     count = pDirFcb->RFCB.FileSize.u.LowPart / SizeDirEntry;
-    size = DeviceExt->FatInfo.BytesPerCluster / SizeDirEntry;
+    /* Pin per cache block, not per cluster: clusters can exceed the
+     * block size, and entries never straddle a block. */
+    size = min(DeviceExt->FatInfo.BytesPerCluster, 16384UL) / SizeDirEntry;
     for (i = 0; i < count; i++, pFatEntry = (PDIR_ENTRY)((ULONG_PTR)pFatEntry + SizeDirEntry))
     {
         if (Context == NULL || (i % size) == 0)
@@ -293,7 +295,7 @@ vfatFindDirSpace(
             }
             _SEH2_TRY
             {
-                CcPinRead(pDirFcb->FileObject, &FileOffset, DeviceExt->FatInfo.BytesPerCluster, PIN_WAIT, &Context, (PVOID*)&pFatEntry);
+                CcPinRead(pDirFcb->FileObject, &FileOffset, size * SizeDirEntry, PIN_WAIT, &Context, (PVOID*)&pFatEntry);
             }
             _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
             {
@@ -301,7 +303,7 @@ vfatFindDirSpace(
             }
             _SEH2_END;
 
-            FileOffset.u.LowPart += DeviceExt->FatInfo.BytesPerCluster;
+            FileOffset.u.LowPart += size * SizeDirEntry;
         }
         if (ENTRY_END(IsFatX, pFatEntry))
         {
@@ -349,23 +351,35 @@ vfatFindDirSpace(
             {
                 return FALSE;
             }
-            /* clear the new dir cluster */
-            FileOffset.u.LowPart = (ULONG)(pDirFcb->RFCB.FileSize.QuadPart -
-                                           DeviceExt->FatInfo.BytesPerCluster);
-            _SEH2_TRY
+            /* clear the new dir cluster, one cache block at a time
+             * (clusters can exceed the block size) */
             {
-                CcPinRead(pDirFcb->FileObject, &FileOffset, DeviceExt->FatInfo.BytesPerCluster, PIN_WAIT, &Context, (PVOID*)&pFatEntry);
-            }
-            _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
-            {
-                _SEH2_YIELD(return FALSE);
-            }
-            _SEH2_END;
+                ULONG Chunk = min(DeviceExt->FatInfo.BytesPerCluster, 16384UL);
+                ULONG Cleared;
 
-            if (IsFatX)
-                memset(pFatEntry, 0xff, DeviceExt->FatInfo.BytesPerCluster);
-            else
-                RtlZeroMemory(pFatEntry, DeviceExt->FatInfo.BytesPerCluster);
+                FileOffset.u.LowPart = (ULONG)(pDirFcb->RFCB.FileSize.QuadPart -
+                                               DeviceExt->FatInfo.BytesPerCluster);
+                for (Cleared = 0;
+                     Cleared < DeviceExt->FatInfo.BytesPerCluster;
+                     Cleared += Chunk)
+                {
+                    _SEH2_TRY
+                    {
+                        CcPinRead(pDirFcb->FileObject, &FileOffset, Chunk, PIN_WAIT, &Context, (PVOID*)&pFatEntry);
+                    }
+                    _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        _SEH2_YIELD(return FALSE);
+                    }
+                    _SEH2_END;
+
+                    memset(pFatEntry, IsFatX ? 0xff : 0, Chunk);
+                    CcSetDirtyPinnedData(Context, NULL);
+                    CcUnpinData(Context);
+                    Context = NULL;
+                    FileOffset.u.LowPart += Chunk;
+                }
+            }
         }
         else if (*start + nbSlots < count)
         {
@@ -396,6 +410,7 @@ vfatFindDirSpace(
     return TRUE;
 }
 
+#ifndef SARCH_XBOX
 /*
   create a new FAT entry
 */
@@ -669,10 +684,12 @@ FATAddEntry(
                 return STATUS_DISK_FULL;
             }
 
+#ifndef SARCH_XBOX
             if (DeviceExt->FatInfo.FatType == FAT32)
             {
                 FAT32UpdateFreeClustersCount(DeviceExt);
             }
+#endif
         }
         else
         {
@@ -824,6 +841,7 @@ FATAddEntry(
     DPRINT("addentry ok\n");
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 /*
   create a new FAT entry
@@ -861,11 +879,16 @@ FATXAddEntry(
         return STATUS_DISK_FULL;
     }
     Index = DirContext.DirIndex = DirContext.StartIndex;
+#ifndef SARCH_XBOX
+    /* Bias past the synthesized '.'/'..' entries.  Xbox does not emit
+     * them (indices are raw on-disk), matching the undo in
+     * vfatMakeFCBFromDirEntry (fcb.c). */
     if (!vfatFCBIsRoot(ParentFcb))
     {
         DirContext.DirIndex += 2;
         DirContext.StartIndex += 2;
     }
+#endif
 
     DirContext.ShortNameU.Buffer = 0;
     DirContext.ShortNameU.Length = 0;
@@ -949,6 +972,7 @@ FATXAddEntry(
     return STATUS_SUCCESS;
 }
 
+#ifndef SARCH_XBOX
 /*
  * deleting an existing FAT entry
  */
@@ -1032,14 +1056,17 @@ FATDelEntry(
             CurrentCluster = NextCluster;
         }
 
+#ifndef SARCH_XBOX
         if (DeviceExt->FatInfo.FatType == FAT32)
         {
             FAT32UpdateFreeClustersCount(DeviceExt);
         }
+#endif
     }
 
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 /*
  * deleting an existing FAT entry
@@ -1157,8 +1184,6 @@ VfatMoveEntry(
 }
 
 extern BOOLEAN FATXIsDirectoryEmpty(PDEVICE_EXTENSION DeviceExt, PVFATFCB Fcb);
-extern BOOLEAN FATIsDirectoryEmpty(PDEVICE_EXTENSION DeviceExt, PVFATFCB Fcb);
-extern NTSTATUS FATGetNextDirEntry(PVOID *pContext, PVOID *pPage, PVFATFCB pDirFcb, PVFAT_DIRENTRY_CONTEXT DirContext, BOOLEAN First);
 extern NTSTATUS FATXGetNextDirEntry(PVOID *pContext, PVOID *pPage, PVFATFCB pDirFcb, PVFAT_DIRENTRY_CONTEXT DirContext, BOOLEAN First);
 
 VFAT_DISPATCH FatXDispatch = {
@@ -1168,11 +1193,17 @@ VFAT_DISPATCH FatXDispatch = {
     FATXGetNextDirEntry,    // .GetNextDirEntry
 };
 
+#ifndef SARCH_XBOX
+/* Xbox only mounts FATX; the FAT dispatch and its workers are dead. */
+extern BOOLEAN FATIsDirectoryEmpty(PDEVICE_EXTENSION DeviceExt, PVFATFCB Fcb);
+extern NTSTATUS FATGetNextDirEntry(PVOID *pContext, PVOID *pPage, PVFATFCB pDirFcb, PVFAT_DIRENTRY_CONTEXT DirContext, BOOLEAN First);
+
 VFAT_DISPATCH FatDispatch = {
     FATIsDirectoryEmpty,    // .IsDirectoryEmpty
     FATAddEntry,            // .AddEntry
     FATDelEntry,            // .DelEntry
     FATGetNextDirEntry,     // .GetNextDirEntry
 };
+#endif
 
 /* EOF */

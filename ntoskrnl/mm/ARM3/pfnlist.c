@@ -112,8 +112,10 @@ MiDecrementAvailablePages(
 
         DPRINT1("Running low on pages: %lu remaining\n", MmAvailablePages);
 
+#ifndef SARCH_XBOX
         /* Call RosMm and see if it can release any pages for us */
         MmRebalanceMemoryConsumers();
+#endif
     }
 }
 
@@ -479,6 +481,12 @@ MiRemoveAnyPage(IN ULONG Color)
     PFN_NUMBER PageIndex;
     PMMPFN Pfn1;
 
+#ifdef NXK_MM_PHYS
+    /* The nxmm array allocator owns the supply; this entry remains for
+     * the ARM3-internal callers. */
+    return NxkPageSupplyTakeAny(Color);
+#endif
+
     /* Make sure PFN lock is held and we have pages */
     MI_ASSERT_PFN_LOCK_HELD();
     ASSERT(Color < MmSecondaryColors);
@@ -539,6 +547,10 @@ MiRemoveZeroPage(IN ULONG Color)
     PFN_NUMBER PageIndex;
     PMMPFN Pfn1;
     BOOLEAN Zero = FALSE;
+
+#ifdef NXK_MM_PHYS
+    return NxkPageSupplyTakeZero(Color);
+#endif
 
     /* Make sure PFN lock is held and we have pages */
     MI_ASSERT_PFN_LOCK_HELD();
@@ -616,6 +628,14 @@ MiInsertPageInFreeList(IN PFN_NUMBER PageFrameIndex)
     ULONG Color;
     PMMPFN Blink;
     PMMCOLOR_TABLES ColorTable;
+
+#ifdef NXK_MM_PHYS
+    /* Boot-time PFN population and the ARM3-internal frees (pool page
+     * teardown, share-count zero) all funnel here; hand the page to the
+     * nxmm array.  The MMPFN entry keeps its last owner's state. */
+    NxkPageSupplyReturn(PageFrameIndex);
+    return;
+#endif
 
     /* Make sure the page index is valid */
     MI_ASSERT_PFN_LOCK_HELD();
@@ -974,6 +994,16 @@ MiInitializePfn(IN PFN_NUMBER PageFrameIndex,
     PMMPFN Pfn1;
     NTSTATUS Status;
     PMMPTE PointerPtePte;
+
+#ifdef NXK_MM_PHYS
+    /* Page identity lives in the nxmm array; MMPFN state is graffiti
+     * on the shared frame and must not be read back. */
+    UNREFERENCED_PARAMETER(PageFrameIndex);
+    UNREFERENCED_PARAMETER(PointerPte);
+    UNREFERENCED_PARAMETER(Modified);
+    return;
+#endif
+
     MI_ASSERT_PFN_LOCK_HELD();
 
     /* Setup the PTE */
@@ -1302,6 +1332,12 @@ MiInitializePfnForOtherProcess(IN PFN_NUMBER PageFrameIndex,
                                IN PVOID PteAddress,
                                IN PFN_NUMBER PteFrame)
 {
+#ifdef NXK_MM_PHYS
+    UNREFERENCED_PARAMETER(PageFrameIndex);
+    UNREFERENCED_PARAMETER(PteAddress);
+    UNREFERENCED_PARAMETER(PteFrame);
+    return;
+#endif
     PMMPFN Pfn1;
 
     /* Setup the PTE */

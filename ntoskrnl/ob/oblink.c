@@ -55,6 +55,7 @@ ObpProcessDosDeviceSymbolicLink(IN POBJECT_SYMBOLIC_LINK SymbolicLink,
     /* Initialize lookup context */
     ObpInitializeLookupContext(&LookupContext);
 
+#ifndef SARCH_XBOX
     /*
      * If we have to create the link, locate the IoDeviceObject if any
      * this symbolic link points to.
@@ -213,7 +214,26 @@ ReparseTargetPath:
             DirectoryObject = Object;
         }
     }
+#endif
 
+    /* If we were asked to delete the symlink */
+    if (DeleteLink)
+    {
+        /* Zero its target */
+        RtlInitUnicodeString(&SymbolicLink->LinkTargetRemaining, NULL);
+
+        /* If we had a target objected, dereference it */
+        if (SymbolicLink->LinkTargetObject != NULL)
+        {
+            ObDereferenceObject(SymbolicLink->LinkTargetObject);
+            SymbolicLink->LinkTargetObject = NULL;
+        }
+    }
+#ifndef SARCH_XBOX
+    /*
+     * DriveType[]/DriveMap consumers (ObQueryDeviceMapInformation,
+     * NtQueryInformationProcess) are not used on Xbox; skip the update.
+     */
     DeviceMap = NULL;
     /* That's a drive letter, find a suitable device map */
     if (SymbolicLink->DosDeviceDriveIndex != 0)
@@ -231,19 +251,8 @@ ReparseTargetPath:
         }
     }
 
-    /* If we were asked to delete the symlink */
     if (DeleteLink)
     {
-        /* Zero its target */
-        RtlInitUnicodeString(&SymbolicLink->LinkTargetRemaining, NULL);
-
-        /* If we had a target objected, dereference it */
-        if (SymbolicLink->LinkTargetObject != NULL)
-        {
-            ObDereferenceObject(SymbolicLink->LinkTargetObject);
-            SymbolicLink->LinkTargetObject = NULL;
-        }
-
         /* If it was a drive letter */
         if (DeviceMap != NULL)
         {
@@ -316,6 +325,7 @@ ReparseTargetPath:
             KeReleaseGuardedMutex(&ObpDeviceMapLock);
         }
     }
+#endif
 
     /* Cleanup */
     ObpReleaseLookupContext(&LookupContext);

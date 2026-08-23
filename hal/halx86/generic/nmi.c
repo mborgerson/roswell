@@ -28,6 +28,16 @@ HalHandleNMI(
     IN PVOID NmiInfo)
 {
     UNREFERENCED_PARAMETER(NmiInfo);
+#ifdef SARCH_XBOX
+    /* NMI is hard-wired to the PIC's RTC pin on the MCPX and we never enable
+     * it; if one somehow fires (chipset glitch, expansion-card UNAA, etc.),
+     * just freeze here.  Dropping the rich diagnostic path lets the linker
+     * prune Inbv{AcquireDisplayOwnership,ResetDisplay,SolidColorFill,
+     * SetScrollRegion,SetTextColor,InstallDisplayStringFilter,
+     * EnableDisplayString} -- those are also called by KeBugCheck, so the
+     * net savings come from the SystemControl I/O + EISA branch only. */
+    while (TRUE) NOTHING;
+#else
 #ifndef _MINIHAL_
     SYSTEM_CONTROL_PORT_B_REGISTER SystemControl;
 
@@ -106,4 +116,5 @@ HalHandleNMI(
     /* Freeze the system */
     while (TRUE)
         NOTHING;
+#endif /* !SARCH_XBOX */
 }

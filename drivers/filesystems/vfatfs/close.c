@@ -50,6 +50,10 @@ VfatCommonCloseFile(
     vfatReleaseFCB(DeviceExt, pFcb);
 }
 
+/* Delayed close is dead code: the only place that sets FCB_DELAYED_CLOSE
+ * is disabled upstream (see cleanup.c), so the close worker can never be
+ * queued. */
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 VfatCloseWorker(
@@ -151,6 +155,7 @@ VfatPostCloseFile(
 
     return STATUS_SUCCESS;
 }
+#endif /* !SARCH_XBOX */
 
 /*
  * FUNCTION: Closes a file
@@ -184,12 +189,17 @@ VfatCloseFile(
         vfatDestroyCCB(pCcb);
     }
 
+#ifdef SARCH_XBOX
+    /* FCB_DELAYED_CLOSE is never set; close immediately. */
+    VfatCommonCloseFile(DeviceExt, pFcb);
+#else
     /* If we have to close immediately, or if delaying failed, close */
     if (VfatGlobalData->ShutdownStarted || !BooleanFlagOn(pFcb->Flags, FCB_DELAYED_CLOSE) ||
         !NT_SUCCESS(VfatPostCloseFile(DeviceExt, FileObject)))
     {
         VfatCommonCloseFile(DeviceExt, pFcb);
     }
+#endif
 
     FileObject->FsContext2 = NULL;
     FileObject->FsContext = NULL;
@@ -227,8 +237,17 @@ VfatClose(
         return VfatMarkIrpContextForQueue(IrpContext);
     }
 
+    /* Closing the last file object can drop the final reference on a
+     * delete-pending volume device, freeing the device extension this
+     * routine still touches: DirResource is released *after* the close.
+     * Pin the device across the window so the deletion happens at our
+     * dereference instead. */
+    ObReferenceObject(IrpContext->DeviceObject);
+
     Status = VfatCloseFile(IrpContext->DeviceExt, IrpContext->FileObject);
     ExReleaseResourceLite(&IrpContext->DeviceExt->DirResource);
+
+    ObDereferenceObject(IrpContext->DeviceObject);
 
     IrpContext->Irp->IoStatus.Information = 0;
 

@@ -16,6 +16,8 @@
 
 /* FUNCTIONS ******************************************************************/
 
+/* Only the cross-process attach/detach paths swap address spaces. */
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 KiSwapProcess(IN PKPROCESS NewProcess,
@@ -56,4 +58,5 @@ KiSwapProcess(IN PKPROCESS NewProcess,
     /* Update IOPM offset */
     Pcr->TSS->IoMapBase = NewProcess->IopmOffset;
 }
+#endif /* !SARCH_XBOX */
 

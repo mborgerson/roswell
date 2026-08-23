@@ -424,6 +424,10 @@ NTSTATUS
 AtaPortDeviceChangePower(
     _In_ PATAPORT_PORT_DATA PortData)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(PortData);
+    return STATUS_SUCCESS;
+#else
     PATAPORT_DEVICE_EXTENSION DevExt;
     NTSTATUS Status;
 
@@ -440,6 +444,7 @@ AtaPortDeviceChangePower(
 
     AtaPortClearDeviceAction(DevExt, ACTION_DEVICE_POWER);
     return STATUS_SUCCESS;
+#endif
 }
 
 static
@@ -680,7 +685,9 @@ AtaPortExitStateMachine(
             AtaReqFreezeQueue(DevExt, QUEUE_FLAG_FROZEN_REMOVED);
             AtaReqFlushDeviceQueue(&DevExt->Device);
 
+#ifndef SARCH_XBOX
             AtaDeviceFlushPowerIrpQueue(DevExt);
+#endif
             KeSetEvent(&DevExt->Worker.ConfigureEvent, 0, FALSE);
 
             DevExt->Worker.EnumStatus = DEV_STATUS_NO_DEVICE;

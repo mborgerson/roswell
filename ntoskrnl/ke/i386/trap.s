@@ -62,14 +62,31 @@ idt _KiTrap0F,         INT_32_DPL0  /* INT 14-28: UNDEFINED INTERRUPTS      */
 ENDR
 idt _KiRaiseSecurityCheckFailure, INT_32_DPL3
                                     /* INT 29: Handler for __fastfail       */
+#ifdef SARCH_XBOX
+/* No ntdll on Xbox; the tick-count and callback-return services are unused. */
+idt _KiTrap0F,         INT_32_DPL0  /* INT 2A: unused on Xbox               */
+idt _KiTrap0F,         INT_32_DPL0  /* INT 2B: unused on Xbox               */
+#else
 idt _KiGetTickCount,   INT_32_DPL3  /* INT 2A: Get Tick Count Handler       */
 idt _KiCallbackReturn, INT_32_DPL3  /* INT 2B: User-Mode Callback Return    */
+#endif
 idt _KiRaiseAssertion, INT_32_DPL3  /* INT 2C: Debug Assertion Handler      */
 idt _KiDebugService,   INT_32_DPL3  /* INT 2D: Debug Service Handler        */
+#ifdef SARCH_XBOX
+/* Xbox titles run ring 0; the syscall trap path is unused. */
+idt _KiTrap0F,         INT_32_DPL0  /* INT 2E: unused on Xbox               */
+#else
 idt _KiSystemService,  INT_32_DPL3  /* INT 2E: System Call Service Handler  */
+#endif
 idt _KiTrap0F,         INT_32_DPL0  /* INT 2F: RESERVED                     */
 i = HEX(30)
+#ifdef SARCH_XBOX
+/* Xbox uses only the 16 PIC IRQ vectors 0x30-0x3F; 0x40-0xFF are unused, so the
+ * IDT is 64 entries -- matching the retail kernel (512-byte IDT). */
+REPEAT 16
+#else
 REPEAT 208
+#endif
     GENERATE_IDT_STUB %i
     i = i + 1
 ENDR
@@ -77,7 +94,11 @@ ENDR
 PUBLIC _KiIdtDescriptor
 _KiIdtDescriptor:
     .short 0
+#ifdef SARCH_XBOX
+    .short HEX(1FF)  /* 64 entries x 8 - 1 */
+#else
     .short HEX(7FF)
+#endif
     .long _KiIdt
 
 PUBLIC _KiUnexpectedEntrySize
@@ -115,8 +136,10 @@ TRAP_ENTRY KiTrap10, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiTrap11, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiTrap13, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiRaiseSecurityCheckFailure, KI_PUSH_FAKE_ERROR_CODE
+#ifndef SARCH_XBOX
 TRAP_ENTRY KiGetTickCount, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiCallbackReturn, KI_PUSH_FAKE_ERROR_CODE
+#endif
 TRAP_ENTRY KiRaiseAssertion, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiDebugService, KI_PUSH_FAKE_ERROR_CODE
 TRAP_ENTRY KiUnexpectedInterruptTail, 0
@@ -138,6 +161,7 @@ PUBLIC _KiInterruptTemplateDispatch
 _KiInterruptTemplateDispatch:
     CFI_ENDPROC
 
+#ifndef SARCH_XBOX
 EXTERN @KiSystemServiceHandler@8:PROC
 PUBLIC _KiSystemService
 .PROC _KiSystemService
@@ -160,6 +184,7 @@ PUBLIC _KiFastCallEntryWithSingleStep
     or dword ptr [ecx + KTRAP_FRAME_EFLAGS], EFLAGS_TF
     KiCallHandler @KiSystemServiceHandler@8
 .ENDP
+#endif
 
 PUBLIC _KiEndUnexpectedRange@0
 _KiEndUnexpectedRange@0:
@@ -169,15 +194,18 @@ _KiEndUnexpectedRange@0:
 
 /* EXIT CODE *****************************************************************/
 
+#ifndef SARCH_XBOX
 KiTrapExitStub KiSystemCallReturn,        (KI_RESTORE_EAX OR KI_RESTORE_EFLAGS OR KI_EXIT_JMP)
 KiTrapExitStub KiSystemCallSysExitReturn, (KI_RESTORE_EAX OR KI_RESTORE_FS OR KI_RESTORE_EFLAGS OR KI_EXIT_SYSCALL)
 KiTrapExitStub KiSystemCallTrapReturn,    (KI_RESTORE_EAX OR KI_RESTORE_FS OR KI_EXIT_IRET)
+#endif
 
 KiTrapExitStub KiEditedTrapReturn,        (KI_RESTORE_VOLATILES OR KI_RESTORE_EFLAGS OR KI_EDITED_FRAME OR KI_EXIT_RET)
 KiTrapExitStub KiTrapReturn,              (KI_RESTORE_VOLATILES OR KI_RESTORE_SEGMENTS OR KI_EXIT_IRET)
 KiTrapExitStub KiTrapReturnNoSegments,    (KI_RESTORE_VOLATILES OR KI_EXIT_IRET)
 KiTrapExitStub KiTrapReturnNoSegmentsRet8,(KI_RESTORE_VOLATILES OR KI_RESTORE_EFLAGS OR KI_EXIT_RET8)
 
+#ifndef SARCH_XBOX
 EXTERN _PsConvertToGuiThread@0:PROC
 
 PUBLIC _KiConvertToGuiThread@0
@@ -254,4 +282,5 @@ _KiSystemCallTrampoline@12:
     leave
 
     ret 12
+#endif
 END

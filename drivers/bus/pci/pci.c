@@ -14,8 +14,10 @@
 #define NDEBUG
 #include <debug.h>
 
+#ifndef SARCH_XBOX
 static DRIVER_DISPATCH PciDispatchDeviceControl;
 static NTSTATUS NTAPI PciDispatchDeviceControl(IN PDEVICE_OBJECT DeviceObject, IN PIRP Irp);
+#endif
 
 static DRIVER_ADD_DEVICE PciAddDevice;
 static NTSTATUS NTAPI PciAddDevice(IN PDRIVER_OBJECT DriverObject, IN PDEVICE_OBJECT PhysicalDeviceObject);
@@ -34,6 +36,8 @@ PCI_TYPE1_CFG_CYCLE_BITS PciDebuggingDevice[2] = {0};
 
 /*** PRIVATE *****************************************************************/
 
+#ifndef SARCH_XBOX
+/* No IOCTL consumers exist for the bus FDO/PDOs on Xbox. */
 static NTSTATUS
 NTAPI
 PciDispatchDeviceControl(
@@ -70,9 +74,11 @@ PciDispatchDeviceControl(
 
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 
-static NTSTATUS
+static
+NTSTATUS
 NTAPI
 PciPnpControl(
     IN PDEVICE_OBJECT DeviceObject,
@@ -201,6 +207,9 @@ CODE_SEG("INIT")
 VOID
 PciLocateKdDevices(VOID)
 {
+#ifdef SARCH_XBOX
+    return;
+#else
     ULONG i;
     NTSTATUS Status;
     WCHAR KeyNameBuffer[16];
@@ -242,6 +251,7 @@ PciLocateKdDevices(VOID)
                 PciSlot.u.bits.DeviceNumber,
                 PciSlot.u.bits.FunctionNumber);
     }
+#endif
 }
 
 CODE_SEG("INIT")
@@ -256,11 +266,20 @@ DriverEntry(
     UNREFERENCED_PARAMETER(RegistryPath);
     DPRINT("Peripheral Component Interconnect Bus Driver\n");
 
+#ifndef SARCH_XBOX
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = PciDispatchDeviceControl;
+#endif
     DriverObject->MajorFunction[IRP_MJ_PNP] = PciPnpControl;
+#ifndef SARCH_XBOX
+    /* IRP_MJ_POWER gated on Xbox; PciPowerControl anchors FdoPowerControl
+     * and the PoCallDriver chain. */
     DriverObject->MajorFunction[IRP_MJ_POWER] = PciPowerControl;
+#endif
     DriverObject->DriverExtension->AddDevice = PciAddDevice;
+#ifndef SARCH_XBOX
+    /* The bus driver never unloads. */
     DriverObject->DriverUnload = PciUnload;
+#endif
 
     Status = IoAllocateDriverObjectExtension(DriverObject,
                                              DriverObject,
@@ -434,6 +453,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
 
     switch (Device->PciConfig.BaseClass)
     {
+#ifndef SARCH_XBOX
         case PCI_CLASS_PRE_20:
             switch (Device->PciConfig.SubClass)
             {
@@ -447,18 +467,22 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     break;
             }
             break;
+#endif
 
         case PCI_CLASS_MASS_STORAGE_CTLR:
             switch (Device->PciConfig.SubClass)
             {
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_MSC_SCSI_BUS_CTLR:
                     Description = L"SCSI controller";
                     break;
+#endif
 
                 case PCI_SUBCLASS_MSC_IDE_CTLR:
                     Description = L"IDE controller";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_MSC_FLOPPY_CTLR:
                     Description = L"Floppy disk controller";
                     break;
@@ -470,6 +494,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                 case PCI_SUBCLASS_MSC_RAID_CTLR:
                     Description = L"RAID controller";
                     break;
+#endif
 
                 default:
                     Description = L"Mass storage controller";
@@ -484,6 +509,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     Description = L"Ethernet controller";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_NET_TOKEN_RING_CTLR:
                     Description = L"Token-Ring controller";
                     break;
@@ -495,6 +521,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                 case PCI_SUBCLASS_NET_ATM_CTLR:
                     Description = L"ATM controller";
                     break;
+#endif
 
                 default:
                     Description = L"Network controller";
@@ -509,9 +536,11 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     Description = L"VGA display controller";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_VID_XGA_CTLR:
                     Description = L"XGA display controller";
                     break;
+#endif
 
                 case PCI_SUBCLASS_VID_3D_CTLR:
                     Description = L"Multimedia display controller";
@@ -534,9 +563,11 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     Description = L"Multimedia audio device";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_MM_TELEPHONY_DEV:
                     Description = L"Multimedia telephony device";
                     break;
+#endif
 
                 default:
                     Description = L"Other multimedia device";
@@ -544,6 +575,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
             }
             break;
 
+#ifndef SARCH_XBOX
         case PCI_CLASS_MEMORY_CTLR:
             switch (Device->PciConfig.SubClass)
             {
@@ -560,6 +592,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     break;
             }
             break;
+#endif
 
         case PCI_CLASS_BRIDGE_DEV:
             switch (Device->PciConfig.SubClass)
@@ -572,6 +605,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     Description = L"PCI-ISA bridge";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_BR_EISA:
                     Description = L"PCI-EISA bridge";
                     break;
@@ -579,11 +613,13 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                 case PCI_SUBCLASS_BR_MCA:
                     Description = L"PCI-Micro Channel bridge";
                     break;
+#endif
 
                 case PCI_SUBCLASS_BR_PCI_TO_PCI:
                     Description = L"PCI-PCI bridge";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_BR_PCMCIA:
                     Description = L"PCI-PCMCIA bridge";
                     break;
@@ -595,6 +631,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                 case PCI_SUBCLASS_BR_CARDBUS:
                     Description = L"PCI-CARDBUS bridge";
                     break;
+#endif
 
                 default:
                     Description = L"Other bridge device";
@@ -602,6 +639,7 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
             }
             break;
 
+#ifndef SARCH_XBOX
         case PCI_CLASS_SIMPLE_COMMS_CTLR:
             switch (Device->PciConfig.SubClass)
             {
@@ -651,10 +689,12 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                     break;
             }
             break;
+#endif
 
         case PCI_CLASS_SERIAL_BUS_CTLR:
             switch (Device->PciConfig.SubClass)
             {
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_SB_IEEE1394:
                     Description = L"FireWire controller";
                     break;
@@ -666,14 +706,17 @@ PciCreateDeviceDescriptionString(PUNICODE_STRING DeviceDescription,
                 case PCI_SUBCLASS_SB_SSA:
                     Description = L"SSA controller";
                     break;
+#endif
 
                 case PCI_SUBCLASS_SB_USB:
                     Description = L"USB controller";
                     break;
 
+#ifndef SARCH_XBOX
                 case PCI_SUBCLASS_SB_FIBRE_CHANNEL:
                     Description = L"Fibre Channel controller";
                     break;
+#endif
 
                 case PCI_SUBCLASS_SB_SMBUS:
                     Description = L"SMBus controller";

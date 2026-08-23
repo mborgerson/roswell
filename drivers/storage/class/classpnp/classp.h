@@ -484,7 +484,15 @@ typedef struct _CLASS_ERROR_LOG_DATA {
 #endif
 
 #define NUM_ERROR_LOG_ENTRIES   16
+#ifdef SARCH_XBOX
+/* The per-FDO debug packet log embeds DBG_NUM_PACKET_LOG_ENTRIES full
+ * TRANSFER_PACKET structs (~50 KB at 128) in CLASS_PRIVATE_FDO_DATA -- a
+ * forensic ring only a kernel debugger reads.  On the 64 MB box that's ~25
+ * pages (2 FDOs) the title needs; shrink the ring to a token size. */
+#define DBG_NUM_PACKET_LOG_ENTRIES 2
+#else
 #define DBG_NUM_PACKET_LOG_ENTRIES (64*2)   // 64 send&receive's
+#endif
 
 #if (NTDDI_VERSION >= NTDDI_WIN8)
 typedef
@@ -1238,7 +1246,14 @@ ClasspIsIdleRequestSupported(
     PIRP Irp
     )
 {
-#ifndef __REACTOS__
+#ifdef SARCH_XBOX
+    /* No idle priority infrastructure -- IdlePrioritySupported is never
+     * set TRUE. Returning a constant false lets the compiler kill the
+     * ClasspEnqueueIdleRequest -> ClasspStart/StopIdleTimer chain. */
+    UNREFERENCED_PARAMETER(FdoData);
+    UNREFERENCED_PARAMETER(Irp);
+    return FALSE;
+#elif !defined(__REACTOS__)
     IO_PRIORITY_HINT ioPriority = IoGetIoPriorityHint(Irp);
     return ((ioPriority <= IoPriorityLow) && (FdoData->IdlePrioritySupported == TRUE));
 #else
@@ -1269,10 +1284,18 @@ ClasspIsIdleRequest(
     PIRP Irp
     )
 {
+#ifdef SARCH_XBOX
+    /* ClasspMarkIrpAsIdle is never called on Xbox (the idle-priority
+     * path is gated), so this always reads FALSE -- short-circuit so the
+     * compiler can kill ClasspCompleteIdleRequest and its callees. */
+    UNREFERENCED_PARAMETER(Irp);
+    return FALSE;
+#else
 #ifdef _MSC_VER
 #pragma warning(suppress:4305) // truncation is not an issue for this use case
 #endif
     return ((BOOLEAN)Irp->Tail.Overlay.DriverContext[1]);
+#endif
 }
 
 FORCEINLINE

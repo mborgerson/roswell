@@ -18,7 +18,14 @@
 /* GLOBALS ********************************************************************/
 
 ULONG MmProcessColorSeed = 0x12345678;
+#ifdef SARCH_XBOX
+/* No dead-stack parking: titles churn threads while running at the
+ * edge of RAM, and a parked stack is title-visible capacity (retail
+ * probe: stack pages return on thread exit). */
+ULONG MmMaximumDeadKernelStacks = 0;
+#else
 ULONG MmMaximumDeadKernelStacks = 5;
+#endif
 SLIST_HEADER MmDeadStackSListHead;
 ULONG MmRotatingUniprocessorNumber = 0;
 
@@ -122,6 +129,13 @@ NTAPI
 MmDeleteTeb(IN PEPROCESS Process,
             IN PTEB Teb)
 {
+#ifdef SARCH_XBOX
+    /* MmCreateTeb is gated out and no thread is created with a TEB on
+     * Xbox (titles only use kernel-mode threads), so this is unreachable. */
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Teb);
+    return;
+#else
     ULONG_PTR TebEnd;
     PETHREAD Thread = PsGetCurrentThread();
     PMMVAD Vad;
@@ -180,18 +194,21 @@ MmDeleteTeb(IN PEPROCESS Process,
 
     /* Detach */
     KeDetachProcess();
+#endif /* SARCH_XBOX */
 }
 
 VOID
 NTAPI
-MmDeleteKernelStack(IN PVOID StackBase,
-                    IN BOOLEAN GuiStack)
+MmDeleteKernelStackEx(IN PVOID StackBase,
+                      IN BOOLEAN GuiStack,
+                      IN SIZE_T StackSize)
 {
     PMMPTE PointerPte;
     PFN_NUMBER PageFrameNumber, PageTableFrameNumber;
     PFN_COUNT StackPages;
     PMMPFN Pfn1, Pfn2;
     ULONG i;
+    LONG FreedPages = 0;
     KIRQL OldIrql;
     PSLIST_ENTRY SListEntry;
 
@@ -202,9 +219,10 @@ MmDeleteKernelStack(IN PVOID StackBase,
     PointerPte--;
 
     //
-    // If this is a small stack, just push the stack onto the dead stack S-LIST
+    // If this is a small default-sized stack, just push the stack onto the dead
+    // stack S-LIST.  Non-default-sized stacks bypass the cache.
     //
-    if (!GuiStack)
+    if (!GuiStack && (StackSize == 0 || StackSize == KERNEL_STACK_SIZE))
     {
         if (ExQueryDepthSList(&MmDeadStackSListHead) < MmMaximumDeadKernelStacks)
         {
@@ -217,8 +235,8 @@ MmDeleteKernelStack(IN PVOID StackBase,
     //
     // Calculate pages used
     //
-    StackPages = BYTES_TO_PAGES(GuiStack ?
-                                MmLargeStackSize : KERNEL_STACK_SIZE);
+    StackPages = BYTES_TO_PAGES(GuiStack ? MmLargeStackSize :
+                                (StackSize ? StackSize : KERNEL_STACK_SIZE));
 
     /* Acquire the PFN lock */
     OldIrql = MiAcquirePfnLock();
@@ -233,6 +251,15 @@ MmDeleteKernelStack(IN PVOID StackBase,
         //
         if (PointerPte->u.Hard.Valid == 1)
         {
+#ifdef NXK_MM_PHYS
+            /* Page identity lives in the nxmm array: hand the frame
+             * straight back (page-table pages are permanent). */
+            PageFrameNumber = PFN_FROM_PTE(PointerPte);
+            PointerPte->u.Long = 0;
+            KeInvalidateTlbEntry(MiPteToAddress(PointerPte));
+            NxkPageSupplySetOwner(PageFrameNumber, 0);
+            NxkPageSupplyReturn(PageFrameNumber);
+#else
             /* Get the PTE's page */
             PageFrameNumber = PFN_FROM_PTE(PointerPte);
             Pfn1 = MiGetPfnEntry(PageFrameNumber);
@@ -249,6 +276,8 @@ MmDeleteKernelStack(IN PVOID StackBase,
 
             /* And now delete the actual stack page */
             MiDecrementShareCount(Pfn1, PageFrameNumber);
+#endif
+            FreedPages++;
         }
 
         //
@@ -265,16 +294,27 @@ MmDeleteKernelStack(IN PVOID StackBase,
     /* Release the PFN lock */
     MiReleasePfnLock(OldIrql);
 
+    InterlockedExchangeAdd((volatile LONG *)&NxkMmStackPages, -FreedPages);
+
     //
     // Release the PTEs
     //
     MiReleaseSystemPtes(PointerPte, StackPages + 1, SystemPteSpace);
 }
 
+VOID
+NTAPI
+MmDeleteKernelStack(IN PVOID StackBase,
+                    IN BOOLEAN GuiStack)
+{
+    MmDeleteKernelStackEx(StackBase, GuiStack, 0);
+}
+
 PVOID
 NTAPI
-MmCreateKernelStack(IN BOOLEAN GuiStack,
-                    IN UCHAR Node)
+MmCreateKernelStackEx(IN BOOLEAN GuiStack,
+                      IN UCHAR Node,
+                      IN SIZE_T StackSize)
 {
     PFN_COUNT StackPtes, StackPages;
     PMMPTE PointerPte, StackPte;
@@ -299,10 +339,13 @@ MmCreateKernelStack(IN BOOLEAN GuiStack,
     else
     {
         //
-        // If the dead stack S-LIST has a stack on it, use it instead of allocating
-        // new system PTEs for this stack
+        // If a custom size was requested, honor it.  Otherwise fall back to the
+        // default stack size and consult the dead-stack S-LIST cache.
         //
-        if (ExQueryDepthSList(&MmDeadStackSListHead))
+        if (StackSize == 0) StackSize = KERNEL_STACK_SIZE;
+
+        if (StackSize == KERNEL_STACK_SIZE &&
+            ExQueryDepthSList(&MmDeadStackSListHead))
         {
             SListEntry = InterlockedPopEntrySList(&MmDeadStackSListHead);
             if (SListEntry != NULL)
@@ -312,10 +355,7 @@ MmCreateKernelStack(IN BOOLEAN GuiStack,
             }
         }
 
-        //
-        // We'll allocate 12K and that's it
-        //
-        StackPtes = BYTES_TO_PAGES(KERNEL_STACK_SIZE);
+        StackPtes = BYTES_TO_PAGES(StackSize);
         StackPages = StackPtes;
     }
 
@@ -362,7 +402,27 @@ MmCreateKernelStack(IN BOOLEAN GuiStack,
         /* Get a page and write the current invalid PTE */
         MI_SET_USAGE(MI_USAGE_KERNEL_STACK);
         MI_SET_PROCESS2(PsGetCurrentProcess()->ImageFileName);
-        PageFrameIndex = MiRemoveAnyPage(MI_GET_NEXT_COLOR());
+        PageFrameIndex = NxkPageSupplyTakeAny(MI_GET_NEXT_COLOR());
+        if (PageFrameIndex == 0)
+        {
+            /* Exhausted mid-stack: unwind this call's pages and fail
+             * the create cleanly -- a stack built on frame 0 double
+             * faults on first use. */
+            while (i-- > 0)
+            {
+                PFN_NUMBER Undo;
+                PointerPte--;
+                Undo = PFN_FROM_PTE(PointerPte);
+                PointerPte->u.Long = 0;
+#ifdef NXK_MM_PHYS
+                NxkPageSupplySetOwner(Undo, 0);
+                NxkPageSupplyReturn(Undo);
+#endif
+            }
+            MiReleasePfnLock(OldIrql);
+            MiReleaseSystemPtes(StackPte, StackPtes + 1, SystemPteSpace);
+            return NULL;
+        }
         MI_WRITE_INVALID_PTE(PointerPte, InvalidPte);
 
         /* Initialize the PFN entry for this page */
@@ -371,6 +431,11 @@ MmCreateKernelStack(IN BOOLEAN GuiStack,
         /* Write the valid PTE */
         TempPte.u.Hard.PageFrameNumber = PageFrameIndex;
         MI_WRITE_VALID_PTE(PointerPte, TempPte);
+#ifdef NXK_MM_PHYS
+        /* Stack frames relocate like any PTE-mapped page; the
+         * relocation pass skips the running thread's own stack. */
+        NxkPageSupplySetOwner(PageFrameIndex, (ULONG_PTR)PointerPte);
+#endif
     }
 
     //
@@ -378,10 +443,21 @@ MmCreateKernelStack(IN BOOLEAN GuiStack,
     //
     MiReleasePfnLock(OldIrql);
 
+    InterlockedExchangeAdd((volatile LONG *)&NxkMmStackPages,
+                           (LONG)StackPages);
+
     //
     // Return the stack address
     //
     return BaseAddress;
+}
+
+PVOID
+NTAPI
+MmCreateKernelStack(IN BOOLEAN GuiStack,
+                    IN UCHAR Node)
+{
+    return MmCreateKernelStackEx(GuiStack, Node, 0);
 }
 
 NTSTATUS
@@ -447,7 +523,7 @@ MmGrowKernelStackEx(IN PVOID StackPointer,
         /* Get a page and write the current invalid PTE */
         MI_SET_USAGE(MI_USAGE_KERNEL_STACK_EXPANSION);
         MI_SET_PROCESS2(PsGetCurrentProcess()->ImageFileName);
-        PageFrameIndex = MiRemoveAnyPage(MI_GET_NEXT_COLOR());
+        PageFrameIndex = NxkPageSupplyTakeAny(MI_GET_NEXT_COLOR());
         MI_WRITE_INVALID_PTE(LimitPte, InvalidPte);
 
         /* Initialize the PFN entry for this page */
@@ -457,7 +533,11 @@ MmGrowKernelStackEx(IN PVOID StackPointer,
         MI_MAKE_HARDWARE_PTE_KERNEL(&TempPte, LimitPte, MM_READWRITE, PageFrameIndex);
 
         /* Write the valid PTE */
-        MI_WRITE_VALID_PTE(LimitPte--, TempPte);
+        MI_WRITE_VALID_PTE(LimitPte, TempPte);
+#ifdef NXK_MM_PHYS
+        NxkPageSupplySetOwner(PageFrameIndex, (ULONG_PTR)LimitPte);
+#endif
+        LimitPte--;
     }
 
     //
@@ -513,6 +593,7 @@ MmSetMemoryPriorityProcess(IN PEPROCESS Process,
     return OldPriority;
 }
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI
 MmCreatePeb(IN PEPROCESS Process,
@@ -852,6 +933,7 @@ MmCreateTeb(IN PEPROCESS Process,
     *BaseTeb = Teb;
     return Status;
 }
+#endif /* SARCH_XBOX -- MmCreatePeb + MmCreateTeb unused; titles are ring 0 */
 
 #ifdef _M_AMD64
 static
@@ -927,6 +1009,10 @@ FailPath:
 }
 #endif
 
+#ifdef SARCH_XBOX
+/* The boot-created system process is the only process; its address
+   space is built once during Phase 0/1. */
+#endif
 NTSTATUS
 NTAPI
 MmInitializeProcessAddressSpace(IN PEPROCESS Process,
@@ -1030,11 +1116,13 @@ MmInitializeProcessAddressSpace(IN PEPROCESS Process,
     /* Now initialize the working set list */
     MiInitializeWorkingSetList(&Process->Vm);
 
+#ifndef NXK_MM_PHYS
     /* The rule is that the owner process is always in the FLINK of the PDE's PFN entry */
     Pfn = MiGetPfnEntry(Process->Pcb.DirectoryTableBase[0] >> PAGE_SHIFT);
     ASSERT(Pfn->u4.PteFrame == MiGetPfnEntryIndex(Pfn));
     ASSERT(Pfn->u1.WsIndex == 0);
     Pfn->u1.Event = (PKEVENT)Process;
+#endif
 
     /* Sanity check */
     ASSERT(Process->PhysicalVadRoot == NULL);
@@ -1085,6 +1173,7 @@ MmInitializeProcessAddressSpace(IN PEPROCESS Process,
         while (Length--) *Destination++ = (UCHAR)*Source++;
         *Destination = ANSI_NULL;
 
+#ifndef SARCH_XBOX
         /* Check if caller wants an audit name */
         if (AuditName)
         {
@@ -1097,6 +1186,7 @@ MmInitializeProcessAddressSpace(IN PEPROCESS Process,
                 return Status;
             }
         }
+#endif
 
         /* Map the section */
         Status = MmMapViewOfSection(Section,
@@ -1188,11 +1278,11 @@ MmCreateProcessAddressSpace(IN ULONG MinWs,
      */
     Color = MI_GET_NEXT_PROCESS_COLOR(Process);
     MI_SET_USAGE(MI_USAGE_PAGE_DIRECTORY);
-    TableBaseIndex = MiRemoveZeroPageSafe(Color);
+    TableBaseIndex = NxkPageSupplyTakeZeroIfReady(Color);
     if (!TableBaseIndex)
     {
         /* No zero pages, grab a free one */
-        TableBaseIndex = MiRemoveAnyPage(Color);
+        TableBaseIndex = NxkPageSupplyTakeAny(Color);
 
         /* Zero it outside the PFN lock */
         MiReleasePfnLock(OldIrql);
@@ -1201,11 +1291,11 @@ MmCreateProcessAddressSpace(IN ULONG MinWs,
     }
     MI_SET_USAGE(MI_USAGE_PAGE_DIRECTORY);
     Color = MI_GET_NEXT_PROCESS_COLOR(Process);
-    HyperIndex = MiRemoveZeroPageSafe(Color);
+    HyperIndex = NxkPageSupplyTakeZeroIfReady(Color);
     if (!HyperIndex)
     {
         /* No zero pages, grab a free one */
-        HyperIndex = MiRemoveAnyPage(Color);
+        HyperIndex = NxkPageSupplyTakeAny(Color);
 
         /* Zero it outside the PFN lock */
         MiReleasePfnLock(OldIrql);
@@ -1214,11 +1304,11 @@ MmCreateProcessAddressSpace(IN ULONG MinWs,
     }
     MI_SET_USAGE(MI_USAGE_PAGE_TABLE);
     Color = MI_GET_NEXT_PROCESS_COLOR(Process);
-    WsListIndex = MiRemoveZeroPageSafe(Color);
+    WsListIndex = NxkPageSupplyTakeZeroIfReady(Color);
     if (!WsListIndex)
     {
         /* No zero pages, grab a free one */
-        WsListIndex = MiRemoveAnyPage(Color);
+        WsListIndex = NxkPageSupplyTakeAny(Color);
 
         /* Zero it outside the PFN lock */
         MiReleasePfnLock(OldIrql);
@@ -1239,9 +1329,9 @@ MmCreateProcessAddressSpace(IN ULONG MinWs,
     if (!MiArchCreateProcessAddressSpace(Process, DirectoryTableBase))
     {
         OldIrql = MiAcquirePfnLock();
-        MiInsertPageInFreeList(WsListIndex);
-        MiInsertPageInFreeList(HyperIndex);
-        MiInsertPageInFreeList(TableBaseIndex);
+        NxkPageSupplyReturn(WsListIndex);
+        NxkPageSupplyReturn(HyperIndex);
+        NxkPageSupplyReturn(TableBaseIndex);
         MiReleasePfnLock(OldIrql);
         Process->WorkingSetPage = 0;
         DirectoryTableBase[0] = 0;

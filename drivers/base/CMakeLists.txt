@@ -1,3 +1,9 @@
+if(SARCH STREQUAL "xbox")
+    # Only the two static libs the Xbox kernel actually links.
+    add_subdirectory(bootvid)
+    add_subdirectory(kdrosdbg)
+    return()
+endif()
 
 add_subdirectory(beep)
 add_subdirectory(bootvid)

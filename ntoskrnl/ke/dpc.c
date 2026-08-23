@@ -55,8 +55,13 @@ KiCheckTimerTable(IN ULARGE_INTEGER CurrentTime)
             if (Timer->DueTime.QuadPart <= CurrentTime.QuadPart)
             {
                 /* Check if the DPC was queued, but didn't run */
+#ifdef SARCH_XBOX
+                if (!(KeGetCurrentPrcb()->TimerRequest) &&
+                    !KiTimerExpireDpc.Inserted)
+#else
                 if (!(KeGetCurrentPrcb()->TimerRequest) &&
                     !(*((volatile PULONG*)(&KiTimerExpireDpc.DpcData))))
+#endif
                 {
                     /* This is bad, breakpoint! */
                     DPRINT1("Invalid timer state!\n");
@@ -608,8 +613,12 @@ KiRetireDpcList(IN PKPRCB Prcb)
                 RemoveEntryList(DpcEntry);
                 Dpc = CONTAINING_RECORD(DpcEntry, KDPC, DpcListEntry);
 
-                /* Clear its DPC data and save its parameters */
+                /* Clear its queued state and save its parameters */
+#ifdef SARCH_XBOX
+                Dpc->Inserted = FALSE;
+#else
                 Dpc->DpcData = NULL;
+#endif
                 DeferredRoutine = Dpc->DeferredRoutine;
                 DeferredContext = Dpc->DeferredContext;
                 SystemArgument1 = Dpc->SystemArgument1;
@@ -682,11 +691,15 @@ KiInitializeDpc(IN PKDPC Dpc,
 {
     /* Setup the DPC Object */
     Dpc->Type = Type;
+#ifdef SARCH_XBOX
+    Dpc->Inserted = FALSE;
+#else
     Dpc->Number = 0;
     Dpc->Importance= MediumImportance;
+    Dpc->DpcData = NULL;
+#endif
     Dpc->DeferredRoutine = DeferredRoutine;
     Dpc->DeferredContext = DeferredContext;
-    Dpc->DpcData = NULL;
 }
 
 /* PUBLIC FUNCTIONS **********************************************************/
@@ -726,6 +739,39 @@ KeInsertQueueDpc(IN PKDPC Dpc,
                  IN PVOID SystemArgument1,
                  IN PVOID SystemArgument2)
 {
+#ifdef SARCH_XBOX
+    /* Uniprocessor, retail KDPC: the Inserted boolean is the queued gate
+       (no DpcData backpointer, no importance ordering, no targeting). */
+    KIRQL OldIrql;
+    PKPRCB Prcb;
+    PKDPC_DATA DpcData;
+    BOOLEAN DpcConfigured = FALSE;
+    ASSERT_DPC(Dpc);
+
+    KeRaiseIrql(HIGH_LEVEL, &OldIrql);
+    Prcb = KeGetCurrentPrcb();
+    DpcData = &Prcb->DpcData[DPC_NORMAL];
+
+    if (!Dpc->Inserted)
+    {
+        Dpc->Inserted = TRUE;
+        Dpc->SystemArgument1 = SystemArgument1;
+        Dpc->SystemArgument2 = SystemArgument2;
+        DpcData->DpcQueueDepth++;
+        DpcData->DpcCount++;
+        InsertTailList(&DpcData->DpcListHead, &Dpc->DpcListEntry);
+        DpcConfigured = TRUE;
+
+        if (!(Prcb->DpcRoutineActive) && !(Prcb->DpcInterruptRequested))
+        {
+            Prcb->DpcInterruptRequested = TRUE;
+            HalRequestSoftwareInterrupt(DISPATCH_LEVEL);
+        }
+    }
+
+    KeLowerIrql(OldIrql);
+    return DpcConfigured;
+#else
     KIRQL OldIrql;
     PKPRCB Prcb, CurrentPrcb;
     ULONG Cpu;
@@ -868,6 +914,7 @@ KeInsertQueueDpc(IN PKDPC Dpc,
     /* Lower IRQL */
     KeLowerIrql(OldIrql);
     return DpcConfigured;
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -877,6 +924,23 @@ BOOLEAN
 NTAPI
 KeRemoveQueueDpc(IN PKDPC Dpc)
 {
+#ifdef SARCH_XBOX
+    BOOLEAN Enable, WasInserted;
+    ASSERT_DPC(Dpc);
+
+    Enable = KeDisableInterrupts();
+
+    WasInserted = Dpc->Inserted;
+    if (WasInserted)
+    {
+        KeGetCurrentPrcb()->DpcData[DPC_NORMAL].DpcQueueDepth--;
+        RemoveEntryList(&Dpc->DpcListEntry);
+        Dpc->Inserted = FALSE;
+    }
+
+    KeRestoreInterrupts(Enable);
+    return WasInserted;
+#else
     PKDPC_DATA DpcData;
     BOOLEAN Enable;
     ASSERT_DPC(Dpc);
@@ -909,6 +973,7 @@ KeRemoveQueueDpc(IN PKDPC Dpc)
 
     /* Return if the DPC was in the queue or not */
     return DpcData ? TRUE : FALSE;
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -976,9 +1041,15 @@ NTAPI
 KeSetImportanceDpc (IN PKDPC Dpc,
                     IN KDPC_IMPORTANCE Importance)
 {
+#ifdef SARCH_XBOX
+    /* Retail KDPC carries no importance; every DPC queues at the tail. */
+    ASSERT_DPC(Dpc);
+    UNREFERENCED_PARAMETER(Importance);
+#else
     /* Set the DPC Importance */
     ASSERT_DPC(Dpc);
     Dpc->Importance = Importance;
+#endif
 }
 
 /*
@@ -989,9 +1060,15 @@ NTAPI
 KeSetTargetProcessorDpc(IN PKDPC Dpc,
                         IN CCHAR Number)
 {
+#ifdef SARCH_XBOX
+    /* Single processor; retail KDPC carries no target. */
+    ASSERT_DPC(Dpc);
+    UNREFERENCED_PARAMETER(Number);
+#else
     /* Set a target CPU */
     ASSERT_DPC(Dpc);
     Dpc->Number = Number + MAXIMUM_PROCESSORS;
+#endif
 }
 
 /*

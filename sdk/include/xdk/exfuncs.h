@@ -14,7 +14,10 @@ $if (_WDMDDK_)
 
 #define ExInitializeSListHead InitializeSListHead
 
-#if defined(_NTHAL_) && defined(_X86_)
+#if defined(_NTHAL_) && defined(_X86_) && !defined(SARCH_XBOX)
+/* The Exi* rename exists for NT's separately-built x86 HAL; on Xbox the
+ * HAL is folded into the kernel image and _NTHAL_ is defined tree-wide,
+ * so take the plain declarations below and bind directly. */
 
 NTKERNELAPI
 VOID

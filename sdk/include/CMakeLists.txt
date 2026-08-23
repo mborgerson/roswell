@@ -1,7 +1,9 @@
 
 add_subdirectory(asm)
 add_subdirectory(dxsdk)
-add_subdirectory(ndk/tests)
+if(NOT SARCH STREQUAL "xbox")
+    add_subdirectory(ndk/tests)
+endif()
 add_subdirectory(psdk)
 add_subdirectory(reactos)
 add_subdirectory(wine)

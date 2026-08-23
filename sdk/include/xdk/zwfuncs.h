@@ -1507,3 +1507,144 @@ ZwYieldExecution (
 $endif (_NTIFS_)
 #endif /* (NTDDI_VERSION >= NTDDI_WIN7) */
 
+$if (_WDMDDK_)
+#ifdef SARCH_XBOX
+/* Everything runs kernel-mode and PreviousMode folds to KernelMode, so
+ * Zw and Nt are the same function; bind Zw names straight to the Nt
+ * implementations at the source level (the PE/COFF toolchain cannot
+ * alias stdcall-decorated symbols at link time).  The Nt prototypes
+ * below cover callers whose headers only declare the Zw names; NDK
+ * consumers already have them. */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtClose(
+  _In_ HANDLE Handle);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtCreateDirectoryObject(
+  _Out_ PHANDLE DirectoryHandle,
+  _In_ ACCESS_MASK DesiredAccess,
+  _In_ POBJECT_ATTRIBUTES ObjectAttributes);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtMakeTemporaryObject(
+  _In_ HANDLE Handle);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtOpenFile(
+  _Out_ PHANDLE FileHandle,
+  _In_ ACCESS_MASK DesiredAccess,
+  _In_ POBJECT_ATTRIBUTES ObjectAttributes,
+  _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+  _In_ ULONG ShareAccess,
+  _In_ ULONG OpenOptions);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtOpenSymbolicLinkObject(
+  _Out_ PHANDLE LinkHandle,
+  _In_ ACCESS_MASK DesiredAccess,
+  _In_ POBJECT_ATTRIBUTES ObjectAttributes);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtQueryDirectoryFile(
+  _In_ HANDLE FileHandle,
+  _In_opt_ HANDLE Event,
+  _In_opt_ PIO_APC_ROUTINE ApcRoutine,
+  _In_opt_ PVOID ApcContext,
+  _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+  _Out_writes_bytes_(Length) PVOID FileInformation,
+  _In_ ULONG Length,
+  _In_ FILE_INFORMATION_CLASS FileInformationClass,
+  _In_ BOOLEAN ReturnSingleEntry,
+  _In_opt_ PUNICODE_STRING FileName,
+  _In_ BOOLEAN RestartScan);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtQueryInformationFile(
+  _In_ HANDLE FileHandle,
+  _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+  _Out_writes_bytes_(Length) PVOID FileInformation,
+  _In_ ULONG Length,
+  _In_ FILE_INFORMATION_CLASS FileInformationClass);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtReadFile(
+  _In_ HANDLE FileHandle,
+  _In_opt_ HANDLE Event,
+  _In_opt_ PIO_APC_ROUTINE ApcRoutine,
+  _In_opt_ PVOID ApcContext,
+  _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+  _Out_writes_bytes_(Length) PVOID Buffer,
+  _In_ ULONG Length,
+  _In_opt_ PLARGE_INTEGER ByteOffset,
+  _In_opt_ PULONG Key);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtSetInformationFile(
+  _In_ HANDLE FileHandle,
+  _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+  _In_reads_bytes_(Length) PVOID FileInformation,
+  _In_ ULONG Length,
+  _In_ FILE_INFORMATION_CLASS FileInformationClass);
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+NTSYSAPI
+NTSTATUS
+NTAPI
+NtWaitForSingleObject(
+  _In_ HANDLE Handle,
+  _In_ BOOLEAN Alertable,
+  _In_opt_ PLARGE_INTEGER Timeout);
+
+#define ZwAllocateVirtualMemory   NtAllocateVirtualMemory
+#define ZwClearEvent              NtClearEvent
+#define ZwClose                   NtClose
+#define ZwContinue                NtContinue
+#define ZwCreateDirectoryObject   NtCreateDirectoryObject
+#define ZwCreateEvent             NtCreateEvent
+#define ZwCreateFile              NtCreateFile
+#define ZwCreateSymbolicLinkObject NtCreateSymbolicLinkObject
+#define ZwMakeTemporaryObject     NtMakeTemporaryObject
+#define ZwOpenDirectoryObject     NtOpenDirectoryObject
+#define ZwOpenFile                NtOpenFile
+#define ZwOpenSymbolicLinkObject  NtOpenSymbolicLinkObject
+#define ZwQueryDirectoryFile      NtQueryDirectoryFile
+#define ZwQueryDirectoryObject    NtQueryDirectoryObject
+#define ZwQueryFullAttributesFile NtQueryFullAttributesFile
+#define ZwQueryInformationFile    NtQueryInformationFile
+#define ZwRaiseException          NtRaiseException
+#define ZwReadFile                NtReadFile
+#define ZwSetInformationFile      NtSetInformationFile
+#define ZwTerminateProcess        NtTerminateProcess
+#define ZwTerminateThread         NtTerminateThread
+#define ZwWaitForSingleObject     NtWaitForSingleObject
+#define ZwYieldExecution          NtYieldExecution
+#endif /* SARCH_XBOX */
+$endif (_WDMDDK_)
+

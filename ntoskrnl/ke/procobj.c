@@ -30,6 +30,10 @@ PVOID KeRaiseUserExceptionDispatcher;
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+/* On Xbox a single process owns every thread for the life of the system, so
+ * a cross-process attach can never be requested; the attach/detach entry
+ * points below keep their same-process fast paths and bug-check otherwise. */
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 KiAttachProcess(IN PKTHREAD Thread,
@@ -109,6 +113,7 @@ KiAttachProcess(IN PKTHREAD Thread,
         ASSERT(FALSE);
     }
 }
+#endif /* !SARCH_XBOX */
 
 VOID
 NTAPI
@@ -581,7 +586,9 @@ VOID
 NTAPI
 KeAttachProcess(IN PKPROCESS Process)
 {
+#ifndef SARCH_XBOX
     KLOCK_QUEUE_HANDLE ApcLock;
+#endif
     PKTHREAD Thread = KeGetCurrentThread();
     ASSERT_PROCESS(Process);
     ASSERT_IRQL_LESS_OR_EQUAL(DISPATCH_LEVEL);
@@ -602,6 +609,14 @@ KeAttachProcess(IN PKPROCESS Process)
     }
     else
     {
+#ifdef SARCH_XBOX
+        /* Cross-process attach is impossible with a single process */
+        KeBugCheckEx(INVALID_PROCESS_ATTACH_ATTEMPT,
+                     (ULONG_PTR)Process,
+                     (ULONG_PTR)Thread->ApcState.Process,
+                     Thread->ApcStateIndex,
+                     0);
+#else
         /* Acquire APC Lock */
         KiAcquireApcLockRaiseToSynch(Thread, &ApcLock);
 
@@ -610,6 +625,7 @@ KeAttachProcess(IN PKPROCESS Process)
 
         /* Legit attach attempt: do it! */
         KiAttachProcess(Thread, Process, &ApcLock, &Thread->SavedApcState);
+#endif
     }
 }
 
@@ -621,13 +637,19 @@ NTAPI
 KeDetachProcess(VOID)
 {
     PKTHREAD Thread = KeGetCurrentThread();
+#ifndef SARCH_XBOX
     KLOCK_QUEUE_HANDLE ApcLock;
     PKPROCESS Process;
+#endif
     ASSERT_IRQL_LESS_OR_EQUAL(DISPATCH_LEVEL);
 
     /* Check if it's attached */
     if (Thread->ApcStateIndex == OriginalApcEnvironment) return;
 
+#ifdef SARCH_XBOX
+    /* Threads can never be attached (see KeAttachProcess) */
+    KeBugCheck(INVALID_PROCESS_DETACH_ATTEMPT);
+#else
     /* Acquire APC Lock */
     KiAcquireApcLockRaiseToSynch(Thread, &ApcLock);
 
@@ -683,6 +705,7 @@ KeDetachProcess(VOID)
         Thread->ApcState.KernelApcPending = TRUE;
         HalRequestSoftwareInterrupt(APC_LEVEL);
     }
+#endif /* !SARCH_XBOX */
 }
 
 /*
@@ -704,7 +727,9 @@ NTAPI
 KeStackAttachProcess(IN PKPROCESS Process,
                      OUT PRKAPC_STATE ApcState)
 {
+#ifndef SARCH_XBOX
     KLOCK_QUEUE_HANDLE ApcLock;
+#endif
     PKTHREAD Thread = KeGetCurrentThread();
     ASSERT_PROCESS(Process);
     ASSERT_IRQL_LESS_OR_EQUAL(DISPATCH_LEVEL);
@@ -728,6 +753,14 @@ KeStackAttachProcess(IN PKPROCESS Process,
         return;
     }
 
+#ifdef SARCH_XBOX
+    /* Cross-process attach is impossible with a single process */
+    KeBugCheckEx(INVALID_PROCESS_ATTACH_ATTEMPT,
+                 (ULONG_PTR)Process,
+                 (ULONG_PTR)Thread->ApcState.Process,
+                 Thread->ApcStateIndex,
+                 0);
+#else
     /* Acquire APC Lock */
     KiAcquireApcLockRaiseToSynch(Thread, &ApcLock);
 
@@ -746,6 +779,7 @@ KeStackAttachProcess(IN PKPROCESS Process,
         KiAttachProcess(Thread, Process, &ApcLock, &Thread->SavedApcState);
         ApcState->Process = NULL;
     }
+#endif
 }
 
 /*
@@ -755,14 +789,21 @@ VOID
 NTAPI
 KeUnstackDetachProcess(IN PRKAPC_STATE ApcState)
 {
+#ifndef SARCH_XBOX
     KLOCK_QUEUE_HANDLE ApcLock;
-    PKTHREAD Thread = KeGetCurrentThread();
     PKPROCESS Process;
+#endif
+    PKTHREAD Thread = KeGetCurrentThread();
     ASSERT_IRQL_LESS_OR_EQUAL(DISPATCH_LEVEL);
 
     /* Check for magic value meaning we were already in the same process */
     if (ApcState->Process == (PKPROCESS)1) return;
 
+#ifdef SARCH_XBOX
+    /* Threads can never be attached (see KeStackAttachProcess) */
+    (VOID)Thread;
+    KeBugCheck(INVALID_PROCESS_DETACH_ATTEMPT);
+#else
     /* Loop to make sure no APCs are pending  */
     for (;;)
     {
@@ -850,6 +891,7 @@ KeUnstackDetachProcess(IN PRKAPC_STATE ApcState)
         Thread->ApcState.KernelApcPending = TRUE;
         HalRequestSoftwareInterrupt(APC_LEVEL);
     }
+#endif /* !SARCH_XBOX */
 }
 
 /*

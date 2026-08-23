@@ -14,6 +14,11 @@
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+#ifndef SARCH_XBOX
+/* Xbox has no ISA bus and titles don't drive PnP IRQ arbitration; the
+ * pcix/isapnp/pciidex query-interface paths that would call into the
+ * translator are dead.  Body-gate the translator + its helpers. */
+
 /*
  * @implemented
  */
@@ -147,6 +152,7 @@ FstubTranslateRequirement(IN OUT PVOID Context OPTIONAL,
 
     return STATUS_TRANSLATION_COMPLETE;
 }
+#endif /* !SARCH_XBOX */
 
 /*
  * @implemented
@@ -161,6 +167,16 @@ xHalGetInterruptTranslator(IN INTERFACE_TYPE ParentInterfaceType,
                            OUT PTRANSLATOR_INTERFACE Translator,
                            OUT PULONG BridgeBusNumber)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ParentInterfaceType);
+    UNREFERENCED_PARAMETER(ParentBusNumber);
+    UNREFERENCED_PARAMETER(BridgeInterfaceType);
+    UNREFERENCED_PARAMETER(Size);
+    UNREFERENCED_PARAMETER(Version);
+    UNREFERENCED_PARAMETER(Translator);
+    UNREFERENCED_PARAMETER(BridgeBusNumber);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PAGED_CODE();
 
     ASSERT(Version == HAL_IRQ_TRANSLATOR_VERSION);
@@ -183,4 +199,5 @@ xHalGetInterruptTranslator(IN INTERFACE_TYPE ParentInterfaceType,
     Translator->TranslateResourceRequirements = FstubTranslateRequirement;
 
     return STATUS_SUCCESS;
+#endif
 }

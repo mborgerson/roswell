@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="640"
+   height="480"
+   viewBox="0 0 640 480"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="splash.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#000000"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#282828"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="1"
+     inkscape:cx="348.5"
+     inkscape:cy="381.5"
+     inkscape:window-width="1914"
+     inkscape:window-height="2091"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g1180" />
+  <defs
+     id="defs2" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     style="display:none">
+    <text
+       xml:space="preserve"
+       style="font-size:64px;text-align:center;text-anchor:middle;opacity:1;fill:#ffffff;stroke:#ffffff;stroke-width:3.78"
+       x="319.99997"
+       y="264.32001"
+       id="text360"><tspan
+         sodipodi:role="line"
+         id="tspan358"
+         x="319.99997"
+         y="264.32001"
+         style="font-size:64px;text-align:center;text-anchor:middle;fill:#ffffff">nxkrnl</tspan></text>
+  </g>
+  <g
+     inkscape:label="Layer 1 copy"
+     inkscape:groupmode="layer"
+     id="g1180"
+     style="display:inline">
+    <text
+       xml:space="preserve"
+       style="font-size:42.6667px;text-align:center;text-anchor:middle;opacity:1;fill:#ffffff;stroke:#ffffff;stroke-width:3.78"
+       x="318.84375"
+       y="254.93524"
+       id="text1178"><tspan
+         sodipodi:role="line"
+         id="tspan1176"
+         x="318.84375"
+         y="254.93524"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:42.6667px;font-family:'Chakra Petch';-inkscape-font-specification:'Chakra Petch';text-align:center;text-anchor:middle;fill:#ffffff;stroke:none">nxkrnl</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:'Chakra Petch';-inkscape-font-specification:'Chakra Petch';text-align:center;text-anchor:middle;fill:#ffffff;stroke:none;stroke-width:3.78"
+       x="591.60669"
+       y="455.9082"
+       id="text2511"><tspan
+         sodipodi:role="line"
+         id="tspan2509"
+         x="591.60669"
+         y="455.9082"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:'Classic Console';-inkscape-font-specification:'Classic Console'">v1.0</tspan></text>
+  </g>
+</svg>

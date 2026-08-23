@@ -154,7 +154,14 @@ VidInitialize(
     }
 
     BytesPerPixel = NvGetBytesPerPixel(ControlStart, FrameBufferWidth);
-    ASSERT(BytesPerPixel >= 1 && BytesPerPixel <= 4);
+    if (BytesPerPixel < 1 || BytesPerPixel > 4)
+    {
+        /* CRTC pitch register reads back out-of-range when no XBE has set
+         * up scanout yet -- bail gracefully instead of an ASSERT-and-crash
+         * on a DBG build. */
+        DPRINT1("Bogus BytesPerPixel = %d\n", BytesPerPixel);
+        goto cleanup;
+    }
 
     if (BytesPerPixel != 4)
     {

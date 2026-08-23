@@ -62,6 +62,11 @@ BOOLEAN PspDoingGiveBacks;
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+#ifndef SARCH_XBOX
+/* Xbox has no ntdll -- PsLocateSystemDll / PspInitializeSystemDll +
+ * their helpers are never invoked (PspInitPhase1 just returns TRUE
+ * without staging the system DLL). Compiling them out drops their
+ * static reference to NtRaiseHardError + helpers (~2 KB). */
 static CODE_SEG("INIT")
 NTSTATUS
 PspLookupSystemDllEntryPoint(
@@ -147,6 +152,7 @@ PspLookupKernelUserEntryPoints(VOID)
     /* Return the status */
     return Status;
 }
+#endif /* !SARCH_XBOX (part 1) */
 
 NTSTATUS
 NTAPI
@@ -181,6 +187,7 @@ PspMapSystemDll(IN PEPROCESS Process,
     return Status;
 }
 
+#ifndef SARCH_XBOX /* part 2: PsLocateSystemDll + PspInitializeSystemDll */
 CODE_SEG("INIT")
 NTSTATUS
 NTAPI
@@ -297,14 +304,17 @@ PspInitializeSystemDll(VOID)
     /* Return status */
     return Status;
 }
+#endif /* !SARCH_XBOX */
 
 CODE_SEG("INIT")
 BOOLEAN
 NTAPI
 PspInitPhase1(VOID)
 {
-    /* Initialize the System DLL and return status of operation */
-    if (!NT_SUCCESS(PspInitializeSystemDll())) return FALSE;
+    /* no user-mode system DLL.  PspInitializeSystemDll maps ntdll and
+     * harvests the KiUser* dispatchers (APC / exception / callback delivery
+     * to user mode); nxkrnl has no user mode, so it is skipped and those
+     * dispatchers are never invoked. */
     return TRUE;
 }
 
@@ -415,7 +425,12 @@ PspInitPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     ObjectTypeInitializer.DefaultNonPagedPoolCharge = sizeof(EPROCESS);
     ObjectTypeInitializer.GenericMapping = PspProcessMapping;
     ObjectTypeInitializer.ValidAccessMask = PROCESS_ALL_ACCESS;
+#ifndef SARCH_XBOX
     ObjectTypeInitializer.DeleteProcedure = PspDeleteProcess;
+#else
+    /* The only processes (Idle, System) are created at boot and stay
+     * referenced forever, so process objects are never reaped. */
+#endif
     ObCreateObjectType(&Name, &ObjectTypeInitializer, NULL, &PsProcessType);
 
     /*  Initialize the Thread type  */
@@ -427,6 +442,7 @@ PspInitPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     ObjectTypeInitializer.DeleteProcedure = PspDeleteThread;
     ObCreateObjectType(&Name, &ObjectTypeInitializer, NULL, &PsThreadType);
 
+#ifndef SARCH_XBOX
     /*  Initialize the Job type  */
     RtlInitUnicodeString(&Name, L"Job");
     ObjectTypeInitializer.Length = sizeof(ObjectTypeInitializer);
@@ -439,6 +455,7 @@ PspInitPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 
     /* Initialize job structures external to this file */
     PspInitializeJobStructures();
+#endif
 
     /* Initialize the Working Set data */
     InitializeListHead(&PspWorkingSetChangeHead.List);
@@ -453,8 +470,10 @@ PspInitPhase0(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Setup the reaper */
     ExInitializeWorkItem(&PspReaperWorkItem, PspReapRoutine, NULL);
 
+#ifndef SARCH_XBOX
     /* Set the boot access token */
     PspBootAccessToken = (PTOKEN)(PsIdleProcess->Token.Value & ~MAX_FAST_REFS);
+#endif
 
     /* Setup default object attributes */
     InitializeObjectAttributes(&ObjectAttributes,

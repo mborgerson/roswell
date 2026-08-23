@@ -1,14 +1,10 @@
 
-spec2def(kdcom.dll kdrosdbg.spec ADD_IMPORTLIB)
-
-list(APPEND SOURCE
-    kdrosdbg.c
-    kdrosdbg.rc
-    ${CMAKE_CURRENT_BINARY_DIR}/kdcom.def)
-
-add_library(kdcom MODULE ${SOURCE})
-set_module_type(kdcom kerneldll ENTRYPOINT 0)
-add_importlibs(kdcom ntoskrnl hal)
+# kdcom -- the kernel debugger transport.  Built as a static library and
+# linked into the kernel rather than imported as a separate kerneldll.
+# _NTSYSTEM_: ntoskrnl APIs resolve as direct symbols, not DLL imports.
+# kdcom's own functions (kddll.h) carry no import decoration, so ntoskrnl
+# already references them directly.
+add_library(kdcom kdrosdbg.c)
+target_compile_definitions(kdcom PRIVATE _NTSYSTEM_)
 target_link_libraries(kdcom cportlib)
-add_dependencies(kdcom psdk)
-add_cd_file(TARGET kdcom DESTINATION reactos/system32 NO_CAB FOR all)
+add_dependencies(kdcom psdk xdk bugcodes)

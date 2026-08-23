@@ -892,6 +892,42 @@ SeFastTraverseCheck(
     _In_ ACCESS_MASK DesiredAccess,
     _In_ KPROCESSOR_MODE AccessMode);
 
+#ifdef SARCH_XBOX
+/* The SE tree is unlinked; all callers are kernel-mode and every check
+   grants.  Access states keep only the desired-access bookkeeping that
+   Ob handle grants and IopParseDevice consume; AuxData, tokens, and
+   captured security descriptors stay NULL. */
+FORCEINLINE
+NTSTATUS
+NxSeCreateAccessState(
+    _Out_ PACCESS_STATE AccessState,
+    _In_ ACCESS_MASK Access)
+{
+    RtlZeroMemory(AccessState, sizeof(*AccessState));
+    AccessState->RemainingDesiredAccess = Access;
+    AccessState->OriginalDesiredAccess = Access;
+    return STATUS_SUCCESS;
+}
+
+#define SeCreateAccessState(State, Aux, Access, Mapping) \
+    ((VOID)(Aux), (VOID)(Mapping), NxSeCreateAccessState((State), (Access)))
+#define SeCreateAccessStateEx(Thread, Process, State, Aux, Access, Mapping) \
+    ((VOID)(Thread), (VOID)(Process), (VOID)(Aux), (VOID)(Mapping), \
+     NxSeCreateAccessState((State), (Access)))
+#define SeDeleteAccessState(State) ((VOID)(State))
+
+#define SeSinglePrivilegeCheck(Privilege, Mode) ((VOID)(Mode), TRUE)
+#define SeDetailedAuditingWithToken(Token) ((VOID)(Token), FALSE)
+#define SeLocateProcessImageName(Process, Name) \
+    ((VOID)(Process), *(Name) = NULL, STATUS_NOT_FOUND)
+
+/* Object types created with no security method keep a NULL procedure;
+   the "is default" comparisons in Ob match on NULL instead. */
+#define SeDefaultObjectMethod NULL
+#define SePublicDefaultSd ((PSECURITY_DESCRIPTOR)NULL)
+#define SePublicDefaultUnrestrictedSd ((PSECURITY_DESCRIPTOR)NULL)
+#endif /* SARCH_XBOX */
+
 #endif
 
 /* EOF */

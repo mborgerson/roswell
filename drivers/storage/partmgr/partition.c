@@ -111,7 +111,10 @@ PartitionHandleStartDevice(
 
     // first, create a symbolic link for our device
     WCHAR nameBuf[64];
-    UNICODE_STRING partitionSymlink, interfaceName;
+    UNICODE_STRING partitionSymlink;
+#ifndef SARCH_XBOX
+    UNICODE_STRING interfaceName;
+#endif
     PFDO_EXTENSION fdoExtension = PartExt->LowerDevice->DeviceExtension;
 
     // \\Device\\Harddisk%lu\\Partition%lu
@@ -134,6 +137,7 @@ PartitionHandleStartDevice(
 
     INFO("Symlink created %wZ -> %wZ\n", &partitionSymlink, &PartExt->DeviceName);
 
+#ifndef SARCH_XBOX
     // Our partition device will have two interfaces:
     // GUID_DEVINTERFACE_PARTITION and GUID_DEVINTERFACE_VOLUME
     // (aka. MOUNTDEV_MOUNTED_DEVICE_GUID).
@@ -176,6 +180,7 @@ PartitionHandleStartDevice(
         RtlInitUnicodeString(&PartExt->VolumeInterfaceName, NULL);
         return status;
     }
+#endif
 
     return STATUS_SUCCESS;
 }
@@ -279,6 +284,22 @@ Quit:
     return Status;
 }
 
+#ifdef SARCH_XBOX
+/* Storage topology is fixed at boot: partitions never disappear, so the
+ * REMOVE / SURPRISE_REMOVAL PnP minors never fire and the IOCTL_DISK_-
+ * UPDATE_PROPERTIES rebuild path is gated off too. */
+CODE_SEG("PAGE")
+NTSTATUS
+PartitionHandleRemove(
+    _In_ PPARTITION_EXTENSION PartExt,
+    _In_ BOOLEAN FinalRemove)
+{
+    UNREFERENCED_PARAMETER(PartExt);
+    UNREFERENCED_PARAMETER(FinalRemove);
+    PAGED_CODE();
+    return STATUS_SUCCESS;
+}
+#else
 CODE_SEG("PAGE")
 NTSTATUS
 PartitionHandleRemove(
@@ -312,6 +333,7 @@ PartitionHandleRemove(
         INFO("Symlink removed %wZ -> %wZ\n", &partitionSymlink, &PartExt->DeviceName);
     }
 
+#ifndef SARCH_XBOX
     // release device interfaces
     if (PartExt->PartitionInterfaceName.Buffer)
     {
@@ -347,6 +369,7 @@ PartitionHandleRemove(
         RtlFreeUnicodeString(&PartExt->VolumeInterfaceName);
         RtlInitUnicodeString(&PartExt->VolumeInterfaceName, NULL);
     }
+#endif
 
     if (FinalRemove)
     {
@@ -362,6 +385,7 @@ PartitionHandleRemove(
 
     return STATUS_SUCCESS;
 }
+#endif
 
 static
 CODE_SEG("PAGE")
@@ -422,6 +446,8 @@ PartitionHandleQueryId(
             status = RtlCreateUnicodeString(&idString, L"STORAGE\\Partition")
                      ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
             break;
+#ifndef SARCH_XBOX
+        /* The synthetic devtree only issues BusQueryDeviceID. */
         case BusQueryHardwareIDs:
         {
             static WCHAR volumeID[] = L"STORAGE\\Volume\0";
@@ -471,6 +497,7 @@ PartitionHandleQueryId(
                      ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
             break;
         }
+#endif
         default:
             status = STATUS_NOT_SUPPORTED;
             break;
@@ -646,6 +673,15 @@ PartitionHandleDeviceControl(
                 .RewritePartition = FALSE,
             };
 
+#ifdef SARCH_XBOX
+            /* Xbox is fixed MBR; GPT path is dead. */
+            partInfoEx->Mbr = (PARTITION_INFORMATION_MBR){
+                .PartitionType = partExt->Mbr.PartitionType,
+                .HiddenSectors = partExt->Mbr.HiddenSectors,
+                .BootIndicator = partExt->Mbr.BootIndicator,
+                .RecognizedPartition = partExt->Mbr.RecognizedPartition,
+            };
+#else
             if (fdoExtension->DiskData.PartitionStyle == PARTITION_STYLE_MBR)
             {
                 partInfoEx->Mbr = (PARTITION_INFORMATION_MBR){
@@ -667,6 +703,7 @@ PartitionHandleDeviceControl(
                               partExt->Gpt.Name,
                               sizeof(partInfoEx->Gpt.Name));
             }
+#endif
 
             PartMgrReleaseLayoutLock(fdoExtension);
 
@@ -674,6 +711,8 @@ PartitionHandleDeviceControl(
             status = STATUS_SUCCESS;
             break;
         }
+#ifndef SARCH_XBOX
+        /* Partition table writes: titles don't repartition. */
         case IOCTL_DISK_SET_PARTITION_INFO:
         {
             PSET_PARTITION_INFORMATION inputBuffer = Irp->AssociatedIrp.SystemBuffer;
@@ -740,6 +779,7 @@ PartitionHandleDeviceControl(
             Irp->IoStatus.Information = 0;
             break;
         }
+#endif
         case IOCTL_DISK_GET_LENGTH_INFO:
         {
             PGET_LENGTH_INFORMATION lengthInfo = Irp->AssociatedIrp.SystemBuffer;
@@ -759,6 +799,8 @@ PartitionHandleDeviceControl(
             Irp->IoStatus.Information = sizeof(*lengthInfo);
             break;
         }
+#ifndef SARCH_XBOX
+        /* No surface-scan or media-change re-enumeration on Xbox. */
         case IOCTL_DISK_VERIFY:
         {
             PVERIFY_INFORMATION verifyInfo = Irp->AssociatedIrp.SystemBuffer;
@@ -780,6 +822,7 @@ PartitionHandleDeviceControl(
             status = STATUS_SUCCESS;
             break;
         }
+#endif
         case IOCTL_STORAGE_GET_DEVICE_NUMBER:
         {
             PSTORAGE_DEVICE_NUMBER deviceNumber = Irp->AssociatedIrp.SystemBuffer;
@@ -806,6 +849,9 @@ PartitionHandleDeviceControl(
             return ForwardIrpAndForget(DeviceObject, Irp);
         }
         // volume stuff (most of that should be in volmgr.sys once it is implemented)
+#ifndef SARCH_XBOX
+        /* Titles target partition devices directly; volume-extent
+         * enumeration is a Windows volmgr query path. */
         case IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS:
         {
             PVOLUME_DISK_EXTENTS volExts = Irp->AssociatedIrp.SystemBuffer;
@@ -837,6 +883,8 @@ PartitionHandleDeviceControl(
             Irp->IoStatus.Information = sizeof(*volExts);
             break;
         }
+#endif
+#ifndef SARCH_XBOX
         case IOCTL_VOLUME_QUERY_VOLUME_NUMBER:
         {
             PVOLUME_NUMBER volNum = Irp->AssociatedIrp.SystemBuffer;
@@ -869,11 +917,14 @@ PartitionHandleDeviceControl(
             status = STATUS_SUCCESS;
             break;
         }
+#endif
         case IOCTL_VOLUME_ONLINE:
         {
             status = STATUS_SUCCESS;
             break;
         }
+#ifndef SARCH_XBOX
+        /* Xbox is MBR-only; titles never query GPT attributes. */
         case IOCTL_VOLUME_GET_GPT_ATTRIBUTES:
         {
             PVOLUME_GET_GPT_ATTRIBUTES_INFORMATION gptAttrs = Irp->AssociatedIrp.SystemBuffer;
@@ -896,6 +947,7 @@ PartitionHandleDeviceControl(
             Irp->IoStatus.Information = sizeof(*gptAttrs);
             break;
         }
+#endif
         // mountmgr notifications (these should be in volmgr.sys once it is implemented)
         case IOCTL_MOUNTDEV_QUERY_DEVICE_NAME:
         {
@@ -939,6 +991,24 @@ PartitionHandleDeviceControl(
 
             PartMgrAcquireLayoutLock(fdoExtension);
 
+#ifdef SARCH_XBOX
+            /* Xbox HDD is MBR with a fixed multi-partition layout; the
+             * GPT/super-floppy/InterfaceName-fallback arms are dead. */
+            (void)basicVolId;
+            (void)InterfaceName;
+            uniqueId->UniqueIdLength = sizeof(basicVolId->Mbr);
+
+            if (!VerifyIrpOutBufferSize(Irp, headerSize + uniqueId->UniqueIdLength))
+            {
+                PartMgrReleaseLayoutLock(fdoExtension);
+                Irp->IoStatus.Information = headerSize;
+                status = STATUS_BUFFER_OVERFLOW;
+                break;
+            }
+
+            basicVolId->Mbr.Signature = fdoExtension->DiskData.Mbr.Signature;
+            basicVolId->Mbr.StartingOffset = partExt->StartingOffset;
+#else
             InterfaceName = &partExt->VolumeInterfaceName;
             if (fdoExtension->IsSuperFloppy)
                 InterfaceName = &fdoExtension->DiskInterfaceName;
@@ -1002,6 +1072,7 @@ PartitionHandleDeviceControl(
                               InterfaceName->Buffer,
                               uniqueId->UniqueIdLength);
             }
+#endif
 
             PartMgrReleaseLayoutLock(fdoExtension);
 

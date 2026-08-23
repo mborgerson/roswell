@@ -109,18 +109,32 @@ NTAPI
 ExDereferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack,
                            IN PEX_CALLBACK_ROUTINE_BLOCK CallbackBlock)
 {
+#ifdef SARCH_XBOX
+    /* No registration path is built (see ExReferenceCallBackBlock) */
+    UNREFERENCED_PARAMETER(CallBack);
+    UNREFERENCED_PARAMETER(CallbackBlock);
+    ASSERT(FALSE);
+#else
     /* Release a fast reference */
     if (!ExReleaseFastReference(&CallBack->RoutineBlock, CallbackBlock))
     {
         /* Take slow path */
         ExReleaseRundownProtection(&CallbackBlock->RundownProtect);
     }
+#endif
 }
 
 PEX_CALLBACK_ROUTINE_BLOCK
 NTAPI
 ExReferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack)
 {
+#ifdef SARCH_XBOX
+    /* Nothing can install a callback block (ExCreateCallback and the Ps
+     * notify-routine setters are not built), so every EX_CALLBACK stays
+     * empty for the system's lifetime. */
+    UNREFERENCED_PARAMETER(CallBack);
+    return NULL;
+#else
     EX_FAST_REF OldValue;
     ULONG_PTR Count;
     PEX_CALLBACK_ROUTINE_BLOCK CallbackBlock;
@@ -163,6 +177,7 @@ ExReferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack)
 
     /* Return the callback block */
     return CallbackBlock;
+#endif
 }
 
 BOOLEAN
@@ -255,6 +270,10 @@ BOOLEAN
 NTAPI
 ExpInitializeCallbacks(VOID)
 {
+#ifdef SARCH_XBOX
+    /* Nothing on Xbox subscribes to \\Callback\\* notifications. */
+    return TRUE;
+#else
     OBJECT_ATTRIBUTES ObjectAttributes;
     NTSTATUS Status;
     UNICODE_STRING DirName = RTL_CONSTANT_STRING(L"\\Callback");
@@ -324,6 +343,7 @@ ExpInitializeCallbacks(VOID)
 
     /* Everything successful */
     return TRUE;
+#endif
 }
 
 /* PUBLIC FUNCTIONS **********************************************************/
@@ -468,6 +488,13 @@ ExNotifyCallback(IN PCALLBACK_OBJECT CallbackObject,
                  IN PVOID Argument1,
                  IN PVOID Argument2)
 {
+#ifdef SARCH_XBOX
+    /* No callback objects ever registered on Xbox. */
+    UNREFERENCED_PARAMETER(CallbackObject);
+    UNREFERENCED_PARAMETER(Argument1);
+    UNREFERENCED_PARAMETER(Argument2);
+    return;
+#else
     PLIST_ENTRY RegisteredCallbacks;
     PCALLBACK_REGISTRATION CallbackRegistration;
     KIRQL OldIrql;
@@ -526,6 +553,7 @@ ExNotifyCallback(IN PCALLBACK_OBJECT CallbackObject,
 
     /* Release the Callback Object */
     KeReleaseSpinLock(&CallbackObject->Lock, OldIrql);
+#endif
 }
 
 /*++

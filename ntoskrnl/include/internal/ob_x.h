@@ -363,6 +363,10 @@ FORCEINLINE
 VOID
 ObpReleaseObjectCreateInformation(IN POBJECT_CREATE_INFORMATION ObjectCreateInfo)
 {
+#ifdef SARCH_XBOX
+    /* Security descriptors are never captured. */
+    UNREFERENCED_PARAMETER(ObjectCreateInfo);
+#else
     /* Check if we have a security descriptor */
     if (ObjectCreateInfo->SecurityDescriptor)
     {
@@ -372,6 +376,7 @@ ObpReleaseObjectCreateInformation(IN POBJECT_CREATE_INFORMATION ObjectCreateInfo
                                     TRUE);
         ObjectCreateInfo->SecurityDescriptor = NULL;
     }
+#endif
 }
 
 FORCEINLINE

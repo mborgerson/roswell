@@ -1615,6 +1615,14 @@ VOID
 ReconcileThisDatabaseWithMaster(IN PDEVICE_EXTENSION DeviceExtension,
                                 IN PDEVICE_INFORMATION DeviceInformation)
 {
+#ifdef SARCH_XBOX
+    /* Mount points on Xbox are hardcoded (T:/U:/X:/Y:/Z:/D:/E:);
+     * there's no \System Volume Information remote database to
+     * reconcile against. Stubbing drops ReconcileThisDatabaseWithMasterWorker
+     * (3.7 KB) + CreateRemoteDatabaseWorker + the OpenRemoteDatabase chain. */
+    UNREFERENCED_PARAMETER(DeviceExtension);
+    UNREFERENCED_PARAMETER(DeviceInformation);
+#else
     PRECONCILE_WORK_ITEM WorkItem;
 
     /* Removable devices don't have remote database */
@@ -1652,6 +1660,7 @@ ReconcileThisDatabaseWithMaster(IN PDEVICE_EXTENSION DeviceExtension,
     {
         OnlineMountedVolumes(DeviceExtension, DeviceInformation);
     }
+#endif
 }
 
 /*

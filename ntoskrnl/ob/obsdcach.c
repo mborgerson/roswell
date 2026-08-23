@@ -15,7 +15,13 @@
 /* GLOBALS ********************************************************************/
 
 #define SD_CACHE_ENTRIES 0x100
+#ifndef SARCH_XBOX
+/* No SD is ever assigned on Xbox (the trimmed OBJECT_ATTRIBUTES has no
+ * SecurityDescriptor and the stubbed SE passes NULL), so the log/assign
+ * machinery is link-dead.  -fdata-sections is off (see gcc.cmake), so
+ * the 3 KB array must be compiled out, not just unreferenced. */
 OB_SD_CACHE_LIST ObsSecurityDescriptorCache[SD_CACHE_ENTRIES];
+#endif
 
 /* PRIVATE FUNCTIONS **********************************************************/
 
@@ -60,6 +66,11 @@ NTSTATUS
 NTAPI
 ObpInitSdCache(VOID)
 {
+#ifndef SARCH_XBOX
+    /* No SD is ever assigned on Xbox (the trimmed OBJECT_ATTRIBUTES has
+     * no SecurityDescriptor and kernel callers pass NULL): the log/assign
+     * machinery is link-dead, and skipping this touch lets section GC
+     * drop the 3 KB cache array too. */
     ULONG i;
 
     /* Loop each cache entry */
@@ -69,6 +80,7 @@ ObpInitSdCache(VOID)
         InitializeListHead(&ObsSecurityDescriptorCache[i].Head);
         ExInitializePushLock(&ObsSecurityDescriptorCache[i].PushLock);
     }
+#endif
 
     /* Return success */
     return STATUS_SUCCESS;
@@ -287,6 +299,13 @@ NTAPI
 ObDereferenceSecurityDescriptor(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
                                 IN ULONG Count)
 {
+#ifdef SARCH_XBOX
+    /* Objects never carry an SD (see the cache gate above); deletion
+     * paths only call here for a non-NULL header SD, which cannot
+     * exist. */
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+    UNREFERENCED_PARAMETER(Count);
+#else
     PSECURITY_DESCRIPTOR_HEADER SdHeader;
     LONG OldValue, NewValue;
     ULONG Index;
@@ -336,7 +355,7 @@ ObDereferenceSecurityDescriptor(IN PSECURITY_DESCRIPTOR SecurityDescriptor,
         /* Just release the lock */
         ObpSdReleaseLock(CacheEntry);
     }
-
+#endif /* !SARCH_XBOX */
 }
 
 /*++
@@ -370,6 +389,21 @@ ObLogSecurityDescriptor(IN PSECURITY_DESCRIPTOR InputSecurityDescriptor,
     POB_SD_CACHE_LIST CacheEntry;
     BOOLEAN Result;
     PLIST_ENTRY NextEntry;
+
+#ifdef SARCH_XBOX
+    /* Stubbed SE never assigns a real SD; the cache array is compiled
+       out, so never reach the lookup below. */
+    UNREFERENCED_PARAMETER(SdHeader);
+    UNREFERENCED_PARAMETER(NewHeader);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(Hash);
+    UNREFERENCED_PARAMETER(Index);
+    UNREFERENCED_PARAMETER(CacheEntry);
+    UNREFERENCED_PARAMETER(Result);
+    UNREFERENCED_PARAMETER(NextEntry);
+    if (OutputSecurityDescriptor) *OutputSecurityDescriptor = NULL;
+    return STATUS_SUCCESS;
+#else
 
     /* Get the length */
     Length = RtlLengthSecurityDescriptor(InputSecurityDescriptor);
@@ -463,6 +497,7 @@ ObLogSecurityDescriptor(IN PSECURITY_DESCRIPTOR InputSecurityDescriptor,
     /* Return the SD*/
     *OutputSecurityDescriptor = &NewHeader->SecurityDescriptor;
     return STATUS_SUCCESS;
+#endif /* !SARCH_XBOX */
 }
 
 /* EOF */

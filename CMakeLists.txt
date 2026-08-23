@@ -14,7 +14,32 @@ message(WARNING "Setting policy CMP0091 to OLD behaviour")
 cmake_policy(SET CMP0091 OLD)
 endif()
 
+# Our fork only ever builds for Xbox.  Default ARCH and SARCH
+# *before* project() so the toolchain file (which is processed inside
+# project() and branches on ARCH for the mingw prefix) sees them.
+# Setting SARCH in the cache before sdk/cmake/config.cmake runs means
+# its own `set(SARCH "pc" CACHE STRING ...)` no-ops (CACHE-without-FORCE
+# only writes if there's no existing value).
+if(NOT ARCH)
+    set(ARCH "i386" CACHE STRING "Target architecture")
+endif()
+if(NOT SARCH AND ARCH STREQUAL "i386")
+    set(SARCH "xbox" CACHE STRING "Sub-architecture (Xbox)")
+endif()
+
 project(REACTOS)
+
+if(SARCH STREQUAL "xbox")
+    # Everything in this tree links into the single kernel image -- the
+    # folded drivers' "loadable .sys" view is a fiction on Xbox.  Define
+    # the in-image gates tree-wide so NTKERNELAPI/NTHALAPI/NTSYSAPI stop
+    # expanding to __declspec(dllimport): driver->kernel calls become
+    # direct references instead of __imp_ pointer loads, which removes
+    # the generated import table (xb/gen-import-table.py) and the
+    # GC-rooting it caused (an __imp_ slot pins its target even after
+    # every calling body is dead-stripped).
+    add_definitions(-D_NTOSKRNL_ -D_NTHAL_ -D_NTSYSTEM_)
+endif()
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_INCLUDE_DIRECTORIES_PROJECT_BEFORE ON)
@@ -28,10 +53,6 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 11)
 #set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
 
-# check that the ARCH (target architecture) variable is defined
-if(NOT ARCH)
-    message(FATAL_ERROR "Target architecture (ARCH) is not defined. Please, choose one of: i386, amd64, arm, arm64")
-endif()
 # Now the ARCH variable will be in lowercase.
 # It is needed because STREQUAL comparison
 # is case-sensitive.
@@ -156,7 +177,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(sdk/tools)
     add_subdirectory(sdk/lib)
 
-    set(NATIVE_TARGETS asmpp bin2c widl gendib cabman fatten hpp isohybrid mkhive mkisofs obj2bin spec2def geninc mkshelllink utf16le xml2sdb)
+    set(NATIVE_TARGETS asmpp bin2c widl gendib cabman fatten hpp isohybrid mkisofs obj2bin spec2def geninc mkshelllink utf16le xml2sdb)
+    if(NOT SARCH STREQUAL "xbox")
+        list(APPEND NATIVE_TARGETS mkhive)
+    endif()
     if(NOT MSVC)
         list(APPEND NATIVE_TARGETS pefixup)
         if (ARCH STREQUAL "i386")
@@ -254,6 +278,13 @@ Enable this if the module uses typeid or dynamic_cast. You will probably need to
         add_definitions(-D_X86_ -D__i386__ -Di386)
         if(SARCH STREQUAL "xbox")
             add_definitions(-DSARCH_XBOX)
+            # the HAL is part of the kernel image -- it is linked into
+            # ntoskrnl, not a separate hal.dll -- and there is no user mode.
+            # So the HAL-import decoration (NTHALAPI, _DECL_HAL_KE_IMPORT) is
+            # always direct, build-wide: every kernel translation unit
+            # references HalXxx / KeGetCurrentIrql etc. as plain symbols, which
+            # the linked-in HAL satisfies.
+            add_definitions(-D_NTHALDLL_ -D_NTHAL_)
         elseif(SARCH STREQUAL "pc98")
             add_definitions(-DSARCH_PC98)
         endif()
@@ -361,27 +392,40 @@ Enable this if the module uses typeid or dynamic_cast. You will probably need to
         set(CMAKE_PDB_OUTPUT_DIRECTORY "${REACTOS_BINARY_DIR}/symbols")
     endif()
 
-    #begin with boot so reactos_cab target is defined before all other modules
+    # SARCH=xbox builds only the freestanding kernel image (nxldr +
+    # ntoskrnl + linked drivers/HAL).  The user-mode subtrees (base/, dll/,
+    # subsystems/, win32ss/, media/, modules/) and the CD/registry-image
+    # plumbing aren't reachable from `flash` -- gating them keeps a default
+    # `ninja` build limited to `flash.bin`.
     add_subdirectory(boot)
-    add_subdirectory(base)
-    add_subdirectory(dll)
+    if(NOT SARCH STREQUAL "xbox")
+        add_subdirectory(base)
+        add_subdirectory(dll)
+    endif()
     add_subdirectory(drivers)
     add_subdirectory(hal)
     add_subdirectory(sdk/lib)
-    add_subdirectory(media)
-    add_subdirectory(modules)
+    if(NOT SARCH STREQUAL "xbox")
+        add_subdirectory(media)
+        add_subdirectory(modules)
+    endif()
     add_subdirectory(ntoskrnl)
-    add_subdirectory(subsystems)
-    add_subdirectory(sdk/tools/wpp)
-    add_subdirectory(win32ss)
+    if(NOT SARCH STREQUAL "xbox")
+        add_subdirectory(subsystems)
+        add_subdirectory(sdk/tools/wpp)  # libwpp -- only widl consumes it, host-side
+        add_subdirectory(win32ss)
 
-    # Create the registry hives
-    create_registry_hives()
+        # Create the registry hives
+        create_registry_hives()
 
-    # Create {bootcd, bootcdregtest, livecd}.lst
-    create_iso_lists()
+        # Create {bootcd, bootcdregtest, livecd}.lst
+        create_iso_lists()
+    endif()
 
     file(MAKE_DIRECTORY ${REACTOS_BINARY_DIR}/sdk/include/reactos)
+
+    # The Xbox flash image (nxldr + xboxkrnl) is assembled in
+    # boot/nxldr/CMakeLists.txt.
 
     add_dependency_footer()
 endif()

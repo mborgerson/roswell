@@ -22,6 +22,7 @@ Revision History:
 
 #define DEBUG_MAIN_SOURCE   1
 #include "disk.h"
+#include <ndk/section_attribs.h>
 
 
 //
@@ -45,7 +46,9 @@ Revision History:
 #pragma alloc_text(PAGE, DiskDetermineMediaTypes)
 #pragma alloc_text(PAGE, DiskModeSelect)
 #pragma alloc_text(PAGE, DisableWriteCache)
+#ifndef SARCH_XBOX
 #pragma alloc_text(PAGE, DiskSetSpecialHacks)
+#endif
 #pragma alloc_text(PAGE, DiskGetCacheInformation)
 #pragma alloc_text(PAGE, DiskSetCacheInformation)
 #pragma alloc_text(PAGE, DiskLogCacheInformation)
@@ -141,6 +144,7 @@ DiskBootDriverReinit(
 
 }
 
+CODE_SEG("INIT")
 NTSTATUS
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
 DriverEntry(
@@ -203,17 +207,33 @@ Return Value:
 
     InitializationData.FdoData.ClassInitDevice    = DiskInitFdo;
     InitializationData.FdoData.ClassStartDevice   = DiskStartFdo;
+#ifndef SARCH_XBOX
+    /* The classpnp STOP/REMOVE dispatch arms are gated on Xbox, so these
+     * callbacks can never be invoked; planting them only anchors the
+     * teardown chains. */
     InitializationData.FdoData.ClassStopDevice    = DiskStopDevice;
     InitializationData.FdoData.ClassRemoveDevice  = DiskRemoveDevice;
+#endif
+#ifndef SARCH_XBOX
+    /* IRP_MJ_POWER and IRP_MJ_SHUTDOWN dispatch slots are gated on Xbox
+     * (no title-callable Po*/NtShutdownSystem on the Xbox ABI), so these
+     * function-pointer assignments would only anchor dead chains
+     * (ClasspPowerHandler + classpnp/power.c, classpnp ClassShutdownFlush). */
     InitializationData.FdoData.ClassPowerDevice   = ClassSpinDownPowerHandler;
+#endif
 
     InitializationData.FdoData.ClassError         = DiskFdoProcessError;
     InitializationData.FdoData.ClassReadWriteVerification = DiskReadWriteVerification;
     InitializationData.FdoData.ClassDeviceControl = DiskDeviceControl;
+#ifndef SARCH_XBOX
     InitializationData.FdoData.ClassShutdownFlush = DiskShutdownFlush;
+#endif
     InitializationData.FdoData.ClassCreateClose   = NULL;
 
 
+#ifndef SARCH_XBOX
+    /* Xbox: no WMI providers, no SMART/failure-prediction reporting surface;
+     * leave ClassWmiInfo zero so diskwmi.c symbols GC out. */
     InitializationData.FdoData.ClassWmiInfo.GuidCount               = 7;
     InitializationData.FdoData.ClassWmiInfo.GuidRegInfo             = DiskWmiFdoGuidList;
     InitializationData.FdoData.ClassWmiInfo.ClassQueryWmiRegInfo    = DiskFdoQueryWmiRegInfo;
@@ -222,15 +242,25 @@ Return Value:
     InitializationData.FdoData.ClassWmiInfo.ClassSetWmiDataItem     = DiskFdoSetWmiDataItem;
     InitializationData.FdoData.ClassWmiInfo.ClassExecuteWmiMethod   = DiskFdoExecuteWmiMethod;
     InitializationData.FdoData.ClassWmiInfo.ClassWmiFunctionControl = DiskWmiFunctionControl;
+#endif
 
     InitializationData.ClassAddDevice = DiskAddDevice;
+#ifndef SARCH_XBOX
+    /* Xbox kernel never unloads drivers; gate to drop DiskUnload and the
+     * DiskCleanupDetectInfo / WPP_CLEANUP chain it anchors. */
     InitializationData.ClassUnload = DiskUnload;
+#endif
 
     //
     // Initialize regregistration data structures
     //
 
+#ifndef SARCH_XBOX
+    /* Reregistration only runs from WMI path callbacks, which are
+     * gated out on Xbox. Skip so diskwmi.c can be excluded from the
+     * build entirely. */
     DiskInitializeReregistration();
+#endif
 
     //
     // Call the class init routine
@@ -250,17 +280,25 @@ Return Value:
     // PCLASS_QUERY_WMI_REGINFO_EX routine
     //
 
+#ifndef SARCH_XBOX
     classQueryWmiRegInfoExList.Size = sizeof(CLASS_QUERY_WMI_REGINFO_EX_LIST);
     classQueryWmiRegInfoExList.ClassFdoQueryWmiRegInfoEx = DiskFdoQueryWmiRegInfoEx;
 
     (VOID)ClassInitializeEx(DriverObject,
                             &guidQueryRegInfoEx,
                             &classQueryWmiRegInfoExList);
+#endif
 
     //
     // Call class init Ex routine to register SRB support
     //
+#ifdef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; keep the whole stack on
+     * legacy SRBs so the extended-SRB arms stay unreachable. */
+    srbSupport = CLASS_SRB_SCSI_REQUEST_BLOCK;
+#else
     srbSupport = CLASS_SRB_SCSI_REQUEST_BLOCK | CLASS_SRB_STORAGE_REQUEST_BLOCK;
+#endif
     if (!NT_SUCCESS(ClassInitializeEx(DriverObject,
                                       &guidSrbSupport,
                                       &srbSupport))) {
@@ -1002,16 +1040,25 @@ Return Value:
             break;
         }
 
+#ifndef SARCH_XBOX
+        /* The following IOCTLs are not issued by any kept Xbox-side
+         * driver or by titles via NtDeviceIoControlFile, and stay cold
+         * across a boot+gameplay session.  Gating the case arms
+         * lets the linker drop the matching DiskIoctl* worker bodies
+         * (verify thread, reassign-blocks, is-writable, update-size,
+         * media-types-ex, predict-failure, internal set/clear-verify). */
         case IOCTL_DISK_VERIFY: {
             status = DiskIoctlVerify(DeviceObject, Irp);
             break;
         }
+#endif
 
         case IOCTL_DISK_GET_LENGTH_INFO: {
             status = DiskIoctlGetLengthInfo(DeviceObject, Irp);
             break;
         }
 
+#ifndef SARCH_XBOX
         case IOCTL_DISK_IS_WRITABLE: {
             status = DiskIoctlIsWritable(DeviceObject, Irp);
             break;
@@ -1058,7 +1105,12 @@ Return Value:
             break;
         }
         #endif
+#endif /* SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+        /* SMART IOCTLs not exposed via the Xbox kernel ABI. Gating the
+         * cases lets the linker drop DiskIoctlSmart* + DiskPerformSmartCommand
+         * + DiskInfoExceptionCheck/Complete. */
         case SMART_GET_VERSION: {
             status = DiskIoctlSmartGetVersion(DeviceObject, Irp);
             break;
@@ -1073,6 +1125,7 @@ Return Value:
             status = DiskIoctlSmartSendDriveCommand(DeviceObject, Irp);
             break;
         }
+#endif
 
         case IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS:
         case IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS_ADMIN: {
@@ -1837,10 +1890,12 @@ Return Value:
     NTSTATUS status;
     PULONG buffer;
     PMODE_PARAMETER_BLOCK blockDescriptor;
+#ifndef SARCH_XBOX
     UCHAR srbExBuffer[CLASS_SRBEX_SCSI_CDB16_BUFFER_SIZE] = {0};
     PSTORAGE_REQUEST_BLOCK srbEx = (PSTORAGE_REQUEST_BLOCK)srbExBuffer;
     PSTOR_ADDR_BTL8 storAddrBtl8;
     PSRBEX_DATA_SCSI_CDB16 srbExDataCdb16;
+#endif
     PSCSI_REQUEST_BLOCK srbPtr;
 
     PAGED_CODE();
@@ -1900,6 +1955,8 @@ Return Value:
     // Build the MODE SELECT CDB.
     //
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExtension->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
 
         //
@@ -1951,7 +2008,9 @@ Return Value:
 
        srbPtr = (PSCSI_REQUEST_BLOCK)srbEx;
 
-    } else {
+    } else
+#endif /* !SARCH_XBOX */
+    {
 
         srb.CdbLength = 6;
         cdb = (PCDB)srb.Cdb;
@@ -2305,16 +2364,20 @@ Return Value:
 
 {
     PFUNCTIONAL_DEVICE_EXTENSION fdoExtension = Fdo->DeviceExtension;
+#ifndef SARCH_XBOX
     PSTORAGE_REQUEST_BLOCK srbEx;
+    CDB noOp = {0};
+#endif
     PCDB cdb = NULL;
     UCHAR scsiStatus = 0;
     UCHAR senseBufferLength = 0;
     PVOID senseBuffer = NULL;
-    CDB noOp = {0};
 
     //
     // Get relevant fields from SRB
     //
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) {
 
         srbEx = (PSTORAGE_REQUEST_BLOCK)Srb;
@@ -2342,7 +2405,9 @@ Return Value:
             cdb = &noOp;
         }
 
-    } else {
+    } else
+#endif
+    {
 
         cdb = (PCDB)(Srb->Cdb);
         scsiStatus = Srb->ScsiStatus;
@@ -2597,6 +2662,8 @@ Return Value:
 }
 
 
+#ifndef SARCH_XBOX
+/* Quirk-table callback; the scan that reaches it is gated out on Xbox. */
 VOID
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
 DiskSetSpecialHacks(
@@ -2699,6 +2766,7 @@ Return Value:
 
     return;
 }
+#endif /* SARCH_XBOX */
 
 
 VOID
@@ -4389,6 +4457,11 @@ Return Value:
 
     if (status != STATUS_INSUFFICIENT_RESOURCES)
     {
+#ifndef SARCH_XBOX
+        /* SMART / Sense failure-prediction helpers live in diskwmi.c
+         * (excluded from the Xbox build). FailurePredictionCapability is
+         * pinned at FailurePredictionNone on Xbox, so this branch is
+         * statically dead -- gate it so the references GC out. */
         if ((diskData->FailurePredictionCapability == FailurePredictionSmart) ||
             (diskData->FailurePredictionCapability == FailurePredictionSense)) {
 
@@ -4407,7 +4480,9 @@ Return Value:
 
                 Irp->IoStatus.Information = sizeof(STORAGE_PREDICT_FAILURE);
             }
-        } else {
+        } else
+#endif
+        {
             status = STATUS_INVALID_DEVICE_REQUEST;
         }
     }

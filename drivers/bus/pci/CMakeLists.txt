@@ -8,8 +8,12 @@ list(APPEND SOURCE
     pdo.c
     pci.h)
 
-add_library(pci MODULE ${SOURCE} pci.rc)
-set_module_type(pci kernelmodedriver)
-add_importlibs(pci ntoskrnl hal)
+# the PCI bus driver is linked into the kernel image as a static
+# library, not a loadable pci.sys.  ntoskrnl's IopInitializeBootDrivers runs
+# its DriverEntry via IoCreateDriver.  _NTSYSTEM_ makes its kernel-API
+# references direct; DriverEntry is renamed so it does not collide with the
+# other folded-in drivers.
+add_library(pci ${SOURCE})
 add_pch(pci pci.h SOURCE)
-add_cd_file(TARGET pci DESTINATION reactos/system32/drivers NO_CAB FOR all)
+target_compile_definitions(pci PRIVATE _NTSYSTEM_ DriverEntry=PciDriverEntry)
+add_dependencies(pci psdk xdk bugcodes)

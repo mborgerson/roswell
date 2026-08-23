@@ -511,7 +511,6 @@ DRIVER_INITIALIZE DriverEntry;
 CODE_SEG("PAGE")
 DRIVER_UNLOAD PciIdeXUnload;
 
-CODE_SEG("PAGE")
 DRIVER_ADD_DEVICE PciIdeXAddDevice;
 
 _Dispatch_type_(IRP_MJ_SYSTEM_CONTROL)
@@ -564,7 +563,6 @@ PciIdeXPnpQueryPnpDeviceState(
 /* pdo.c **********************************************************************/
 
 _Dispatch_type_(IRP_MJ_PNP)
-CODE_SEG("PAGE")
 DRIVER_DISPATCH_PAGED PciIdeXDispatchPnp;
 
 CODE_SEG("PAGE")

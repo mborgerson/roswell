@@ -1,12 +1,9 @@
 
-spec2def(classpnp.sys classpnp.spec ADD_IMPORTLIB)
-
 remove_definitions(-D_WIN32_WINNT=0x502)
 
 list(APPEND SOURCE
     autorun.c
     class.c
-    classwmi.c
     clntirp.c
     create.c
     data.c
@@ -17,21 +14,29 @@ list(APPEND SOURCE
     history.c
     lock.c
     obsolete.c
-    power.c
     retry.c
     srblib.c
     utils.c
     xferpkt.c)
 
-add_library(classpnp MODULE
-    ${SOURCE}
-    class.rc
-    ${CMAKE_CURRENT_BINARY_DIR}/classpnp.def)
+if(NOT SARCH STREQUAL "xbox")
+    # power.c: ClassDispatchPower stubbed; no PoCallDriver / Po settings ever fire.
+    # classwmi.c: no WMI/IRP_MJ_SYSTEM_CONTROL surface on Xbox.
+    list(APPEND SOURCE power.c classwmi.c)
+endif()
 
-target_compile_definitions(classpnp PUBLIC
+# the storage class library is linked into the kernel image as a
+# static library -- disk (and the deferred cdrom) call its Class* ABI
+# directly.
+add_library(classpnp ${SOURCE})
+
+# PRIVATE (not PUBLIC): these must not leak into ntoskrnl's own compilation
+# now that classpnp is linked into the kernel image.
+target_compile_definitions(classpnp PRIVATE
     DEBUG_USE_KDPRINT
     _WIN32_WINNT=0x602
-    NTDDI_VERSION=0x06020000) # NTDDI_WIN8
+    NTDDI_VERSION=0x06020000 # NTDDI_WIN8
+    DriverEntry=ClasspnpDriverEntry)
 
 target_compile_definitions(classpnp PRIVATE
     CLASS_GLOBAL_BREAK_ON_LOST_IRPS=0
@@ -49,7 +54,5 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(classpnp PRIVATE -Wno-unused-but-set-variable)
 endif()
 
-set_module_type(classpnp kernelmodedriver)
 target_link_libraries(classpnp ntoskrnl_vista libcntpr ${PSEH_LIB})
-add_importlibs(classpnp ntoskrnl hal)
-add_cd_file(TARGET classpnp DESTINATION reactos/system32/drivers NO_CAB FOR all)
+add_dependencies(classpnp psdk xdk bugcodes)

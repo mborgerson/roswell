@@ -35,7 +35,21 @@
 #define SMC_REG_POWER_SHUTDOWN  0x80
 
 VOID HalpXboxInitPciBus(PBUS_HANDLER BusHandler);
-VOID HalpXboxInitPartIo(VOID);
+VOID NxConfigurePciDevices(VOID);
+
+/*
+ * SMBus byte/word transaction primitives.  Slaves include the SMC (0x10),
+ * AV/TV encoders (0x45 / 0x6A), EEPROM (0x54), and temperature sensor
+ * (0x4C).  Returns STATUS_IO_DEVICE_ERROR on timeout.
+ */
+NTSTATUS HalpXboxSmBusReadByte(_In_ UCHAR Address, _In_ UCHAR Register,
+                               _Out_ PUCHAR Value);
+NTSTATUS HalpXboxSmBusWriteByte(_In_ UCHAR Address, _In_ UCHAR Register,
+                                _In_ UCHAR Value);
+NTSTATUS HalpXboxSmBusReadWord(_In_ UCHAR Address, _In_ UCHAR Register,
+                               _Out_ PUSHORT Value);
+NTSTATUS HalpXboxSmBusWriteWord(_In_ UCHAR Address, _In_ UCHAR Register,
+                                _In_ USHORT Value);
 
 #endif /* HALXBOX_H_INCLUDED */
 

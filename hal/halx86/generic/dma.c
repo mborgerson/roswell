@@ -138,6 +138,7 @@ static DMA_OPERATIONS HalpDmaOperations = {
    (PPUT_DMA_ADAPTER)HalPutDmaAdapter,
    (PALLOCATE_COMMON_BUFFER)HalAllocateCommonBuffer,
    (PFREE_COMMON_BUFFER)HalFreeCommonBuffer,
+#ifndef SARCH_XBOX
    NULL, /* Initialized in HalpInitDma() */
    NULL, /* Initialized in HalpInitDma() */
    NULL, /* Initialized in HalpInitDma() */
@@ -150,6 +151,26 @@ static DMA_OPERATIONS HalpDmaOperations = {
    (PCALCULATE_SCATTER_GATHER_LIST_SIZE)HalCalculateScatterGatherListSize,
    (PBUILD_SCATTER_GATHER_LIST)HalBuildScatterGatherList,
    (PBUILD_MDL_FROM_SCATTER_GATHER_LIST)HalBuildMdlFromScatterGatherList
+#else
+   /* Xbox storage stack only invokes PutDmaAdapter / Alloc/FreeCommonBuffer /
+    * Get/PutScatterGatherList through this vtable.  The (E)ISA adapter channel
+    * + MapTransfer + counter + alignment + IOmgr-style ScatterGatherList
+    * builders are dead reachable -- NULL them so the linker can drop the
+    * implementations (and the entire HalpInitDma overwrite chain, which would
+    * otherwise re-anchor IoAllocate/Free/Flush/Map). */
+   NULL, /* AllocateAdapterChannel */
+   NULL, /* FlushAdapterBuffers */
+   NULL, /* FreeAdapterChannel */
+   NULL, /* FreeMapRegisters */
+   NULL, /* MapTransfer */
+   NULL, /* GetDmaAlignment */
+   NULL, /* ReadDmaCounter */
+   (PGET_SCATTER_GATHER_LIST)HalGetScatterGatherList,
+   (PPUT_SCATTER_GATHER_LIST)HalPutScatterGatherList,
+   NULL, /* CalculateScatterGatherListSize */
+   NULL, /* BuildScatterGatherList */
+   NULL  /* BuildMdlFromScatterGatherList */
+#endif
 };
 #endif
 
@@ -182,6 +203,7 @@ CODE_SEG("INIT")
 VOID
 HalpInitDma(VOID)
 {
+#ifndef SARCH_XBOX
     /*
      * Initialize the DMA Operation table
      */
@@ -204,6 +226,7 @@ HalpInitDma(VOID)
             HalpEisaDma = TRUE;
         }
     }
+#endif
 
     /*
      * Intialize all the global variables and allocate master adapter with
@@ -248,7 +271,17 @@ HalpGetAdapterMaximumPhysicalAddress(IN PADAPTER_OBJECT AdapterObject)
         }
     }
 
+#ifdef SARCH_XBOX
+    /* The Xbox has no ISA bus -- every DMA-capable device is a 32-bit
+     * PCI bus master, so the legacy 24-bit (16 MB) fallback never applies on
+     * real hardware.  Defaulting to it strands DMA common-buffer allocations
+     * in the low 16 MB, which the title owns once we move our kernel + pools
+     * above 64 MB; report the full 32-bit reach so they come from anywhere in
+     * RAM (NT's high free region), mirroring retail Xbox DMA behaviour. */
+    HighestAddress.QuadPart = 0xFFFFFFFF;
+#else
     HighestAddress.QuadPart = 0xFFFFFF;
+#endif
     return HighestAddress;
 }
 
@@ -512,6 +545,14 @@ NTAPI
 HalpDmaInitializeEisaAdapter(IN PADAPTER_OBJECT AdapterObject,
                              IN PDEVICE_DESCRIPTION DeviceDescription)
 {
+#ifdef SARCH_XBOX
+    /* No (E)ISA bus on Xbox -- DMA adapters are always PCI bus-masters and
+     * HalGetAdapter never sets EisaAdapter=TRUE.  Keep the symbol so the
+     * caller still links, but drop the (E)ISA controller programming. */
+    UNREFERENCED_PARAMETER(AdapterObject);
+    UNREFERENCED_PARAMETER(DeviceDescription);
+    return FALSE;
+#else
     UCHAR Controller;
     DMA_MODE DmaMode = {{0 }};
     DMA_EXTENDED_MODE ExtendedMode = {{ 0 }};
@@ -636,6 +677,7 @@ HalpDmaInitializeEisaAdapter(IN PADAPTER_OBJECT AdapterObject,
     AdapterObject->AdapterMode = DmaMode;
 
     return TRUE;
+#endif /* !SARCH_XBOX */
 }
 
 #ifndef _MINIHAL_
@@ -992,80 +1034,55 @@ HalpScatterGatherAdapterControl(IN PDEVICE_OBJECT DeviceObject,
 {
 	PSCATTER_GATHER_CONTEXT AdapterControlContext = Context;
 	PADAPTER_OBJECT AdapterObject = AdapterControlContext->AdapterObject;
-	PSCATTER_GATHER_LIST ScatterGatherList;
-	PSCATTER_GATHER_ELEMENT TempElements;
+	/* The S/G list lives in the tail of the context buffer, sized up front by
+	 * HalCalculateScatterGatherListSize.  Building it here needs no pool
+	 * allocation, so the callback cannot fail on a memory shortage and strand
+	 * the transfer. */
+	PSCATTER_GATHER_LIST ScatterGatherList =
+		(PSCATTER_GATHER_LIST)(AdapterControlContext + 1);
 	ULONG ElementCount = 0, RemainingLength = AdapterControlContext->Length;
 	PUCHAR CurrentVa = AdapterControlContext->CurrentVa;
-    // RemainingLength / PAGE_SIZE + 1 for the remainder of our division
-    // + 1 for a safety cushion gives a good safe value. Using the
-    // min function with MAX_SG_ELEMENTS keeps us from getting too large.
-    ULONG Est_SG_Elements = min(RemainingLength / PAGE_SIZE + 2, MAX_SG_ELEMENTS);
 
 	/* Store the map register base for later in HalPutScatterGatherList */
 	AdapterControlContext->MapRegisterBase = MapRegisterBase;
 
-    // FIXME: HACK Allocate TempElements from pool to minimize stack usage.
-    // A more efficient algorithm should be found to avoid allocations during S/G I/O operations.
-    TempElements = ExAllocatePoolUninitialized(NonPagedPool,
-                                               sizeof(*TempElements) * Est_SG_Elements,
-                                               TAG_DMA);
-    if (!TempElements)
-	{
-		DPRINT1("Scatter/gather list construction failed!\n");
-		return DeallocateObject;
-	}
-
 	while (RemainingLength > 0 && ElementCount < MAX_SG_ELEMENTS)
 	{
-	    TempElements[ElementCount].Length = RemainingLength;
-		TempElements[ElementCount].Reserved = 0;
-	    TempElements[ElementCount].Address = IoMapTransfer(AdapterObject,
-		                                                   AdapterControlContext->Mdl,
-														   MapRegisterBase,
-														   CurrentVa + (AdapterControlContext->Length - RemainingLength),
-														   &TempElements[ElementCount].Length,
-														   AdapterControlContext->WriteToDevice);
-		if (TempElements[ElementCount].Length == 0)
+		PSCATTER_GATHER_ELEMENT Element = &ScatterGatherList->Elements[ElementCount];
+
+		Element->Length = RemainingLength;
+		Element->Reserved = 0;
+		Element->Address = IoMapTransfer(AdapterObject,
+			AdapterControlContext->Mdl,
+			MapRegisterBase,
+			CurrentVa + (AdapterControlContext->Length - RemainingLength),
+			&Element->Length,
+			AdapterControlContext->WriteToDevice);
+		if (Element->Length == 0)
 			break;
 
-		DPRINT("Allocated one S/G element: 0x%I64u with length: 0x%x\n",
-		        TempElements[ElementCount].Address.QuadPart,
-				TempElements[ElementCount].Length);
-
-		ASSERT(TempElements[ElementCount].Length <= RemainingLength);
-		RemainingLength -= TempElements[ElementCount].Length;
+		ASSERT(Element->Length <= RemainingLength);
+		RemainingLength -= Element->Length;
 		ElementCount++;
 	}
 
-    DPRINT("Est_SG_Elements %d\n", Est_SG_Elements);
-    DPRINT("ElementCount is %d\n", ElementCount);
-
 	if (RemainingLength > 0)
 	{
+		/* Needs more than MAX_SG_ELEMENTS fragments; the caller (nxata) falls
+		 * back to PIO when the S/G build fails. */
 		DPRINT1("Scatter/gather list construction failed!\n");
-        ExFreePoolWithTag(TempElements, TAG_DMA);
 		return DeallocateObject;
 	}
 
-	ScatterGatherList = ExAllocatePoolWithTag(NonPagedPool,
-	                                          sizeof(SCATTER_GATHER_LIST) + sizeof(SCATTER_GATHER_ELEMENT) * ElementCount,
-											  TAG_DMA);
-	ASSERT(ScatterGatherList);
-
 	ScatterGatherList->NumberOfElements = ElementCount;
 	ScatterGatherList->Reserved = (ULONG_PTR)AdapterControlContext;
-	RtlCopyMemory(ScatterGatherList->Elements,
-	              TempElements,
-				  sizeof(SCATTER_GATHER_ELEMENT) * ElementCount);
-
-    ExFreePoolWithTag(TempElements, TAG_DMA);
 
 	DPRINT("Initiating S/G DMA with %d element(s)\n", ElementCount);
 
 	AdapterControlContext->AdapterListControlRoutine(DeviceObject,
-	                                                 Irp,
-													 ScatterGatherList,
-													 AdapterControlContext->AdapterListControlContext);
+		Irp,
+		ScatterGatherList,
+		AdapterControlContext->AdapterListControlContext);
 
 	return DeallocateObjectKeepRegisters;
 }
@@ -1148,6 +1165,12 @@ HalpScatterGatherAdapterControl(IN PDEVICE_OBJECT DeviceObject,
     PSCATTER_GATHER_CONTEXT AdapterControlContext = (PSCATTER_GATHER_CONTEXT)ScatterGather->Reserved;
 	ULONG i;
 
+	/* A valid list has 1..MAX_SG_ELEMENTS elements.  Anything else means we
+	 * were handed a stale/freed list, so Reserved is a wild context pointer:
+	 * fail early here instead of dereferencing it below. */
+	ASSERT(ScatterGather->NumberOfElements != 0 &&
+	       ScatterGather->NumberOfElements <= MAX_SG_ELEMENTS);
+
 	for (i = 0; i < ScatterGather->NumberOfElements; i++)
 	{
 	     IoFlushAdapterBuffers(AdapterObject,
@@ -1164,7 +1187,8 @@ HalpScatterGatherAdapterControl(IN PDEVICE_OBJECT DeviceObject,
 					   AdapterControlContext->MapRegisterCount);
 
 
-	ExFreePoolWithTag(ScatterGather, TAG_DMA);
+	/* The S/G list is embedded in the context buffer; freeing the context
+	 * below releases it.  Do not free ScatterGather separately. */
 
     /* If this is our buffer, release it */
     if (!AdapterControlContext->UsingUserBuffer)
@@ -1186,10 +1210,14 @@ HalCalculateScatterGatherListSize(
     ULONG NumberOfMapRegisters;
     ULONG SgSize;
 
-    UNIMPLEMENTED_ONCE;
-
     NumberOfMapRegisters = PAGE_ROUND_UP(Length) >> PAGE_SHIFT;
-    SgSize = sizeof(SCATTER_GATHER_CONTEXT);
+
+    /* The context buffer also holds the S/G list (carved from its tail in
+     * HalpScatterGatherAdapterControl), so size for both plus the worst-case
+     * element run. */
+    SgSize = sizeof(SCATTER_GATHER_CONTEXT) +
+             sizeof(SCATTER_GATHER_LIST) +
+             sizeof(SCATTER_GATHER_ELEMENT) * MAX_SG_ELEMENTS;
 
     *ScatterGatherListSize = SgSize;
     if (pNumberOfMapRegisters) *pNumberOfMapRegisters = NumberOfMapRegisters;
@@ -1941,6 +1969,17 @@ IoFlushAdapterBuffers(IN PADAPTER_OBJECT AdapterObject,
                       IN ULONG Length,
                       IN BOOLEAN WriteToDevice)
 {
+#ifdef SARCH_XBOX
+    /* PCI bus-master adapters with HW S/G use MapRegisterBase=NULL on Xbox;
+     * slave DMA disable + map-register copyback paths never fire. */
+    UNREFERENCED_PARAMETER(AdapterObject);
+    UNREFERENCED_PARAMETER(Mdl);
+    UNREFERENCED_PARAMETER(MapRegisterBase);
+    UNREFERENCED_PARAMETER(CurrentVa);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(WriteToDevice);
+    return TRUE;
+#else
     BOOLEAN SlaveDma = FALSE;
     PROS_MAP_REGISTER_ENTRY RealMapRegisterBase;
     PHYSICAL_ADDRESS HighestAcceptableAddress;
@@ -2014,6 +2053,7 @@ IoFlushAdapterBuffers(IN PADAPTER_OBJECT AdapterObject,
     RealMapRegisterBase->Counter = 0;
 
     return TRUE;
+#endif
 }
 
 /**
@@ -2118,6 +2158,19 @@ IoMapTransfer(IN PADAPTER_OBJECT AdapterObject,
         return PhysicalAddress;
     }
 
+#ifdef SARCH_XBOX
+    /* Non-NULL MapRegisterBase implies the slave-DMA / sw-S/G double-buffer
+     * paths, which never fire on Xbox (all Xbox DMA is PCI bus-master HW S/G
+     * and reaches the early return above). */
+    UNREFERENCED_PARAMETER(MdlPage1);
+    UNREFERENCED_PARAMETER(MdlPage2);
+    UNREFERENCED_PARAMETER(UseMapRegisters);
+    UNREFERENCED_PARAMETER(RealMapRegisterBase);
+    UNREFERENCED_PARAMETER(HighestAcceptableAddress);
+    UNREFERENCED_PARAMETER(Counter);
+    if (TransferLength > *Length) TransferLength = *Length;
+    *Length = TransferLength;
+#else
     /*
      * The code below applies to slave DMA adapters and bus master adapters
      * without hardward S/G support.
@@ -2203,7 +2256,9 @@ IoMapTransfer(IN PADAPTER_OBJECT AdapterObject,
      * Return the length of transfer that actually takes place.
      */
     *Length = TransferLength;
+#endif /* SARCH_XBOX */
 
+#ifndef SARCH_XBOX
     /*
      * If we're doing slave (system) DMA then program the (E)ISA controller
      * to actually start the transfer.
@@ -2307,6 +2362,7 @@ IoMapTransfer(IN PADAPTER_OBJECT AdapterObject,
 
         KeReleaseSpinLock(&AdapterObject->MasterAdapter->SpinLock, OldIrql);
     }
+#endif /* !SARCH_XBOX */
 
     /*
      * Return physical address of the buffer with data that is used for the

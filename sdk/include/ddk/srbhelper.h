@@ -12,6 +12,16 @@
 #define SRBHELPER_ASSERT NT_ASSERT
 #endif
 
+#if defined(SARCH_XBOX)
+/* The port drivers only advertise legacy SCSI_REQUEST_BLOCKs and the class
+ * drivers only declare legacy SRB support, so a STORAGE_REQUEST_BLOCK never
+ * exists.  Folding the type test lets the compiler drop the extended-SRB
+ * arm of every inline accessor below. */
+#define SRBHELPER_IS_SRBEX(_srb) (FALSE && ((_srb)->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK))
+#else
+#define SRBHELPER_IS_SRBEX(_srb) ((_srb)->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+#endif
+
 #if !defined(SRB_ALIGN_SIZEOF)
 #define SRB_ALIGN_SIZEOF(x) (((ULONG_PTR)(sizeof(x) + sizeof(PVOID) - 1)) & ~(sizeof(PVOID) - 1))
 #endif
@@ -50,7 +60,7 @@ SrbGetSrbExDataByIndex(
 {
   PSRBEX_DATA srbExData = NULL;
 
-  if ((Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) &&
+  if ((SRBHELPER_IS_SRBEX(Srb)) &&
       (SrbExDataIndex < Srb->NumSrbExData) && (Srb->SrbExDataOffset[SrbExDataIndex]) &&
       (Srb->SrbExDataOffset[SrbExDataIndex] >= sizeof(STORAGE_REQUEST_BLOCK)) &&
       (Srb->SrbExDataOffset[SrbExDataIndex] < Srb->SrbLength))
@@ -67,7 +77,7 @@ SrbGetSrbExDataByType(
   _In_ PSTORAGE_REQUEST_BLOCK Srb,
   _In_ SRBEXDATATYPE Type)
 {
-  if ((Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) && (Srb->NumSrbExData > 0))
+  if ((SRBHELPER_IS_SRBEX(Srb)) && (Srb->NumSrbExData > 0))
   {
     PSRBEX_DATA srbExData = NULL;
     UCHAR i = 0;
@@ -94,7 +104,7 @@ PSRBEX_DATA
 SrbGetPrimarySrbExData(
   _In_ PSTORAGE_REQUEST_BLOCK Srb)
 {
-  if (Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(Srb))
   {
     switch (Srb->SrbFunction)
     {
@@ -140,7 +150,7 @@ FORCEINLINE PSTOR_ADDRESS SrbGetAddress(_In_ PSTORAGE_REQUEST_BLOCK Srb)
 {
   PSTOR_ADDRESS storAddr = NULL;
 
-  if (Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(Srb))
   {
     SRBHELPER_ASSERT(Srb->AddressOffset);
 
@@ -164,7 +174,7 @@ SrbCopySrb(
   PSTORAGE_REQUEST_BLOCK sourceSrb = (PSTORAGE_REQUEST_BLOCK)SourceSrb;
   BOOLEAN status = FALSE;
 
-  if (sourceSrb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(sourceSrb))
   {
     if (DestinationSrbLength >= sourceSrb->SrbLength)
     {
@@ -193,7 +203,7 @@ SrbZeroSrb(
   UCHAR function = srb->Function;
   USHORT length = srb->Length;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     ULONG srbLength = srb->SrbLength;
 
@@ -217,7 +227,7 @@ SrbGetSrbLength(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->SrbLength;
   }
@@ -235,7 +245,7 @@ SrbSetSrbLength(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->SrbLength = Length;
   }
@@ -282,7 +292,7 @@ SrbGetScsiData(
   PSRBEX_DATA SrbExData = NULL;
   BOOLEAN FoundEntry = FALSE;
 
-  if ((SrbEx->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) &&
+  if ((SRBHELPER_IS_SRBEX(SrbEx)) &&
       (SrbEx->SrbFunction == SRB_FUNCTION_EXECUTE_SCSI))
   {
     SRBHELPER_ASSERT(SrbEx->NumSrbExData > 0);
@@ -460,7 +470,7 @@ SrbSetScsiData(
   PSRBEX_DATA SrbExData = NULL;
   BOOLEAN FoundEntry = FALSE;
 
-  if ((SrbEx->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) &&
+  if ((SRBHELPER_IS_SRBEX(SrbEx)) &&
       (SrbEx->SrbFunction == SRB_FUNCTION_EXECUTE_SCSI))
   {
     SRBHELPER_ASSERT(SrbEx->NumSrbExData > 0);
@@ -586,7 +596,7 @@ SrbGetCdb(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   PCDB pCdb = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return SrbGetScsiData(srb, NULL, NULL, NULL, NULL, NULL);
   }
@@ -604,7 +614,7 @@ SrbGetSrbFunction(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->SrbFunction;
   }
@@ -622,7 +632,7 @@ SrbGetSenseInfoBuffer(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   PVOID pSenseInfoBuffer = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbGetScsiData(srb, NULL, NULL, NULL, &pSenseInfoBuffer, NULL);
   }
@@ -641,7 +651,7 @@ SrbGetSenseInfoBufferLength(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   UCHAR SenseInfoBufferLength = 0;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbGetScsiData(srb, NULL, NULL, NULL, NULL, &SenseInfoBufferLength);
   }
@@ -660,7 +670,7 @@ SrbSetSenseInfoBuffer(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbSetScsiData(srb, NULL, NULL, NULL, &SenseInfoBuffer, NULL);
   }
@@ -678,7 +688,7 @@ SrbSetSenseInfoBufferLength(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbSetScsiData(srb, NULL, NULL, NULL, NULL, &SenseInfoBufferLength);
   }
@@ -695,7 +705,7 @@ SrbGetOriginalRequest(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->OriginalRequest;
   }
@@ -713,7 +723,7 @@ SrbSetOriginalRequest(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->OriginalRequest = OriginalRequest;
   }
@@ -731,7 +741,7 @@ SrbGetDataBuffer(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   PVOID DataBuffer;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     DataBuffer = srb->DataBuffer;
   }
@@ -750,7 +760,7 @@ SrbSetDataBuffer(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->DataBuffer = DataBuffer;
   }
@@ -768,7 +778,7 @@ SrbGetDataTransferLength(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   ULONG DataTransferLength;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     DataTransferLength = srb->DataTransferLength;
   }
@@ -787,7 +797,7 @@ SrbSetDataTransferLength(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->DataTransferLength = DataTransferLength;
   }
@@ -805,7 +815,7 @@ SrbGetTimeOutValue(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   ULONG timeOutValue;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     timeOutValue = srb->TimeOutValue;
   }
@@ -824,7 +834,7 @@ SrbSetTimeOutValue(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->TimeOutValue = TimeOutValue;
   }
@@ -842,7 +852,7 @@ SrbSetQueueSortKey(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function != SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (!SRBHELPER_IS_SRBEX(srb))
   {
     ((PSCSI_REQUEST_BLOCK)srb)->QueueSortKey = QueueSortKey;
   }
@@ -856,7 +866,7 @@ SrbSetQueueTag(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->RequestTag = QueueTag;
   }
@@ -875,7 +885,7 @@ SrbGetQueueTag(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->RequestTag;
   }
@@ -894,7 +904,7 @@ SrbGetNextSrb(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return (PVOID)srb->NextSrb;
   }
@@ -912,7 +922,7 @@ SrbSetNextSrb(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->NextSrb = (PSTORAGE_REQUEST_BLOCK)NextSrb;
   }
@@ -930,7 +940,7 @@ SrbGetSrbFlags(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   ULONG srbFlags;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srbFlags = srb->SrbFlags;
   }
@@ -949,7 +959,7 @@ SrbAssignSrbFlags(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->SrbFlags = Flags;
   }
@@ -967,7 +977,7 @@ SrbSetSrbFlags(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->SrbFlags |= Flags;
   }
@@ -985,7 +995,7 @@ SrbClearSrbFlags(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->SrbFlags &= ~Flags;
   }
@@ -1003,7 +1013,7 @@ SrbGetSystemStatus(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   ULONG systemStatus;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     systemStatus = srb->SystemStatus;
   }
@@ -1022,7 +1032,7 @@ SrbSetSystemStatus(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->SystemStatus = Status;
   }
@@ -1040,7 +1050,7 @@ SrbGetScsiStatus(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   UCHAR scsiStatus = 0;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbGetScsiData(srb, NULL, NULL, &scsiStatus, NULL, NULL);
   }
@@ -1059,7 +1069,7 @@ SrbSetScsiStatus(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbSetScsiData(srb, NULL, NULL, &ScsiStatus, NULL, NULL);
   }
@@ -1077,7 +1087,7 @@ SrbGetCdbLength(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   UCHAR CdbLength = 0;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbGetScsiData(srb, &CdbLength, NULL, NULL, NULL, NULL);
   }
@@ -1096,7 +1106,7 @@ SrbSetCdbLength(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     SrbSetScsiData(srb, &CdbLength, NULL, NULL, NULL, NULL);
   }
@@ -1113,7 +1123,7 @@ SrbGetRequestAttribute(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   ULONG RequestAttribute;
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     RequestAttribute = srb->RequestAttribute;
   }
@@ -1134,7 +1144,7 @@ SrbSetRequestAttribute(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->RequestAttribute = RequestAttribute;
   }
@@ -1155,7 +1165,7 @@ SrbGetPathId(
   UCHAR PathId = 0;
   PSTOR_ADDRESS storAddr = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     storAddr = (PSTOR_ADDRESS)SrbGetAddress(srb);
     if (storAddr)
@@ -1188,7 +1198,7 @@ SrbGetTargetId(
   UCHAR TargetId = 0;
   PSTOR_ADDRESS storAddr = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     storAddr = (PSTOR_ADDRESS)SrbGetAddress(srb);
     if (storAddr)
@@ -1221,7 +1231,7 @@ SrbGetLun(
   UCHAR Lun = 0;
   PSTOR_ADDRESS storAddr = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     storAddr = (PSTOR_ADDRESS)SrbGetAddress(srb);
     if (storAddr)
@@ -1256,7 +1266,7 @@ SrbGetPathTargetLun(
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
   PSTOR_ADDRESS storAddr = NULL;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     storAddr = (PSTOR_ADDRESS)SrbGetAddress(srb);
     if (storAddr)
@@ -1315,7 +1325,7 @@ SrbGetMiniportContext(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->MiniportContext;
   }
@@ -1332,7 +1342,7 @@ SrbGetSrbStatus(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->SrbStatus;
   }
@@ -1350,7 +1360,7 @@ SrbSetSrbStatus(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     if (srb->SrbStatus & SRB_STATUS_AUTOSENSE_VALID)
     {
@@ -1381,7 +1391,7 @@ SrbGetPortContext(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     return srb->PortContext;
   }
@@ -1400,7 +1410,7 @@ SrbSetPortContext(
 {
   PSTORAGE_REQUEST_BLOCK srb = (PSTORAGE_REQUEST_BLOCK)Srb;
 
-  if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+  if (SRBHELPER_IS_SRBEX(srb))
   {
     srb->PortContext = PortContext;
   }

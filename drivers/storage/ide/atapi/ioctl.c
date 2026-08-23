@@ -533,6 +533,7 @@ AtaPdoDeviceControl(
             Status = AtaPdoHandleGetScsiAddress(DevExt, Irp, IoStack);
             break;
 
+#ifndef SARCH_XBOX
         case IOCTL_SCSI_MINIPORT:
             Status = AtaPdoHandleScsiMiniport(DevExt, Irp, IoStack);
             break;
@@ -550,11 +551,14 @@ AtaPdoDeviceControl(
         case IOCTL_SCSI_PASS_THROUGH_DIRECT:
             Status = AtaPdoHandleScsiPassthrough(DevExt, Irp, IoStack);
             break;
+#endif
 
+#ifndef SARCH_XBOX
         case IOCTL_SCSI_GET_CAPABILITIES:
         case IOCTL_SCSI_GET_INQUIRY_DATA:
             ForwardToFdo = TRUE;
             break;
+#endif
 
         default:
             Status = STATUS_INVALID_DEVICE_REQUEST;
@@ -663,6 +667,8 @@ AtaFdoHandleStorageQueryProperty(
     return Status;
 }
 
+#ifndef SARCH_XBOX
+/* Legacy SCSI port-compat queries; no client issues these here. */
 static
 DECLSPEC_NOINLINE_FROM_NOT_PAGED
 CODE_SEG("PAGE")
@@ -792,6 +798,7 @@ AtaFdoHandleGetScsiInquiryData(
 
     return STATUS_SUCCESS;
 }
+#endif /* SARCH_XBOX */
 
 static
 DECLSPEC_NOINLINE_FROM_NOT_PAGED
@@ -881,6 +888,7 @@ AtaFdoDeviceControl(
             Status = AtaFdoHandleStorageQueryProperty(ChanExt, Irp, IoStack);
             break;
 
+#ifndef SARCH_XBOX
         case IOCTL_SCSI_GET_CAPABILITIES:
             Status = AtaFdoHandleGetScsiCapabilities(ChanExt, Irp, IoStack);
             break;
@@ -902,6 +910,7 @@ AtaFdoDeviceControl(
             IoInvalidateDeviceRelations(ChanExt->Pdo, BusRelations);
             Status = STATUS_SUCCESS;
             break;
+#endif
 
         default:
         {

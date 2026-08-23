@@ -1078,6 +1078,12 @@ IoInitializeTimer(
   _In_ PIO_TIMER_ROUTINE TimerRoutine,
   _In_opt_ __drv_aliasesMem PVOID Context);
 
+#ifdef SARCH_XBOX
+/* No PnP enumeration on Xbox; every caller (partmgr/atapi/disk/...) hits
+ * dead code.  Compile away the call entirely at the header level so the
+ * stub + each callsite's argument prep + call instruction all vanish. */
+#define IoInvalidateDeviceRelations(DeviceObject, Type) ((void)0)
+#else
 _IRQL_requires_max_(DISPATCH_LEVEL)
 NTKERNELAPI
 VOID
@@ -1085,6 +1091,7 @@ NTAPI
 IoInvalidateDeviceRelations(
   _In_ PDEVICE_OBJECT DeviceObject,
   _In_ DEVICE_RELATION_TYPE Type);
+#endif
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
 NTKERNELAPI

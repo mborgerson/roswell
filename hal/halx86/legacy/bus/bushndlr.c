@@ -459,15 +459,27 @@ HalpInitBusHandler(VOID)
     /* Setup the HAL Dispatch routines */
 #ifndef _MINIHAL_
     HalRegisterBusHandler = HaliRegisterBusHandler;
+#ifndef SARCH_XBOX
+    /* No reader of these two dispatch slots exists on Xbox; the plants
+     * would only anchor the handler-lookup bodies. */
     HalHandlerForBus = HaliHandlerForBus;
     HalHandlerForConfigSpace = HaliHandlerForConfigSpace;
+#endif
     HalReferenceHandlerForBus = HaliReferenceHandlerForBus;
     HalReferenceBusHandler = HaliReferenceBusHandler;
     HalDereferenceBusHandler = HaliDereferenceBusHandler;
 #endif
+#ifndef SARCH_XBOX
+    /* Nothing calls HalAssignSlotResources (no scsiport/videoprt); this
+     * pointer is the only thing keeping HalpAssignSlotResources linked. */
     HalPciAssignSlotResources = HalpAssignSlotResources;
+#endif
     HalPciTranslateBusAddress = HaliTranslateBusAddress; /* PCI Driver can override */
+#ifndef SARCH_XBOX
+    /* Only the PC bootvid and the x86bios thunk consume this slot;
+     * neither is linked on Xbox. */
     if (!HalFindBusAddressTranslation) HalFindBusAddressTranslation = HaliFindBusAddressTranslation;
+#endif
 }
 
 /* EOF */

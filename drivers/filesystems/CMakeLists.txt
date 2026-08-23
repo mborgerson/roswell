@@ -1,6 +1,12 @@
+if(SARCH STREQUAL "xbox")
+    add_subdirectory(xdvdfs)
+    add_subdirectory(vfatfs)
+    return()
+endif()
 
 add_subdirectory(btrfs)
 add_subdirectory(cdfs)
+add_subdirectory(xdvdfs)
 add_subdirectory(ext2)
 add_subdirectory(fastfat)
 add_subdirectory(fs_rec)

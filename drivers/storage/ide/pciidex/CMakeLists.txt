@@ -1,6 +1,4 @@
 
-spec2def(pciidex.sys pciidex.spec ADD_IMPORTLIB)
-
 list(APPEND SOURCE
     chipset/ahci_generic.c
     chipset/ahci_hw.c
@@ -28,17 +26,42 @@ list(APPEND SOURCE
     pdo.c
     power.c)
 
-if(ARCH STREQUAL "i386")
+if(ARCH STREQUAL "i386" AND NOT SARCH STREQUAL "xbox")
+    # Xbox has only the PnP-enumerated NVIDIA controller -- no legacy
+    # non-PnP ATA detection. Dropping the define unanchors the legacy
+    # function-pointer registration in pciidex.c.
     add_definitions(-DATA_DETECT_LEGACY_DEVICES)
     list(APPEND SOURCE chipset/pata_legacy.c)
 endif()
 
-add_library(pciidex MODULE
-    ${SOURCE}
-    pciidex.rc
-    ${CMAKE_CURRENT_BINARY_DIR}/pciidex.def)
+if(SARCH STREQUAL "xbox")
+    # MCPX southbridge is a fixed VEN_NVIDIA PATA controller -- AHCI/SATA and
+    # every other vendor-specific chipset is dead.  Drop them so the linker
+    # can GC ~30 KB of unused detection + transfer-mode code.  amd.c stays
+    # because the NVIDIA case in PciIdeGetControllerProperties dispatches to
+    # AmdGetControllerProperties.
+    list(REMOVE_ITEM SOURCE
+        chipset/ahci_generic.c
+        chipset/ahci_hw.c
+        chipset/ahci_io.c
+        chipset/ati.c
+        chipset/cmd.c
+        chipset/intel.c
+        chipset/pctech.c
+        chipset/sil680.c
+        chipset/svw_pata.c
+        chipset/svw_sata.c
+        chipset/toshiba.c)
+    # via.c stays in because amd.c uses its ViaClampTimings helper for the
+    # NVIDIA chipset timing path.  Most of the file is dead but the helper is
+    # cheap to keep.
+endif()
 
+# the PCI IDE bus-extension library is linked into the kernel image
+# as a static library -- it exports the PciIdeX* ABI the folded-in pciide
+# miniport calls directly.  Built unchanged, in the normal driver view; its
+# kernel-API imports resolve through the in-kernel import table.
+add_library(pciidex ${SOURCE})
 add_pch(pciidex pciidex.h SOURCE)
-set_module_type(pciidex kernelmodedriver)
-add_importlibs(pciidex ntoskrnl hal)
-add_cd_file(TARGET pciidex DESTINATION reactos/system32/drivers NO_CAB FOR all)
+target_compile_definitions(pciidex PRIVATE DriverEntry=PciidexDriverEntry)
+add_dependencies(pciidex psdk xdk bugcodes)

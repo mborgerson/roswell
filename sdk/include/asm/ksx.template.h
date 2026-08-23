@@ -416,14 +416,18 @@ SIZE(DeviceQueueEntryLength, KDEVICE_QUEUE_ENTRY),
 
 HEADER("KDPC"),
 OFFSET(DpType, KDPC, Type),
+#ifndef SARCH_XBOX
 OFFSET(DpImportance, KDPC, Importance),
 OFFSET(DpNumber, KDPC, Number),
+#endif
 OFFSET(DpDpcListEntry, KDPC, DpcListEntry),
 OFFSET(DpDeferredRoutine, KDPC, DeferredRoutine),
 OFFSET(DpDeferredContext, KDPC, DeferredContext),
 OFFSET(DpSystemArgument1, KDPC, SystemArgument1),
 OFFSET(DpSystemArgument2, KDPC, SystemArgument2),
+#ifndef SARCH_XBOX
 OFFSET(DpDpcData, KDPC, DpcData),
+#endif
 SIZE(DpcObjectLength, KDPC),
 
 HEADER("KDEVICE_QUEUE"),

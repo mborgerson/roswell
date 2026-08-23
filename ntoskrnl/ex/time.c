@@ -41,6 +41,13 @@ ExpGetTimeZoneId(
     _Out_ PULONG TimeZoneId,
     _Out_ PLARGE_INTEGER NewTimeZoneBias)
 {
+#ifdef SARCH_XBOX
+    /* No registry on Xbox; report UTC with zero bias. */
+    UNREFERENCED_PARAMETER(TimeNow);
+    *TimeZoneId = TIME_ZONE_ID_UNKNOWN;
+    NewTimeZoneBias->QuadPart = 0;
+    return TRUE;
+#else
     LARGE_INTEGER StandardTime;
     LARGE_INTEGER DaylightTime;
     LARGE_INTEGER LocalTimeNow = *TimeNow;
@@ -122,6 +129,7 @@ ExpGetTimeZoneId(
     }
 
     return TRUE;
+#endif
 }
 
 /*++
@@ -431,7 +439,9 @@ ExpSetTimeZoneInformation(PRTL_TIME_ZONE_INFORMATION TimeZoneInformation)
 
     /* Set the new system time and notify the system */
     KeSetSystemTime(&SystemTime, &OldTime, FALSE, NULL);
+#ifndef SARCH_XBOX
     PoNotifySystemTimeSet();
+#endif
 
     /* Return success */
     DPRINT("ExpSetTimeZoneInformation done\n");
@@ -508,7 +518,9 @@ NtSetSystemTime(IN PLARGE_INTEGER SystemTime,
 
     /* Now set the system time and notify the system */
     KeSetSystemTime(&NewSystemTime, &OldSystemTime, FALSE, NULL);
+#ifndef SARCH_XBOX
     PoNotifySystemTimeSet();
+#endif
 
     /* Check if caller wanted previous time */
     if (PreviousTime)
@@ -545,7 +557,9 @@ NtSetSystemTime(IN PLARGE_INTEGER SystemTime,
 
         /* Set the system time and notify the system */
         KeSetSystemTime(&NewSystemTime, &OldSystemTime, FALSE, NULL);
+#ifndef SARCH_XBOX
         PoNotifySystemTimeSet();
+#endif
     }
 
     /* Return status */
@@ -562,6 +576,10 @@ NTSTATUS
 NTAPI
 NtQuerySystemTime(OUT PLARGE_INTEGER SystemTime)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(SystemTime);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     PAGED_CODE();
 
@@ -595,6 +613,7 @@ NtQuerySystemTime(OUT PLARGE_INTEGER SystemTime)
 
     /* Return success */
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -628,6 +647,12 @@ NtQueryTimerResolution(OUT PULONG MinimumResolution,
                        OUT PULONG MaximumResolution,
                        OUT PULONG ActualResolution)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(MinimumResolution);
+    UNREFERENCED_PARAMETER(MaximumResolution);
+    UNREFERENCED_PARAMETER(ActualResolution);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
 
     /* Check if the call came from user-mode */
@@ -668,6 +693,7 @@ NtQueryTimerResolution(OUT PULONG MinimumResolution,
 
     /* Return success */
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 /*

@@ -1,12 +1,5 @@
 
-spec2def(wmilib.sys wmilib.spec ADD_IMPORTLIB)
-
-list(APPEND SOURCE
-    wmilib.c
-    wmilib.rc
-    ${CMAKE_CURRENT_BINARY_DIR}/wmilib.def)
-
-add_library(wmilib MODULE ${SOURCE})
-set_module_type(wmilib kernelmodedriver ENTRYPOINT 0)
-add_importlibs(wmilib ntoskrnl)
-add_cd_file(TARGET wmilib DESTINATION reactos/system32/drivers NO_CAB FOR all)
+# the WMI helper library is linked into the kernel image as a static
+# library -- atapi (and other drivers) call its Wmi* helpers directly.
+add_library(wmilib wmilib.c)
+add_dependencies(wmilib psdk xdk bugcodes)

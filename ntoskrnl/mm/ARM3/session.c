@@ -509,11 +509,11 @@ MiSessionInitializeWorkingSetList(VOID)
         /* Get a zeroed colored zero page */
         MI_SET_USAGE(MI_USAGE_INIT_MEMORY);
         Color = MI_GET_NEXT_COLOR();
-        PageFrameIndex = MiRemoveZeroPageSafe(Color);
+        PageFrameIndex = NxkPageSupplyTakeZeroIfReady(Color);
         if (!PageFrameIndex)
         {
             /* No zero pages, grab a free one */
-            PageFrameIndex = MiRemoveAnyPage(Color);
+            PageFrameIndex = NxkPageSupplyTakeAny(Color);
 
             /* Zero it outside the PFN lock */
             MiReleasePfnLock(OldIrql);
@@ -541,11 +541,11 @@ MiSessionInitializeWorkingSetList(VOID)
     /* Get a zeroed colored zero page */
     MI_SET_USAGE(MI_USAGE_INIT_MEMORY);
     Color = MI_GET_NEXT_COLOR();
-    PageFrameIndex = MiRemoveZeroPageSafe(Color);
+    PageFrameIndex = NxkPageSupplyTakeZeroIfReady(Color);
     if (!PageFrameIndex)
     {
         /* No zero pages, grab a free one */
-        PageFrameIndex = MiRemoveAnyPage(Color);
+        PageFrameIndex = NxkPageSupplyTakeAny(Color);
 
         /* Zero it outside the PFN lock */
         MiReleasePfnLock(OldIrql);
@@ -687,11 +687,11 @@ MiSessionCreateInternal(OUT PULONG SessionId)
         /* Get a zeroed colored zero page */
         MI_SET_USAGE(MI_USAGE_INIT_MEMORY);
         Color = MI_GET_NEXT_COLOR();
-        DataPage[i] = MiRemoveZeroPageSafe(Color);
+        DataPage[i] = NxkPageSupplyTakeZeroIfReady(Color);
         if (!DataPage[i])
         {
             /* No zero pages, grab a free one */
-            DataPage[i] = MiRemoveAnyPage(Color);
+            DataPage[i] = NxkPageSupplyTakeAny(Color);
 
             /* Zero it outside the PFN lock */
             MiReleasePfnLock(OldIrql);
@@ -710,11 +710,11 @@ MiSessionCreateInternal(OUT PULONG SessionId)
     /* Get a zeroed colored zero page */
     MI_SET_USAGE(MI_USAGE_INIT_MEMORY);
     Color = MI_GET_NEXT_COLOR();
-    SessionPageDirIndex = MiRemoveZeroPageSafe(Color);
+    SessionPageDirIndex = NxkPageSupplyTakeZeroIfReady(Color);
     if (!SessionPageDirIndex)
     {
         /* No zero pages, grab a free one */
-        SessionPageDirIndex = MiRemoveAnyPage(Color);
+        SessionPageDirIndex = NxkPageSupplyTakeAny(Color);
 
         /* Zero it outside the PFN lock */
         MiReleasePfnLock(OldIrql);
@@ -752,11 +752,11 @@ MiSessionCreateInternal(OUT PULONG SessionId)
         /* Grab a zeroed colored page */
         MI_SET_USAGE(MI_USAGE_INIT_MEMORY);
         Color = MI_GET_NEXT_COLOR();
-        TagPage[i] = MiRemoveZeroPageSafe(Color);
+        TagPage[i] = NxkPageSupplyTakeZeroIfReady(Color);
         if (!TagPage[i])
         {
             /* No zero pages, grab a free one */
-            TagPage[i] = MiRemoveAnyPage(Color);
+            TagPage[i] = NxkPageSupplyTakeAny(Color);
 
             /* Zero it outside the PFN lock */
             MiReleasePfnLock(OldIrql);

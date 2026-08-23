@@ -86,6 +86,11 @@ MountMgrChangeNotify(IN PDEVICE_EXTENSION DeviceExtension,
 NTSTATUS
 MountmgrWriteNoAutoMount(IN PDEVICE_EXTENSION DeviceExtension)
 {
+#ifdef SARCH_XBOX
+    /* No persisted AutoMount preference. */
+    UNREFERENCED_PARAMETER(DeviceExtension);
+    return STATUS_SUCCESS;
+#else
     ULONG Value = DeviceExtension->NoAutoMount;
 
     return RtlWriteRegistryValue(RTL_REGISTRY_ABSOLUTE,
@@ -94,6 +99,7 @@ MountmgrWriteNoAutoMount(IN PDEVICE_EXTENSION DeviceExtension)
                                  REG_DWORD,
                                  &Value,
                                  sizeof(Value));
+#endif
 }
 
 /*
@@ -220,6 +226,11 @@ ScrubRegistryRoutine(IN PWSTR ValueName,
 NTSTATUS
 MountMgrScrubRegistry(IN PDEVICE_EXTENSION DeviceExtension)
 {
+#ifdef SARCH_XBOX
+    /* No persisted DB to scrub. */
+    UNREFERENCED_PARAMETER(DeviceExtension);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     BOOLEAN Continue;
     RTL_QUERY_REGISTRY_TABLE QueryTable[2];
@@ -240,6 +251,7 @@ MountMgrScrubRegistry(IN PDEVICE_EXTENSION DeviceExtension)
     while (Continue);
 
     return Status;
+#endif
 }
 
 /*
@@ -716,11 +728,14 @@ MountMgrQuerySystemVolumeName(OUT PUNICODE_STRING SystemVolumeName)
 
     SystemVolumeName->Buffer = NULL;
 
+#ifndef SARCH_XBOX
+    /* No \Registry\Machine\System\Setup hive. */
     RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE,
                            L"\\Registry\\Machine\\System\\Setup",
                            QueryTable,
                            SystemVolumeName,
                            NULL);
+#endif
 
     if (SystemVolumeName->Buffer)
     {
@@ -2077,7 +2092,12 @@ MountMgrVolumeMountPointChanged(IN PDEVICE_EXTENSION DeviceExtension,
     }
 
     /* Reference it */
+#ifdef SARCH_XBOX
+    /* in-image view: the type variable, not the import-slot indirection */
+    Status = ObReferenceObjectByHandle(Handle, 0, IoFileObjectType, KernelMode, (PVOID *)&FileObject, NULL);
+#else
     Status = ObReferenceObjectByHandle(Handle, 0, *IoFileObjectType, KernelMode, (PVOID *)&FileObject, NULL);
+#endif
     if (!NT_SUCCESS(Status))
     {
         goto Cleanup;
@@ -2683,6 +2703,11 @@ MountMgrDeviceControl(IN PDEVICE_OBJECT DeviceObject,
 
     switch (Stack->Parameters.DeviceIoControl.IoControlCode)
     {
+#ifndef SARCH_XBOX
+        /* Xbox titles can't reach IOCTL_MOUNTMGR_* (the codes aren't in
+         * any xboxkrnl-callable ABI and nothing in our kernel issues
+         * them internally). Gate the whole switch so the linker can
+         * drop all 17 handlers + their internal helpers. */
         case IOCTL_MOUNTMGR_CREATE_POINT:
             Status = MountMgrCreatePoint(DeviceExtension, Irp);
             break;
@@ -2774,6 +2799,7 @@ MountMgrDeviceControl(IN PDEVICE_OBJECT DeviceObject,
         case IOCTL_MOUNTMGR_SET_AUTO_MOUNT:
             Status = MountMgrSetAutoMount(DeviceExtension, Irp);
             break;
+#endif
 
         default:
             Status = STATUS_INVALID_DEVICE_REQUEST;

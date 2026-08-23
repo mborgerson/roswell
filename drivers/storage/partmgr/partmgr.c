@@ -129,6 +129,20 @@ PartMgrConvertLayoutToExtended(
  * - Requires partitioning lock held.
  * - Uses the cached disk partition layout.
  **/
+#ifdef SARCH_XBOX
+/* The FATX layout is six fixed partitions; the unpartitioned-FAT16
+ * "super-floppy" heuristic doesn't apply. */
+static
+CODE_SEG("PAGE")
+BOOLEAN
+PartMgrIsDiskSuperFloppy(
+    _In_ PFDO_EXTENSION FdoExtension)
+{
+    UNREFERENCED_PARAMETER(FdoExtension);
+    PAGED_CODE();
+    return FALSE;
+}
+#else
 static
 CODE_SEG("PAGE")
 BOOLEAN
@@ -191,6 +205,7 @@ PartMgrIsDiskSuperFloppy(
 
     return TRUE;
 }
+#endif
 
 static
 CODE_SEG("PAGE")
@@ -964,6 +979,7 @@ FdoHandleStartDevice(
 
     FdoExtension->DiskData.DeviceNumber = deviceNumber.DeviceNumber;
 
+#ifndef SARCH_XBOX
     // Register the disk interface.
     // partmgr.sys from Windows 8.1 also registers a mysterious GUID_DEVINTERFACE_HIDDEN_DISK here.
     UNICODE_STRING interfaceName;
@@ -985,6 +1001,7 @@ FdoHandleStartDevice(
         RtlFreeUnicodeString(&interfaceName);
         RtlInitUnicodeString(&FdoExtension->DiskInterfaceName, NULL);
     }
+#endif
 
     return status;
 }
@@ -1122,12 +1139,14 @@ FdoHandleRemoveDevice(
 {
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
     if (FdoExtension->DiskInterfaceName.Buffer)
     {
         IoSetDeviceInterfaceState(&FdoExtension->DiskInterfaceName, FALSE);
         RtlFreeUnicodeString(&FdoExtension->DiskInterfaceName);
         RtlInitUnicodeString(&FdoExtension->DiskInterfaceName, NULL);
     }
+#endif
 
     // Send the IRP down the stack
     IoSkipCurrentIrpStackLocation(Irp);
@@ -1171,7 +1190,6 @@ FdoHandleSurpriseRemoval(
 }
 
 static
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 PartMgrAddDevice(
@@ -1263,14 +1281,21 @@ PartMgrDeviceControl(
             status = FdoIoctlDiskGetPartitionInfoEx(fdoExtension, Irp);
             break;
 
+#ifndef SARCH_XBOX
+        /* Titles use the _EX variant exclusively. */
         case IOCTL_DISK_GET_DRIVE_LAYOUT:
             status = FdoIoctlDiskGetDriveLayout(fdoExtension, Irp);
             break;
+#endif
 
         case IOCTL_DISK_GET_DRIVE_LAYOUT_EX:
             status = FdoIoctlDiskGetDriveLayoutEx(fdoExtension, Irp);
             break;
 
+#ifndef SARCH_XBOX
+        /* Partition table write IOCTLs: titles don't repartition the
+         * HDD or DVD. The Xbox partition layout is fixed at
+         * Harddisk0/partition1..6 and DVD has a single fixed extent. */
         case IOCTL_DISK_SET_DRIVE_LAYOUT:
             status = FdoIoctlDiskSetDriveLayout(fdoExtension, Irp);
             break;
@@ -1290,6 +1315,7 @@ PartMgrDeviceControl(
         case IOCTL_DISK_DELETE_DRIVE_LAYOUT:
             status = FdoIoctlDiskDeleteDriveLayout(fdoExtension, Irp);
             break;
+#endif
         // case IOCTL_DISK_GROW_PARTITION: // todo
         default:
             return ForwardIrpAndForget(DeviceObject, Irp);
@@ -1301,7 +1327,6 @@ PartMgrDeviceControl(
 }
 
 static
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 PartMgrPnp(
@@ -1347,6 +1372,8 @@ PartMgrPnp(
         {
             return FdoHandleDeviceRelations(fdoExtension, Irp);
         }
+#ifndef SARCH_XBOX
+        /* HDD/DVD are fixed; PnP removal never fires on Xbox. */
         case IRP_MN_SURPRISE_REMOVAL:
         {
             return FdoHandleSurpriseRemoval(fdoExtension, Irp);
@@ -1355,6 +1382,7 @@ PartMgrPnp(
         {
             return FdoHandleRemoveDevice(fdoExtension, Irp);
         }
+#endif
         case IRP_MN_QUERY_STOP_DEVICE:
         case IRP_MN_QUERY_REMOVE_DEVICE:
         case IRP_MN_CANCEL_STOP_DEVICE:
@@ -1491,7 +1519,10 @@ DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
     _In_ PUNICODE_STRING RegistryPath)
 {
+#ifndef SARCH_XBOX
+    /* Folded into the kernel image -- never unloaded. */
     DriverObject->DriverUnload = PartMgrUnload;
+#endif
     DriverObject->DriverExtension->AddDevice = PartMgrAddDevice;
     DriverObject->MajorFunction[IRP_MJ_CREATE]         = ForwardIrpAndForget;
     DriverObject->MajorFunction[IRP_MJ_CLOSE]          = ForwardIrpAndForget;
@@ -1499,9 +1530,16 @@ DriverEntry(
     DriverObject->MajorFunction[IRP_MJ_WRITE]          = PartMgrReadWrite;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = PartMgrDeviceControl;
     DriverObject->MajorFunction[IRP_MJ_PNP]            = PartMgrPnp;
+#ifndef SARCH_XBOX
+    /* NtShutdownSystem is not exported, and an FSD-issued
+     * IRP_MJ_FLUSH_BUFFERS tolerates the IO manager's default
+     * STATUS_INVALID_DEVICE_REQUEST (unsupported flush is swallowed). */
     DriverObject->MajorFunction[IRP_MJ_SHUTDOWN]       = PartMgrShutdownFlush;
     DriverObject->MajorFunction[IRP_MJ_FLUSH_BUFFERS]  = PartMgrShutdownFlush;
+#endif
+#ifndef SARCH_XBOX /* ntoskrnl/po is unlinked; no Po* exports */
     DriverObject->MajorFunction[IRP_MJ_POWER]          = PartMgrPower;
+#endif
 
     return STATUS_SUCCESS;
 }

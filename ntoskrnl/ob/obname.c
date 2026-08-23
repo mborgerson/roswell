@@ -39,6 +39,11 @@ NTSTATUS
 NTAPI
 ObpGetDosDevicesProtection(OUT PSECURITY_DESCRIPTOR SecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* No DACL on Xbox; SD callbacks are all stubs. */
+    return RtlCreateSecurityDescriptor(SecurityDescriptor,
+                                       SECURITY_DESCRIPTOR_REVISION);
+#else
     PACL Dacl;
     ULONG AclSize;
     NTSTATUS Status;
@@ -153,6 +158,7 @@ ObpGetDosDevicesProtection(OUT PSECURITY_DESCRIPTOR SecurityDescriptor)
     ASSERT(NT_SUCCESS(Status));
 
     return STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 }
 
 CODE_SEG("INIT")
@@ -160,6 +166,10 @@ VOID
 NTAPI
 ObpFreeDosDevicesProtection(OUT PSECURITY_DESCRIPTOR SecurityDescriptor)
 {
+#ifdef SARCH_XBOX
+    /* ObpGetDosDevicesProtection allocates no DACL on Xbox. */
+    UNREFERENCED_PARAMETER(SecurityDescriptor);
+#else
     PACL Dacl;
     NTSTATUS Status;
     BOOLEAN DaclPresent, DaclDefaulted;
@@ -169,6 +179,7 @@ ObpFreeDosDevicesProtection(OUT PSECURITY_DESCRIPTOR SecurityDescriptor)
     ASSERT(DaclPresent);
     ASSERT(Dacl != NULL);
     ExFreePoolWithTag(Dacl, TAG_DACL);
+#endif
 }
 
 CODE_SEG("INIT")
@@ -214,6 +225,7 @@ ObpCreateDosDevicesDirectory(VOID)
     if (!NT_SUCCESS(Status))
         goto done;
 
+#ifndef SARCH_XBOX
     /*
      * Initialize the \??\GLOBALROOT symbolic link
      * pointing to the root directory \ .
@@ -248,6 +260,7 @@ ObpCreateDosDevicesDirectory(VOID)
                                         &ObjectAttributes,
                                         &RootName);
     if (NT_SUCCESS(Status)) NtClose(SymHandle);
+#endif
 
     /* Close the directory handle */
     NtClose(Handle);
@@ -396,6 +409,12 @@ NTAPI
 ObpIsUnsecureName(IN PUNICODE_STRING ObjectName,
                   IN BOOLEAN CaseInSensitive)
 {
+#ifdef SARCH_XBOX
+    /* No unsecure-names registry entry; always secure. */
+    UNREFERENCED_PARAMETER(ObjectName);
+    UNREFERENCED_PARAMETER(CaseInSensitive);
+    return FALSE;
+#else
     BOOLEAN Unsecure;
     PWSTR UnsecureBuffer;
     UNICODE_STRING UnsecureName;
@@ -439,6 +458,7 @@ ObpIsUnsecureName(IN PUNICODE_STRING ObjectName,
 
     /* Return our findings */
     return Unsecure;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -799,6 +819,7 @@ ParseFromRoot:
             /* Check if we're in the root */
             if (!Directory) Directory = RootDirectory;
 
+#ifndef SARCH_XBOX
             /* Check if this is a user-mode call that needs to traverse */
             if ((AccessCheckMode != KernelMode) &&
                 !(AccessState->Flags & TOKEN_HAS_TRAVERSE_PRIVILEGE))
@@ -826,6 +847,7 @@ ParseFromRoot:
                     }
                 }
             }
+#endif
 
             /* Check if we don't have a remaining name yet */
             if (!RemainingName.Length)
@@ -886,6 +908,7 @@ ParseFromRoot:
                 /* Get the object header */
                 ObjectHeader = OBJECT_TO_OBJECT_HEADER(InsertObject);
 
+#ifndef SARCH_XBOX
                 /*
                  * Deny object creation if:
                  * That's a section object or a symbolic link
@@ -907,6 +930,7 @@ ParseFromRoot:
                         }
                     }
                 }
+#endif
 
                 /* Create Object Name */
                 NewName = ExAllocatePoolWithTag(PagedPool,
@@ -1097,6 +1121,7 @@ ReparseObject:
                     /* Are we creating an object? */
                     if (!InsertObject)
                     {
+#ifndef SARCH_XBOX
                         /* Check if this is a user-mode call that needs to traverse */
                         if ((AccessCheckMode != KernelMode) &&
                             !(AccessState->Flags & TOKEN_HAS_TRAVERSE_PRIVILEGE))
@@ -1114,6 +1139,7 @@ ReparseObject:
                                 break;
                             }
                         }
+#endif
 
                         /* Reference the Object */
                         Status = ObReferenceObjectByPointer(Object,

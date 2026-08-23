@@ -16,8 +16,16 @@ FORCEINLINE
 KPROCESSOR_MODE
 KeGetPreviousMode(VOID)
 {
+#ifdef SARCH_XBOX
+    /* Titles run ring 0; there is no user-mode entry into the kernel.
+     * Constant-fold to KernelMode so the `if (PreviousMode != KernelMode)`
+     * user-buffer-probe arms in every Nt* syscall become dead code that
+     * --gc-sections drops along with their ProbeFor* / SEH machinery. */
+    return KernelMode;
+#else
     /* Return the current mode */
     return KeGetCurrentThread()->PreviousMode;
+#endif
 }
 #endif
 
@@ -859,6 +867,18 @@ KiCheckAlertability(IN PKTHREAD Thread,
             Thread->ApcState.UserApcPending = TRUE;
             return STATUS_USER_APC;
         }
+        else if ((WaitMode != KernelMode) &&
+                 (Thread->ApcState.UserApcPending))
+        {
+            /* Xbox: async-IO completion routines run as in-kernel APCs (titles
+             * are ring 0) and flag UserApcPending without a queued user APC; honor
+             * it so the title's alertable poll-wait breaks with STATUS_USER_APC,
+             * which it explicitly tests for.  One-shot: the list is empty here, so
+             * this can only be the synthetic completion flag (a real user APC
+             * would have been taken by the branch above). */
+            Thread->ApcState.UserApcPending = FALSE;
+            return STATUS_USER_APC;
+        }
         else if (Thread->Alerted[KernelMode])
         {
             /* It isn't that either, but we're alered in kernel mode */
@@ -868,8 +888,27 @@ KiCheckAlertability(IN PKTHREAD Thread,
     }
     else if ((WaitMode != KernelMode) && (Thread->ApcState.UserApcPending))
     {
-        /* Not alertable, but this is a user wait with pending user APCs */
-        return STATUS_USER_APC;
+        /* Not alertable, but this is a user wait with pending user APCs.
+         *
+         * Xbox: the async-IO completion mechanism (see KiSetCurrentThreadUserApcPending
+         * + ntoskrnl/xbe NtUserIoApcDispatcher) sets UserApcPending synthetically,
+         * without a queued user APC, to break the title's *alertable* poll-waits with
+         * STATUS_USER_APC.  On retail this branch fires only when a real user APC is
+         * queued; with our synthetic flag it would also leak into non-alertable user
+         * waits -- the title issues those between streaming phases (e.g. blocking on
+         * the per-buffer "data ready" event signalled by the completion routine), and
+         * a spurious USER_APC return makes it miss the event signal and stall.
+         * Distinguish: if the UserMode APC list is empty, the flag is synthetic --
+         * clear it and fall through to the normal wait so the in-kernel completion
+         * APC can run and signal the object, matching retail. */
+        if (IsListEmpty(&Thread->ApcState.ApcListHead[UserMode]))
+        {
+            Thread->ApcState.UserApcPending = FALSE;
+        }
+        else
+        {
+            return STATUS_USER_APC;
+        }
     }
 
     /* Otherwise, we're fine */
@@ -894,8 +933,12 @@ KiRemoveEntryTimer(IN PKTIMER Timer)
     ULONG Hand;
     PKTIMER_TABLE_ENTRY TableEntry;
 
-    /* Remove the timer from the timer list and check if it's empty */
-    Hand = Timer->Header.Hand;
+    /* Remove the timer from the timer list and check if it's empty.
+     * NB: derive the hand from the full DueTime, not Timer->Header.Hand --
+     * that field is a UCHAR but TIMER_TABLE_SIZE is 512, so hands >255 are
+     * truncated and would point at the wrong bucket here, corrupting the
+     * .Time lower-bound the clock uses to decide which hands to expire. */
+    Hand = KiComputeTimerTableIndex(Timer->DueTime.QuadPart);
     if (RemoveEntryList(&Timer->TimerListEntry))
     {
         /* Get the respective timer table entry */
@@ -1003,7 +1046,9 @@ FORCEINLINE
 VOID
 KxRemoveTreeTimer(IN PKTIMER Timer)
 {
-    ULONG Hand = Timer->Header.Hand;
+    /* Derive the hand from the full DueTime, not the truncated UCHAR
+     * Timer->Header.Hand (TIMER_TABLE_SIZE is 512). See KiRemoveEntryTimer. */
+    ULONG Hand = KiComputeTimerTableIndex(Timer->DueTime.QuadPart);
     PKSPIN_LOCK_QUEUE LockQueue;
     PKTIMER_TABLE_ENTRY TimerEntry;
 

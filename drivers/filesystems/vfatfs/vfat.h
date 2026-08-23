@@ -932,6 +932,7 @@ WriteCluster(
     ULONG ClusterToWrite,
     ULONG NewValue);
 
+#ifndef SARCH_XBOX
 NTSTATUS
 GetDirtyStatus(
     PDEVICE_EXTENSION DeviceExt,
@@ -965,6 +966,7 @@ FAT32SetDirtyStatus(
 NTSTATUS
 FAT32UpdateFreeClustersCount(
     PDEVICE_EXTENSION DeviceExt);
+#endif /* !SARCH_XBOX */
 
 /* fcb.c */
 

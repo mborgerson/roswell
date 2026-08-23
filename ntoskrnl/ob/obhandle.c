@@ -258,6 +258,13 @@ POBJECT_HANDLE_COUNT_ENTRY
 NTAPI
 ObpInsertHandleCount(IN POBJECT_HEADER ObjectHeader)
 {
+#ifdef SARCH_XBOX
+    /* A second per-process entry can only be needed when a handle is
+     * created from a process that isn't already in the count -- with a
+     * single process the single entry always matches. */
+    ASSERT(FALSE);
+    return NULL;
+#else
     POBJECT_HEADER_HANDLE_INFO HandleInfo;
     POBJECT_HANDLE_COUNT_ENTRY FreeEntry;
     POBJECT_HANDLE_COUNT_DATABASE HandleDatabase, OldHandleDatabase;
@@ -326,6 +333,7 @@ ObpInsertHandleCount(IN POBJECT_HEADER ObjectHeader)
     HandleDatabase->CountEntries = i;
     HandleInfo->HandleCountDatabase = HandleDatabase;
     return FreeEntry;
+#endif /* !SARCH_XBOX */
 }
 
 NTSTATUS
@@ -738,17 +746,16 @@ ObpCloseHandleTableEntry(IN PHANDLE_TABLE HandleTable,
             /* We are! Unlock the entry */
             ExUnlockHandleTableEntry(HandleTable, HandleEntry);
 
+#ifndef SARCH_XBOX
             /* Make sure we have a debug port */
             if (PsGetCurrentProcess()->DebugPort)
             {
                 /* Raise an exception */
                 return KeRaiseUserException(STATUS_HANDLE_NOT_CLOSABLE);
             }
-            else
-            {
-                /* Return the error instead */
-                return STATUS_HANDLE_NOT_CLOSABLE;
-            }
+#endif
+            /* Return the error instead */
+            return STATUS_HANDLE_NOT_CLOSABLE;
         }
         else
         {
@@ -1320,8 +1327,11 @@ ObpCreateUnnamedHandle(IN PVOID Object,
     HANDLE_TABLE_ENTRY NewEntry;
     POBJECT_HEADER ObjectHeader;
     HANDLE Handle;
+#ifndef SARCH_XBOX
     KAPC_STATE ApcState;
-    BOOLEAN AttachedToProcess = FALSE, KernelHandle = FALSE;
+    BOOLEAN AttachedToProcess = FALSE;
+#endif
+    BOOLEAN KernelHandle = FALSE;
     PVOID HandleTable;
     NTSTATUS Status;
     ACCESS_MASK GrantedAccess;
@@ -1351,6 +1361,7 @@ ObpCreateUnnamedHandle(IN PVOID Object,
         HandleTable = ObpKernelHandleTable;
         KernelHandle = TRUE;
 
+#ifndef SARCH_XBOX
         /* Check if we're not in the system process */
         if (PsGetCurrentProcess() != PsInitialSystemProcess)
         {
@@ -1358,6 +1369,7 @@ ObpCreateUnnamedHandle(IN PVOID Object,
             KeStackAttachProcess(&PsInitialSystemProcess->Pcb, &ApcState);
             AttachedToProcess = TRUE;
         }
+#endif
     }
     else
     {
@@ -1377,7 +1389,9 @@ ObpCreateUnnamedHandle(IN PVOID Object,
          * We failed (meaning security failure, according to NT Internals)
          * detach and return
          */
+#ifndef SARCH_XBOX
         if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
         return Status;
     }
 
@@ -1423,8 +1437,10 @@ ObpCreateUnnamedHandle(IN PVOID Object,
             *ReturnedObject = Object;
         }
 
+#ifndef SARCH_XBOX
         /* Detach if needed */
         if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
 
         /* Trace and return */
         OBTRACE(OB_HANDLE_DEBUG,
@@ -1450,8 +1466,10 @@ ObpCreateUnnamedHandle(IN PVOID Object,
                             GrantedAccess,
                             ObjectType);
 
+#ifndef SARCH_XBOX
     /* Detach and fail */
     if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
     return STATUS_INSUFFICIENT_RESOURCES;
 }
 
@@ -1508,8 +1526,11 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
     HANDLE_TABLE_ENTRY NewEntry;
     POBJECT_HEADER ObjectHeader;
     HANDLE Handle;
+#ifndef SARCH_XBOX
     KAPC_STATE ApcState;
-    BOOLEAN AttachedToProcess = FALSE, KernelHandle = FALSE;
+    BOOLEAN AttachedToProcess = FALSE;
+#endif
+    BOOLEAN KernelHandle = FALSE;
     POBJECT_TYPE ObjectType;
     PVOID HandleTable;
     NTSTATUS Status;
@@ -1546,6 +1567,7 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
         HandleTable = ObpKernelHandleTable;
         KernelHandle = TRUE;
 
+#ifndef SARCH_XBOX
         /* Check if we're not in the system process */
         if (PsGetCurrentProcess() != PsInitialSystemProcess)
         {
@@ -1553,6 +1575,7 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
             KeStackAttachProcess(&PsInitialSystemProcess->Pcb, &ApcState);
             AttachedToProcess = TRUE;
         }
+#endif
     }
     else
     {
@@ -1574,7 +1597,9 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
          * detach and return
          */
         if (Context) ObpReleaseLookupContext(Context);
+#ifndef SARCH_XBOX
         if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
         return Status;
     }
 
@@ -1670,8 +1695,10 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
             *ReturnedObject = Object;
         }
 
+#ifndef SARCH_XBOX
         /* Detach if needed */
         if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
 
         /* Trace and return */
         OBTRACE(OB_HANDLE_DEBUG,
@@ -1704,8 +1731,10 @@ ObpCreateHandle(IN OB_OPEN_REASON OpenReason,
         ObDereferenceObject(Object);
     }
 
+#ifndef SARCH_XBOX
     /* Detach if necessary and fail */
     if (AttachedToProcess) KeUnstackDetachProcess(&ApcState);
+#endif
     return STATUS_INSUFFICIENT_RESOURCES;
 }
 
@@ -1797,6 +1826,7 @@ ObpCloseHandle(IN HANDLE Handle,
             (Handle != NtCurrentProcess()) &&
             (Handle != NtCurrentThread()))
         {
+#ifndef SARCH_XBOX
             /* Check if we came from user mode */
             if (AccessMode != KernelMode)
             {
@@ -1812,6 +1842,7 @@ ObpCloseHandle(IN HANDLE Handle,
                 }
             }
             else
+#endif
             {
                 /* This is kernel mode. Check if we're exiting */
                 if (!(PsIsThreadTerminating(PsGetCurrentThread())) &&
@@ -2859,6 +2890,15 @@ ObFindHandleForObject(IN PEPROCESS Process,
                       IN POBJECT_HANDLE_INFORMATION HandleInformation,
                       OUT PHANDLE Handle)
 {
+#ifdef SARCH_XBOX
+    /* No callers on Xbox. */
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Object);
+    UNREFERENCED_PARAMETER(ObjectType);
+    UNREFERENCED_PARAMETER(HandleInformation);
+    UNREFERENCED_PARAMETER(Handle);
+    return FALSE;
+#else
     OBP_FIND_HANDLE_DATA FindData;
     BOOLEAN Result = FALSE;
     PVOID ObjectTable;
@@ -2899,6 +2939,7 @@ ObFindHandleForObject(IN PEPROCESS Process,
 
     /* Return the result */
     return Result;
+#endif
 }
 
 /*++
@@ -3149,6 +3190,7 @@ ObInsertObject(IN PVOID Object,
     /* Now check if this object is being created */
     if (InsertObject == Object)
     {
+#ifndef SARCH_XBOX
         /* Check if it's named or forces security */
         if ((ObjectName) || (ObjectType->TypeInfo.SecurityRequired))
         {
@@ -3185,6 +3227,7 @@ ObInsertObject(IN PVOID Object,
                 ObjectCreateInfo->SecurityDescriptor = NULL;
             }
         }
+#endif
 
         /* Check if anything until now failed */
         if (!NT_SUCCESS(Status))
@@ -3222,7 +3265,9 @@ ObInsertObject(IN PVOID Object,
 
     /* Check if caller wants us to create a handle */
     ObjectHeader->ObjectCreateInfo = NULL;
+#ifndef SARCH_XBOX
     if (Handle)
+#endif
     {
         /* Create the handle */
         Status = ObpCreateHandle(OpenReason,
@@ -3251,6 +3296,7 @@ ObInsertObject(IN PVOID Object,
         /* Remove the extra keep-alive reference */
         ObDereferenceObject(Object);
     }
+#ifndef SARCH_XBOX
     else
     {
         /* Otherwise, lock the object */
@@ -3267,6 +3313,7 @@ ObInsertObject(IN PVOID Object,
         /* Check if we failed and dereference the object if so */
         if (!NT_SUCCESS(RealStatus)) ObDereferenceObject(Object);
     }
+#endif
 
     /* We can delete the Create Info now */
     ObpFreeObjectCreateInformation(ObjectCreateInfo);
@@ -3426,6 +3473,7 @@ NtDuplicateObject(IN HANDLE SourceProcessHandle,
             SourceProcessHandle,
             TargetProcessHandle);
 
+#ifndef SARCH_XBOX
     /* Check if we have a target handle */
     if ((TargetHandle) && (PreviousMode != KernelMode))
     {
@@ -3443,6 +3491,7 @@ NtDuplicateObject(IN HANDLE SourceProcessHandle,
         }
         _SEH2_END;
     }
+#endif
 
     /* Now reference the input handle */
     Status = ObReferenceObjectByHandle(SourceProcessHandle,
@@ -3494,6 +3543,7 @@ NtDuplicateObject(IN HANDLE SourceProcessHandle,
     /* Check if the caller wanted the return handle */
     if (TargetHandle)
     {
+#ifndef SARCH_XBOX
         /* Protect the write to user mode */
         _SEH2_TRY
         {
@@ -3506,6 +3556,9 @@ NtDuplicateObject(IN HANDLE SourceProcessHandle,
             Status = _SEH2_GetExceptionCode();
         }
         _SEH2_END;
+#else
+        *TargetHandle = hTarget;
+#endif
     }
 
     /* Dereference the processes */

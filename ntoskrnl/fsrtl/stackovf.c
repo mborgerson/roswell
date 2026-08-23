@@ -20,7 +20,12 @@
  * Don't add new/change current queues unless you know what you do
  * Most of the code relies on the fact that we have two queues in that order
  */
+#ifdef SARCH_XBOX
+/* No paging file: one worker serves both queues' posts. */
+#define FSRTLP_MAX_QUEUES 1
+#else
 #define FSRTLP_MAX_QUEUES 2
+#endif
 
 typedef struct _STACK_OVERFLOW_WORK_ITEM
 {
@@ -102,7 +107,8 @@ FsRtlpPostStackOverflow(IN PVOID Context,
     ExInitializeWorkItem(&WorkItem->WorkItem, FsRtlStackOverflowRead, WorkItem);
 
     /* And queue it in the appropriate queue (paging or not?) */
-    KeInsertQueue(&FsRtlWorkerQueues[IsPaging], &WorkItem->WorkItem.List);
+    KeInsertQueue(&FsRtlWorkerQueues[IsPaging & (FSRTLP_MAX_QUEUES - 1)],
+                  &WorkItem->WorkItem.List);
 }
 
 /*

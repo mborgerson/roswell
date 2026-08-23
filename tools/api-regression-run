@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+#
+# api-regression-run -- build the kernel + the api-regression XBE, boot it
+# under xemu with the isa-debugcon (port 0xE9) captured, parse TAP from the
+# log.  Uses debugcon rather than the LPC UART so the same suite runs
+# against the retail kernel (which never programs the lpc47m157) as well
+# as nxkrnl.
+#
+# Required env (same as tools/run-xemu):
+#   NXKRNL_XEMU NXKRNL_HDD (and NXKRNL_ROM_DIR with --official)
+# Optional env:
+#   NXKRNL_BUILD_DIR  build tree to use (default: $REPO/build)
+#
+# Options:
+#   --official      boot retail bios.bin instead of the nxkrnl flash (baseline
+#                   run to confirm the suite's expectations are correct)
+#   --trace LOG     pass through to run-xemu: log translated blocks
+#                   (`-d in_asm,nochain`) to LOG.  Feed the log to
+#                   tools/trace2lcov.py for a coverage report (needs a
+#                   -DCOVERAGE=ON build tree).
+#
+# Exits 0 on all-pass, 1 on any failure, 125 on infrastructure error
+# (build broke, xemu died, no TAP found in log).
+#
+set -euo pipefail
+
+: "${NXKRNL_XEMU:?path to xemu (qemu-system-i386) binary}"
+: "${NXKRNL_HDD:?Xbox HDD qcow2 image}"
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_DIR="$REPO/tests/xbe/api-regression"
+NXDK_DIR="$REPO/third_party/nxdk"
+BUILD_DIR="${NXKRNL_BUILD_DIR:-$REPO/build}"
+TIMEOUT_S=${API_REGRESSION_TIMEOUT:-90}
+
+official=0
+trace=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --official) official=1 ;;
+        --trace)    trace="${2:?--trace needs a log path}"; shift ;;
+        -h|--help)
+            sed -n '1,/^set -euo/p' "$0" | sed -n '/^#/p'
+            exit 0 ;;
+        *) echo "api-regression-run: unknown option '$1'" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# --- 1. Build kernel (only when running against nxkrnl) ---------------------
+if [ "$official" = 0 ]; then
+    if [ ! -d "$BUILD_DIR" ]; then
+        echo "api-regression-run: $BUILD_DIR missing -- configure with cmake first" >&2
+        exit 125
+    fi
+    echo "[1/3] building kernel..." >&2
+    cmake --build "$BUILD_DIR" --target flash >/dev/null || {
+        echo "api-regression-run: kernel build failed" >&2
+        exit 125
+    }
+else
+    echo "[1/3] skipping kernel build (--official baseline run)" >&2
+fi
+
+# --- 2. Build test XBE -------------------------------------------------------
+echo "[2/3] building test XBE..." >&2
+if [ -n "${NXDK_DOCKER_IMAGE:-}" ]; then
+    # CI / no local nxdk toolchain: build inside the published nxdk image.
+    docker run --rm -v "$REPO:/work" -w "/work/tests/xbe/api-regression" \
+        "$NXDK_DOCKER_IMAGE" make >/dev/null || {
+        echo "api-regression-run: test XBE build failed (in $NXDK_DOCKER_IMAGE)" >&2
+        exit 125
+    }
+else
+    (
+        eval "$("$NXDK_DIR/bin/activate" -s)"
+        make -C "$TEST_DIR" >/dev/null
+    ) || {
+        echo "api-regression-run: test XBE build failed" >&2
+        exit 125
+    }
+fi
+
+ISO="$TEST_DIR/nxkrnl-api-regression.iso"
+[ -f "$ISO" ] || { echo "api-regression-run: missing $ISO" >&2; exit 125; }
+
+# --- 3. Boot & capture -------------------------------------------------------
+which_kernel="nxkrnl"
+[ "$official" = 1 ] && which_kernel="retail"
+echo "[3/3] booting $which_kernel under xemu (timeout ${TIMEOUT_S}s)..." >&2
+
+LOG="$(mktemp -t api-regression.XXXXXX.log)"
+XEMU_LOG="$(mktemp -t api-regression.xemu.XXXXXX.log)"
+trap 'rm -f "$LOG" "$XEMU_LOG"' EXIT
+
+# The XBE programs LPC47M157 COM1 itself and emits TAP there, so the
+# serial log doubles as the TAP log.  isa-debugcon was the previous
+# target but upstream xemu builds without it.
+xemu_args=( --dvd "$ISO" --serial "file:$LOG" )
+if [ "$official" = 1 ]; then
+    xemu_args=( --official "${xemu_args[@]}" )
+else
+    xemu_args=( --flash "$BUILD_DIR/flash.bin" "${xemu_args[@]}" )
+fi
+[ -n "$trace" ] && xemu_args+=( --trace "$trace" )
+
+set +e
+timeout -k 5 "$TIMEOUT_S" \
+    "$REPO/tools/run-xemu" "${xemu_args[@]}" \
+    >"$XEMU_LOG" 2>&1
+rc=$?
+set -e
+
+# Dump xemu's stdout/stderr on any failure path so the cause of a
+# launch error (missing DISPLAY, AppImage can't FUSE-mount, missing
+# input file, ...) is visible in CI logs.
+dump_xemu_log() {
+    echo "--- xemu stdout/stderr (last 40 lines) ---" >&2
+    tail -n 40 "$XEMU_LOG" >&2 || true
+}
+
+# Normal exit (XBE issued SMC shutdown -> xemu quits) is rc 0.  124 (timeout
+# fired SIGTERM) and 137 (timeout's -k SIGKILL'd) are accepted as fallbacks
+# so a hanging kernel still hands control back here; we then grade the log.
+if [ $rc -ne 0 ] && [ $rc -ne 124 ] && [ $rc -ne 137 ]; then
+    echo "api-regression-run: xemu exited with status $rc" >&2
+    dump_xemu_log
+    exit 125
+fi
+
+# --- 4. Parse TAP ------------------------------------------------------------
+if ! grep -q '^TAP version' "$LOG"; then
+    echo "api-regression-run: no TAP stream in debugcon log (kernel hung before tests?)" >&2
+    dump_xemu_log
+    echo "--- debugcon (last 40 lines) ---" >&2
+    tail -n 40 "$LOG" >&2 || true
+    exit 125
+fi
+
+# The XBE shuts the system down via SMC after emitting its TAP report,
+# so we expect exactly one TAP block in the log.  Two or more means the
+# kernel reset itself somewhere along the way (bugcheck, HalReturnToFirmware,
+# triple fault) and xemu replayed the boot -- a regression we want to
+# fail loudly on rather than silently grade the first run.
+tap_blocks=$(grep -c '^TAP version' "$LOG" || true)
+if [ "$tap_blocks" -gt 1 ]; then
+    echo "api-regression-run: $tap_blocks TAP blocks in the log -- kernel reset itself" >&2
+    tail -n 40 "$LOG" >&2 || true
+    exit 125
+fi
+
+cat "$LOG"
+
+passed=$(grep -ac '^ok ' "$LOG" || true)
+# TAP TODO directives are known gaps, not failures (see harness.h).
+failed=$(grep -a '^not ok ' "$LOG" | grep -cv '# TODO' || true)
+todo=$(grep -a '^not ok .* # TODO' -c "$LOG" || true)
+plan=$(awk '/^1\.\./{sub("^1\\.\\.",""); print; exit}' "$LOG")
+actual=$((passed + failed + todo))
+
+echo >&2
+echo "api-regression ($which_kernel): passed=$passed failed=$failed todo=$todo plan=$plan ran=$actual" >&2
+
+if [ -z "$plan" ] || [ "$actual" -ne "$plan" ]; then
+    echo "api-regression-run: plan/actual mismatch (suite aborted mid-stream)" >&2
+    exit 125
+fi
+[ "$failed" -eq 0 ]

@@ -15,6 +15,47 @@
 
 /* GLOBALS *******************************************************************/
 
+#ifdef SARCH_XBOX
+/* Xbox: the MBR/drive-letter HALDISPATCH entries (xHalExamineMBR /
+ * xHalIoAssignDriveLetters / xHalIoReadPartitionTable /
+ * xHalIoSetPartitionInformation / xHalIoWritePartitionTable) are dead on
+ * a FATX-only image with a static partition layout.  Tiny stubs here let
+ * the disksup.c bodies they would have pointed at GC out. */
+static VOID FASTCALL XbHalpExamineMBRStub(
+    PDEVICE_OBJECT DeviceObject, ULONG SectorSize,
+    ULONG MbrTypeIdentifier, PVOID *MbrBuffer)
+{ (void)DeviceObject; (void)SectorSize; (void)MbrTypeIdentifier;
+  if (MbrBuffer) *MbrBuffer = NULL; }
+
+static VOID FASTCALL XbHalpAssignDriveLettersStub(
+    PLOADER_PARAMETER_BLOCK LoaderBlock, PSTRING NtDeviceName,
+    PUCHAR NtSystemPath, PSTRING NtSystemPathString)
+{ (void)LoaderBlock; (void)NtDeviceName; (void)NtSystemPath;
+  (void)NtSystemPathString; }
+
+static NTSTATUS FASTCALL XbHalpIoReadPartitionTableStub(
+    PDEVICE_OBJECT DeviceObject, ULONG SectorSize,
+    BOOLEAN ReturnRecognizedPartitions,
+    PDRIVE_LAYOUT_INFORMATION *PartitionBuffer)
+{ (void)DeviceObject; (void)SectorSize; (void)ReturnRecognizedPartitions;
+  if (PartitionBuffer) *PartitionBuffer = NULL;
+  return STATUS_NOT_IMPLEMENTED; }
+
+static NTSTATUS FASTCALL XbHalpIoSetPartitionInformationStub(
+    PDEVICE_OBJECT DeviceObject, ULONG SectorSize,
+    ULONG PartitionNumber, ULONG PartitionType)
+{ (void)DeviceObject; (void)SectorSize; (void)PartitionNumber;
+  (void)PartitionType; return STATUS_NOT_IMPLEMENTED; }
+
+static NTSTATUS FASTCALL XbHalpIoWritePartitionTableStub(
+    PDEVICE_OBJECT DeviceObject, ULONG SectorSize,
+    ULONG SectorsPerTrack, ULONG NumberOfHeads,
+    PDRIVE_LAYOUT_INFORMATION PartitionBuffer)
+{ (void)DeviceObject; (void)SectorSize; (void)SectorsPerTrack;
+  (void)NumberOfHeads; (void)PartitionBuffer;
+  return STATUS_NOT_IMPLEMENTED; }
+#endif
+
 HAL_DISPATCH HalDispatchTable =
 {
     HAL_DISPATCH_VERSION,
@@ -22,11 +63,19 @@ HAL_DISPATCH HalDispatchTable =
     xHalSetSystemInformation,
     xHalQueryBusSlots,
     0,
+#ifdef SARCH_XBOX
+    XbHalpExamineMBRStub,
+    XbHalpAssignDriveLettersStub,
+    XbHalpIoReadPartitionTableStub,
+    XbHalpIoSetPartitionInformationStub,
+    XbHalpIoWritePartitionTableStub,
+#else
     xHalExamineMBR,
     xHalIoAssignDriveLetters,
     xHalIoReadPartitionTable,
     xHalIoSetPartitionInformation,
     xHalIoWritePartitionTable,
+#endif
     xHalHandlerForBus,
     xHalReferenceHandler,
     xHalReferenceHandler,

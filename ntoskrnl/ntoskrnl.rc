@@ -14,8 +14,13 @@
 #define VER_FILESUBTYPE          VFT2_DRV_SYSTEM
 #define VER_FILEDESCRIPTION_STR  "NT Kernel & System"
 #ifndef CONFIG_SMP
+#ifdef SARCH_XBOX
+#define VER_INTERNALNAME_STR     "xboxkrnl.exe"
+#define VER_ORIGINALFILENAME_STR "xboxkrnl.exe"
+#else
 #define VER_INTERNALNAME_STR     "ntoskrnl.exe"
 #define VER_ORIGINALFILENAME_STR "ntoskrnl.exe"
+#endif
 #else
 #define VER_INTERNALNAME_STR     "ntkrnlmp.exe"
 #define VER_ORIGINALFILENAME_STR "ntkrnlmp.exe"
@@ -23,8 +28,12 @@
 #define VER_LANGNEUTRAL
 #include "common.ver"
 
-/* Bug Codes */
+/* Bug Codes -- friendly NTSTATUS / bugcheck name table (~14 KB).  Dropped
+ * on Xbox: KeGetBugMessageText returns FALSE when KiBugCodeMessages is NULL,
+ * so the on-screen bugcheck display falls back to the hex code only. */
+#ifndef SARCH_XBOX
 #include <bugcodes.rc>
+#endif
 
 /* Boot Theme Resources */
 #include "inbv/bootanim.rc"

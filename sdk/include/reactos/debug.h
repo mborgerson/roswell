@@ -133,6 +133,18 @@ RtlAssert(
 
 #else /* not DBG */
 
+    /*
+     * Release: elide DbgPrint at the call site.  The exported stub is a
+     * no-op, but it's variadic, so every call still materialises its
+     * format string + args -- pinning resident .rdata for output that
+     * goes nowhere.  The if(0) idiom (same as the DPRINT family below)
+     * keeps printf typechecking while letting the dead call -- and its
+     * string literal -- be eliminated.  __NOTICE (UNIMPLEMENTED /
+     * ERROR_FATAL) expands through this too.  The real exported
+     * implementation undefs this before defining itself (rtl/debug.c).
+     */
+    #define DbgPrint(...) do { if (0) { DbgPrint(__VA_ARGS__); } } while (0)
+
     /* On non-debug builds, we never show these */
     #define UNIMPLEMENTED
     #define UNIMPLEMENTED_ONCE

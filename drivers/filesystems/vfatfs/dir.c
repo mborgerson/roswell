@@ -207,6 +207,7 @@ VfatGetFileDirectoryInformation(
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
         }
+#ifndef SARCH_XBOX
         else
         {
             FsdDosDateTimeToSystemTime(DeviceExt,
@@ -241,6 +242,7 @@ VfatGetFileDirectoryInformation(
 
             pInfo->FileAttributes = DirContext->DirEntry.Fat.Attrib & 0x3f;
         }
+#endif
     }
 
     return Status;
@@ -313,6 +315,7 @@ VfatGetFileFullDirectoryInformation(
                                                        DeviceExt->FatInfo.BytesPerCluster);
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
         }
+#ifndef SARCH_XBOX
         else
         {
             FsdDosDateTimeToSystemTime(DeviceExt,
@@ -337,6 +340,7 @@ VfatGetFileFullDirectoryInformation(
                                                        DeviceExt->FatInfo.BytesPerCluster);
             pInfo->FileAttributes = DirContext->DirEntry.Fat.Attrib & 0x3f;
         }
+#endif
     }
 
     return Status;
@@ -422,6 +426,7 @@ VfatGetFileBothInformation(
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
         }
+#ifndef SARCH_XBOX
         else
         {
             pInfo->ShortNameLength = (CCHAR)DirContext->ShortNameU.Length;
@@ -464,6 +469,7 @@ VfatGetFileBothInformation(
 
             pInfo->FileAttributes = DirContext->DirEntry.Fat.Attrib & 0x3f;
         }
+#endif
     }
 
     return Status;
@@ -694,6 +700,7 @@ DoQuery(
     return Status;
 }
 
+#ifndef SARCH_XBOX
 NTSTATUS VfatNotifyChangeDirectory(PVFAT_IRP_CONTEXT IrpContext)
 {
     PVCB pVcb;
@@ -719,6 +726,7 @@ NTSTATUS VfatNotifyChangeDirectory(PVFAT_IRP_CONTEXT IrpContext)
 
     return STATUS_PENDING;
 }
+#endif
 
 /*
  * FUNCTION: directory control : read/write directory informations
@@ -737,9 +745,13 @@ VfatDirectoryControl(
             Status = DoQuery (IrpContext);
             break;
 
+#ifndef SARCH_XBOX
+        /* NtNotifyChangeDirectoryFile is not part of the Xbox API surface,
+         * so this minor code can never arrive. */
         case IRP_MN_NOTIFY_CHANGE_DIRECTORY:
             Status = VfatNotifyChangeDirectory(IrpContext);
             break;
+#endif
 
         default:
             /* Error */

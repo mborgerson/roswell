@@ -21,6 +21,8 @@ POBJECT_TYPE PsThreadType = NULL;
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+/* No user-mode threads on Xbox; the NtCreateThread path is gated below. */
+#ifndef SARCH_XBOX
 VOID
 NTAPI
 PspUserThreadStartup(IN PKSTART_ROUTINE StartRoutine,
@@ -110,6 +112,7 @@ PspUserThreadStartup(IN PKSTART_ROUTINE StartRoutine,
                                    0);
     }
 }
+#endif /* !SARCH_XBOX */
 
 LONG
 PspUnhandledExceptionInSystemThread(PEXCEPTION_POINTERS ExceptionPointers)
@@ -124,6 +127,20 @@ PspUnhandledExceptionInSystemThread(PEXCEPTION_POINTERS ExceptionPointers)
             ExceptionPointers->ExceptionRecord->ExceptionInformation[1],
             ExceptionPointers->ExceptionRecord->ExceptionInformation[2],
             ExceptionPointers->ExceptionRecord->ExceptionInformation[3]);
+    {
+        PCONTEXT c = ExceptionPointers->ContextRecord;
+        DPRINT1("regs eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx "
+                "esi=%08lx edi=%08lx ebp=%08lx esp=%08lx eip=%08lx\n",
+                c->Eax, c->Ebx, c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp,
+                c->Esp, c->Eip);
+        if (c->Esp >= 0xa0000000 && c->Esp < 0xb0000000) {
+            PULONG sp = (PULONG)c->Esp;
+            DPRINT1("stack[0..8]: %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n",
+                    sp[0], sp[1], sp[2], sp[3], sp[4], sp[5], sp[6], sp[7]);
+            DPRINT1("stack[8..16]: %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx\n",
+                    sp[8], sp[9], sp[10], sp[11], sp[12], sp[13], sp[14], sp[15]);
+        }
+    }
 
     /* Bugcheck the system */
     KeBugCheckEx(SYSTEM_THREAD_EXCEPTION_NOT_HANDLED,
@@ -179,7 +196,8 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
                 IN PINITIAL_TEB InitialTeb,
                 IN BOOLEAN CreateSuspended,
                 IN PKSTART_ROUTINE StartRoutine OPTIONAL,
-                IN PVOID StartContext OPTIONAL)
+                IN PVOID StartContext OPTIONAL,
+                IN SIZE_T StackSize /* 0 means KERNEL_STACK_SIZE */)
 {
     HANDLE hThread;
     PEPROCESS Process;
@@ -305,6 +323,12 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
     }
 
     /* Now let the kernel initialize the context */
+#ifdef SARCH_XBOX
+    /* Xbox titles only spawn kernel-mode threads (XePsCreateSystemThreadEx);
+     * the user-mode NtCreateThread(ThreadContext != NULL) path is dead and
+     * PspUserThreadStartup is not built. */
+    ASSERT(ThreadContext == NULL);
+#else
     if (ThreadContext)
     {
         /* User-mode Thread, create Teb */
@@ -339,10 +363,12 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
                                   Thread->StartAddress,
                                   ThreadContext,
                                   TebBase,
-                                  &Process->Pcb);
+                                  &Process->Pcb,
+                                  StackSize);
         }
     }
     else
+#endif
     {
         /* System Thread */
         Thread->StartAddress = StartRoutine;
@@ -356,7 +382,8 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
                               StartContext,
                               NULL,
                               NULL,
-                              &Process->Pcb);
+                              &Process->Pcb,
+                              StackSize);
     }
 
     /* Check if we failed */
@@ -459,6 +486,11 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
     /* Check for success */
     if (NT_SUCCESS(Status))
     {
+#ifdef SARCH_XBOX
+        /* All Xbox callers are kernel-mode; no probe SEH needed. */
+        if (ClientId) *ClientId = Thread->Cid;
+        *ThreadHandle = hThread;
+#else
         /* Wrap in SEH to protect against bad user-mode pointers */
         _SEH2_TRY
         {
@@ -487,6 +519,7 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
             _SEH2_YIELD(return _SEH2_GetExceptionCode());
         }
         _SEH2_END;
+#endif
     }
     else
     {
@@ -504,6 +537,10 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
     /* Make sure the thread isn't dead */
     if (!Thread->DeadThread)
     {
+#ifdef SARCH_XBOX
+        /* No SRM/tokens on Xbox -- grant everything. */
+        Thread->GrantedAccess = THREAD_ALL_ACCESS;
+#else
         /* Get the thread's SD */
         Status = ObGetObjectSecurity(Thread,
                                      &SecurityDescriptor,
@@ -556,6 +593,7 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
         Thread->GrantedAccess |= (THREAD_TERMINATE |
                                   THREAD_SET_INFORMATION |
                                   THREAD_QUERY_INFORMATION);
+#endif
     }
     else
     {
@@ -632,7 +670,49 @@ PsCreateSystemThread(OUT PHANDLE ThreadHandle,
                            NULL,
                            FALSE,
                            StartRoutine,
-                           StartContext);
+                           StartContext,
+                           0);
+}
+
+/* variant of PsCreateSystemThread that honors a caller-supplied
+ * kernel-stack size.  Xbox titles declare their main-thread stack in the XBE
+ * header (PeStackCommit) and spawn worker threads via PsCreateSystemThreadEx
+ * with an explicit KernelStackSize -- both are routed through here.  StackSize
+ * is rounded up to a page; pass 0 to get the default KERNEL_STACK_SIZE. */
+NTSTATUS
+NTAPI
+NxkPsCreateSystemThread(OUT PHANDLE ThreadHandle,
+                        IN ACCESS_MASK DesiredAccess,
+                        IN POBJECT_ATTRIBUTES ObjectAttributes,
+                        IN HANDLE ProcessHandle,
+                        IN PCLIENT_ID ClientId,
+                        IN PKSTART_ROUTINE StartRoutine,
+                        IN PVOID StartContext,
+                        IN SIZE_T StackSize,
+                        IN BOOLEAN CreateSuspended)
+{
+    PEPROCESS TargetProcess = NULL;
+    HANDLE Handle = ProcessHandle;
+    PAGED_CODE();
+
+    if (!ProcessHandle)
+    {
+        Handle = NULL;
+        TargetProcess = PsInitialSystemProcess;
+    }
+
+    return PspCreateThread(ThreadHandle,
+                           DesiredAccess,
+                           ObjectAttributes,
+                           Handle,
+                           TargetProcess,
+                           ClientId,
+                           NULL,
+                           NULL,
+                           CreateSuspended,
+                           StartRoutine,
+                           StartContext,
+                           StackSize);
 }
 
 /*
@@ -947,6 +1027,17 @@ NtCreateThread(OUT PHANDLE ThreadHandle,
                IN PINITIAL_TEB InitialTeb,
                IN BOOLEAN CreateSuspended)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ThreadHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(ProcessHandle);
+    UNREFERENCED_PARAMETER(ClientId);
+    UNREFERENCED_PARAMETER(ThreadContext);
+    UNREFERENCED_PARAMETER(InitialTeb);
+    UNREFERENCED_PARAMETER(CreateSuspended);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     INITIAL_TEB SafeInitialTeb;
     PAGED_CODE();
     PSTRACE(PS_THREAD_DEBUG,
@@ -1002,7 +1093,9 @@ NtCreateThread(OUT PHANDLE ThreadHandle,
                            &SafeInitialTeb,
                            CreateSuspended,
                            NULL,
-                           NULL);
+                           NULL,
+                           0);
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -1015,6 +1108,13 @@ NtOpenThread(OUT PHANDLE ThreadHandle,
              IN POBJECT_ATTRIBUTES ObjectAttributes,
              IN PCLIENT_ID ClientId OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ThreadHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(ClientId);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = KeGetPreviousMode();
     CLIENT_ID SafeClientId;
     ULONG Attributes = 0;
@@ -1179,6 +1279,7 @@ NtOpenThread(OUT PHANDLE ThreadHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /* EOF */

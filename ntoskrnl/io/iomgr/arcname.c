@@ -150,6 +150,13 @@ NTSTATUS
 NTAPI
 IopCreateArcNamesCd(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
+#ifdef SARCH_XBOX
+    /* xemu always boots from HDD; xdvdfs mounts the title DVD itself by
+     * device name, not ARC.  The disk-pass already binds the boot ARC
+     * name, so there is nothing left to do here. */
+    UNREFERENCED_PARAMETER(LoaderBlock);
+    return STATUS_SUCCESS;
+#else
     PIRP Irp;
     KEVENT Event;
     NTSTATUS Status;
@@ -405,6 +412,7 @@ Cleanup:
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 CODE_SEG("INIT")
@@ -414,6 +422,15 @@ IopCreateArcNamesDisk(IN PLOADER_PARAMETER_BLOCK LoaderBlock,
                       IN BOOLEAN SingleDisk,
                       OUT PBOOLEAN FoundBoot)
 {
+#ifdef SARCH_XBOX
+    /* The fabricated loader block has an empty DiskSignatureListHead, so
+     * the matching loop below would do nothing.  Pretend we found the
+     * boot device so the caller skips the CD pass. */
+    UNREFERENCED_PARAMETER(LoaderBlock);
+    UNREFERENCED_PARAMETER(SingleDisk);
+    *FoundBoot = TRUE;
+    return STATUS_SUCCESS;
+#else
     PIRP Irp;
     PVOID Data;
     KEVENT Event;
@@ -831,6 +848,7 @@ Cleanup:
     }
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 CODE_SEG("INIT")

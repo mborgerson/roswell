@@ -29,6 +29,7 @@ Revision History:
 #include <process.h>
 #include <devpkey.h>
 #include <ntiologc.h>
+#include <ndk/section_attribs.h>
 
 
 #ifdef DEBUG_USE_WPP
@@ -293,6 +294,9 @@ ClassInitialize(
         return (ULONG) STATUS_REVISION_MISMATCH;
     }
 
+#ifndef SARCH_XBOX
+    /* The STOP/REMOVE dispatch arms are gated on Xbox; class drivers do
+     * not plant the (never invoked) stop/remove callbacks there. */
     if((InitializationData->FdoData.ClassStopDevice == NULL) ||
         ((InitializationData->ClassEnumerateDevice != NULL) &&
          (InitializationData->PdoData.ClassStopDevice == NULL))) {
@@ -306,12 +310,17 @@ ClassInitialize(
         NT_ASSERT(FALSE);
         return (ULONG) STATUS_REVISION_MISMATCH;
     }
+#endif
 
     //
     // Setup the default power handlers if the class driver didn't provide
     // any.
     //
 
+#ifndef SARCH_XBOX
+    /* IRP_MJ_POWER is gated on Xbox -- ClassDispatchPower is gone, so
+     * these fallback function-pointer assignments would only anchor
+     * ClassMinimalPowerHandler + its chain.  Leave the slots NULL. */
     if(InitializationData->FdoData.ClassPowerDevice == NULL) {
         InitializationData->FdoData.ClassPowerDevice = ClassMinimalPowerHandler;
     }
@@ -320,6 +329,7 @@ ClassInitialize(
        (InitializationData->PdoData.ClassPowerDevice == NULL)) {
         InitializationData->PdoData.ClassPowerDevice = ClassMinimalPowerHandler;
     }
+#endif
 
     //
     // warn that unload is not supported
@@ -417,23 +427,41 @@ ClassInitialize(
     DriverObject->MajorFunction[IRP_MJ_CLOSE]           = ClassGlobalDispatch;
     DriverObject->MajorFunction[IRP_MJ_READ]            = ClassGlobalDispatch;
     DriverObject->MajorFunction[IRP_MJ_WRITE]           = ClassGlobalDispatch;
+#ifndef SARCH_XBOX
+    /* The per-device table slots these route to are gated. */
     DriverObject->MajorFunction[IRP_MJ_SCSI]            = ClassGlobalDispatch;
+#endif
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL]  = ClassGlobalDispatch;
+#ifndef SARCH_XBOX
     DriverObject->MajorFunction[IRP_MJ_SHUTDOWN]        = ClassGlobalDispatch;
     DriverObject->MajorFunction[IRP_MJ_FLUSH_BUFFERS]   = ClassGlobalDispatch;
+#endif
     DriverObject->MajorFunction[IRP_MJ_PNP]             = ClassGlobalDispatch;
+#ifndef SARCH_XBOX /* ntoskrnl/po and classpnp power.c are unlinked; no Po* exports */
     DriverObject->MajorFunction[IRP_MJ_POWER]           = ClassGlobalDispatch;
+#endif
     DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL]  = ClassGlobalDispatch;
 
+#ifndef SARCH_XBOX
+    /* Xbox: neither disk nor nxcdrom registers a ClassStartIo callback,
+     * so the DriverStartIo slot stays NULL and the ClasspStartIo trampoline
+     * (plus DriverUsesStartIO checks) GC out. */
     if (InitializationData->ClassStartIo) {
         DriverObject->DriverStartIo = ClasspStartIo;
     }
+#endif
 
+#ifndef SARCH_XBOX
+    /* Xbox kernel never unloads drivers; gate the registration so the
+     * ClassUnload thunk and its FREE_POOL/ETW cleanup chain are dropped. */
     if ((InitializationData->ClassUnload) && (ClassPnpAllowUnload == TRUE)) {
         DriverObject->DriverUnload = ClassUnload;
     } else {
         DriverObject->DriverUnload = NULL;
     }
+#else
+    DriverObject->DriverUnload = NULL;
+#endif
 
     DriverObject->DriverExtension->AddDevice = ClassAddDevice;
 #ifdef _MSC_VER
@@ -969,6 +997,10 @@ ClassDispatchPnp(
             }
 
 
+#ifndef SARCH_XBOX
+            /* Xbox storage devices have a fixed topology -- PDOs are never
+             * enumerated and QUERY_DEVICE_RELATIONS / QUERY_ID PnP minors
+             * never fire. */
             case IRP_MN_QUERY_DEVICE_RELATIONS: {
 
                 DEVICE_RELATION_TYPE type =
@@ -1103,7 +1135,15 @@ ClassDispatchPnp(
 
                 break;
             }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+            /* Xbox storage devices never receive any of these PnP minors:
+             * STOP / REMOVE / SURPRISE_REMOVAL / QUERY / CANCEL never fire
+             * (the device list is fixed) and DEVICE_USAGE_NOTIFICATION
+             * tracks pagefile/hibernation/dump usage which Xbox lacks.
+             * Gating the whole block drops ~580 lines of dispatch + their
+             * .rdata strings. */
             case IRP_MN_QUERY_STOP_DEVICE:
             case IRP_MN_QUERY_REMOVE_DEVICE: {
 
@@ -1685,6 +1725,7 @@ ClassDispatchPnp(
                 }
                 break;
             }
+#endif /* !SARCH_XBOX */
 
             case IRP_MN_QUERY_CAPABILITIES: {
 
@@ -1969,6 +2010,9 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
 
             fdoExtension->PrivateFdoData->MaxNumberOfIoRetries = NUM_IO_RETRIES;
 
+#ifndef SARCH_XBOX
+            /* Port driver only advertises legacy SRB type; ClasspReleaseQueue
+             * only ever uses the legacy ReleaseQueueSrb. */
             //
             // Initialize release queue extended SRB
             //
@@ -1982,6 +2026,7 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                             "ClassPnpStartDevice: fail to initialize release queue extended SRB 0x%x\n", status));
                 return status;
             }
+#endif
 
 
             /*
@@ -2066,8 +2111,13 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                         (PVOID *)&fdoExtension->DeviceDescriptor);
             if (NT_SUCCESS(status)){
 
+#ifndef SARCH_XBOX
+                /* No HackFlags registry seeding on Xbox (no installer)
+                 * and ClassBadItems lists PC firmware quirks against
+                 * drives that don't ship in retail consoles. */
                 ClasspScanForSpecialInRegistry(fdoExtension);
                 ClassScanForSpecial(fdoExtension, ClassBadItems, ClasspScanForClassHacks);
+#endif
 
                 //
                 // allow perf to be re-enabled after a given number of failed IOs
@@ -2098,12 +2148,17 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                 //
                 // Test if the device is portable and updated the characteristics if so
                 //
+#ifndef SARCH_XBOX
+                /* No portable/hot-pluggable storage on Xbox; the on-board
+                 * IDE HDD and DVD are both fixed.  Gating drops
+                 * ClasspIsPortable + its IoGetDevicePropertyData chain. */
                 status = ClasspIsPortable(fdoExtension,
                                           &isPortable);
 
                 if (NT_SUCCESS(status) && (isPortable == TRUE)) {
                     DeviceObject->Characteristics |= FILE_PORTABLE_DEVICE;
                 }
+#endif
 
                 //
                 // initialize the hotplug information only after the ScanForSpecial
@@ -2178,23 +2233,36 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
 
                 TracePrint((TRACE_LEVEL_INFORMATION, TRACE_FLAG_PNP,
                            "ClassPnpStartDevice: Enabling idle timer for %p\n", DeviceObject));
+#ifndef SARCH_XBOX
+                /* No idle-priority IO on Xbox; the timer DPC chain is dead. */
                 // Initialize idle timer for disk devices
                 ClasspInitializeIdleTimer(fdoExtension);
+#endif
 
                 if (ClasspIsObsoletePortDriver(fdoExtension) == FALSE) {
+#ifndef SARCH_XBOX
+                    /* VPD inquiry pages 0xB0/0xB1/0xB2 are SBC-3 era
+                     * features; Xbox IDE HDDs don't report them and
+                     * titles do not query the resulting properties.
+                     * Gating drops the VPD interpretation chain. */
                     // get INQUIRY VPD support information. It's safe to send command as everything is ready in ClassInitDevice().
                     ClasspGetInquiryVpdSupportInfo(fdoExtension);
 
                     // Query and cache away Logical Block Provisioning info in the FDO extension.
                     // The cached information will be used in responding to some IOCTLs
                     ClasspGetLBProvisioningInfo(fdoExtension);
+#endif
 
                     //
                     // Query and cache away Block Device ROD Limits info in the FDO extension.
                     //
+#ifndef SARCH_XBOX
+                    /* Xbox HDDs don't report VPD_BLOCK_DEVICE_ROD_LIMITS;
+                     * the call site is statically dead. */
                     if (fdoExtension->FunctionSupportInfo->ValidInquiryPages.BlockDeviceRODLimits) {
                         ClassDetermineTokenOperationCommandSupport(DeviceObject);
                     }
+#endif
 
                     //
                     // See if the user has specified a particular QERR override
@@ -2208,6 +2276,9 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                                             CLASSP_REG_QERR_OVERRIDE_MODE,
                                             &qerrOverrideMode);
 
+#ifndef SARCH_XBOX
+                    /* Thin-provisioning + ODX detection don't apply to
+                     * Xbox IDE drives; the QERR override path is dead. */
                     //
                     // If this device is thinly provisioned or supports ODX, we
                     // may need to force QERR to zero.  The user may have also
@@ -2220,6 +2291,7 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
 
                         ClasspZeroQERR(DeviceObject);
                     }
+#endif
 
                 } else {
 
@@ -2267,6 +2339,8 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
 #endif
 
 
+#ifndef SARCH_XBOX
+                /* No copy-offload (ODX) on Xbox; skip the registry probe. */
                 //
                 // Get the copy offload max target duration value.
                 // This function will set the default value if one hasn't been
@@ -2275,6 +2349,7 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                 ClasspGetCopyOffloadMaxDuration(DeviceObject,
                                                 REG_DISK_CLASS_CONTROL,
                                                 &(fdoExtension->PrivateFdoData->CopyOffloadMaxTargetDuration));
+#endif
 
             }
 
@@ -2318,6 +2393,9 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
         // off so register for screen state notification if we haven't already
         // done so.
         //
+#ifndef SARCH_XBOX
+        /* No GUID_CONSOLE_DISPLAY_STATE notifications on Xbox; the call
+         * only anchors ClasspPowerSettingCallback + its .rdata. */
         if (ScreenStateNotificationHandle == NULL) {
             PoRegisterPowerSettingCallback(DeviceObject,
                                             &GUID_CONSOLE_DISPLAY_STATE,
@@ -2325,6 +2403,7 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                                             NULL,
                                             &ScreenStateNotificationHandle);
         }
+#endif
     }
 
     //
@@ -2365,7 +2444,9 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
         }
 
         if(commonExtension->IsFdo) {
+#ifndef SARCH_XBOX
             IoWMIRegistrationControl(DeviceObject, WMIREG_ACTION_REGISTER);
+#endif
 
             //
             // Tell Storport (Usbstor or SD) to enable idle power management for this
@@ -2377,6 +2458,13 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                 (fdoExtension->MiniportDescriptor->Portdriver == StoragePortCodeSetStorport ||
                  fdoExtension->MiniportDescriptor->Portdriver == StoragePortCodeSetSDport ||
                  fdoExtension->MiniportDescriptor->Portdriver == StoragePortCodeSetUSBport)) {
+#ifndef SARCH_XBOX
+                /* The Xbox FDO is the atapi miniport (Portdriver !=
+                 * Storport/SDport/USBport) so this branch never runs at
+                 * runtime, but the static call still anchors the entire
+                 * classpnp idle-power chain (ClasspPowerDownCompletion,
+                 * ClasspPowerSettingCallback, the .rdata jump table, ~5 KB)
+                 * via gc-sections' coarse .rdata granularity. */
                 ULONG disableIdlePower= 0;
                 ClassGetDeviceParameter(fdoExtension,
                                         CLASSP_REG_SUBKEY_NAME,
@@ -2386,6 +2474,7 @@ NTSTATUS ClassPnpStartDevice(IN PDEVICE_OBJECT DeviceObject)
                 if (!disableIdlePower) {
                     ClasspEnableIdlePower(DeviceObject);
                 }
+#endif
             }
         }
     }
@@ -3078,8 +3167,10 @@ ClassSendStartUnit(
     PSCSI_REQUEST_BLOCK srb;
     PCOMPLETION_CONTEXT context;
     PCDB cdb;
+#ifndef SARCH_XBOX
     NTSTATUS status;
     PSTORAGE_REQUEST_BLOCK srbEx;
+#endif
 
     //
     // Allocate Srb from nonpaged pool.
@@ -3108,6 +3199,8 @@ ClassSendStartUnit(
     context->DeviceObject = Fdo;
 
     srb = &context->Srb.Srb;
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExtension->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srbEx = &context->Srb.SrbEx;
         status = InitializeStorageRequestBlock(srbEx,
@@ -3123,7 +3216,9 @@ ClassSendStartUnit(
 
         srbEx->SrbFunction = SRB_FUNCTION_EXECUTE_SCSI;
 
-    } else {
+    } else
+#endif
+    {
 
         //
         // Zero out srb.
@@ -3265,10 +3360,14 @@ ClassAsynchronousCompletion(
 
     srb = &context->Srb.Srb;
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) {
         srbFunction = ((PSTORAGE_REQUEST_BLOCK)srb)->SrbFunction;
         srbFlags = ((PSTORAGE_REQUEST_BLOCK)srb)->SrbFlags;
-    } else {
+    } else
+#endif
+    {
         srbFunction = srb->Function;
         srbFlags = srb->SrbFlags;
     }
@@ -3405,6 +3504,9 @@ Return Value:
         Irp->IoStatus.Status = STATUS_SUCCESS;
     }
 
+#ifndef SARCH_XBOX
+    /* Xbox has no pagefile -- IRP_PAGING_IO never flows here, so the
+     * high-priority paging throttle path is dead. */
     //
     // If this is a high priority request, hold off all other Io requests
     //
@@ -3454,6 +3556,7 @@ Return Value:
             KeReleaseSpinLock(&fdoData->SpinLock, oldIrql);
         }
     }
+#endif
 
     if (!deferClientIrp)
     {
@@ -3685,6 +3788,7 @@ Return Value:
              */
             TracePrint((TRACE_LEVEL_WARNING, TRACE_FLAG_RW, "No packets available in ServiceTransferRequest - deferring transfer (Irp=%p)...", Irp));
 
+#ifndef SARCH_XBOX
             if (priority == IoPagingPriorityHigh)
             {
                 KeAcquireSpinLock(&fdoData->SpinLock, &oldIrql);
@@ -3716,6 +3820,7 @@ Return Value:
 
                 KeReleaseSpinLock(&fdoData->SpinLock, oldIrql);
             }
+#endif
 
             deferClientIrp = TRUE;
         }
@@ -3783,10 +3888,14 @@ ClassIoComplete(
 
     NT_ASSERT(fdoExtension->CommonExtension.IsFdo);
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) {
         srbFlags = ((PSTORAGE_REQUEST_BLOCK)srb)->SrbFlags;
         srbFunction = ((PSTORAGE_REQUEST_BLOCK)srb)->SrbFunction;
-    } else {
+    } else
+#endif
+    {
         srbFlags = srb->SrbFlags;
         srbFunction = srb->Function;
     }
@@ -4383,9 +4492,13 @@ retry:
 
             if (retryCount--) {
 
+#ifndef SARCH_XBOX
+                /* Xbox port driver never sets SRB_FLAGS_PORT_DRIVER_ALLOCSENSE;
+                 * the sense buffer is always the one we allocated above. */
                 if (PORT_ALLOCATED_SENSE_EX(fdoExtension, Srb)) {
                     FREE_PORT_ALLOCATED_SENSE_BUFFER_EX(fdoExtension, Srb);
                 }
+#endif
 
                 goto retry;
             }
@@ -4397,14 +4510,15 @@ retry:
         status = STATUS_SUCCESS;
     }
 
+#ifndef SARCH_XBOX
     //
     // required even though we allocated our own, since the port driver may
     // have allocated one also
     //
-
     if (PORT_ALLOCATED_SENSE_EX(fdoExtension, Srb)) {
         FREE_PORT_ALLOCATED_SENSE_BUFFER_EX(fdoExtension, Srb);
     }
+#endif
 
     FREE_POOL(senseInfoBuffer);
     SrbSetSenseInfoBuffer(Srb, NULL);
@@ -4596,6 +4710,10 @@ ClassInterpretSenseInfo(
             TracePrint((TRACE_LEVEL_WARNING, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: Additional sense code is %x\n", addlSenseCode));
             TracePrint((TRACE_LEVEL_WARNING, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: Additional sense code qualifier is %x\n", addlSenseCodeQual));
 
+#ifndef SARCH_XBOX
+            /* Xbox ATA/ATAPI devices only emit fixed-format sense
+             * (error code 0x70/0x71); descriptor format (0x72/0x73)
+             * is SBC-3+ and never appears on Xbox storage. */
             if (IsDescriptorSenseDataFormat(senseBuffer)) {
 
                 //
@@ -4704,7 +4822,9 @@ ClassInterpretSenseInfo(
                         startBufferLength = outBufferLength - descriptorLength;
                     }
                 }
-            } else {
+            } else
+#endif
+            {
 
                 //
                 // Sense data in Fixed format
@@ -4765,6 +4885,10 @@ ClassInterpretSenseInfo(
                             break;
                         }
 
+#ifndef SARCH_XBOX
+                        /* SMART predict-failure plumbing has no Xbox
+                         * consumer (no WMI event log, no UI); skip the
+                         * wmiEventData + state-tracking entirely. */
                         case SCSI_ADSENSE_FAILURE_PREDICTION_THRESHOLD_EXCEEDED: {
 
                             UCHAR wmiEventData[sizeof(ULONG)+sizeof(UCHAR)] = {0};
@@ -4800,6 +4924,7 @@ ClassInterpretSenseInfo(
                             fdoExtension->FailurePredicted = TRUE;
                             break;
                         }
+#endif
 
                         default: {
                             logStatus = IO_ERR_CONTROLLER_ERROR;
@@ -4853,6 +4978,13 @@ ClassInterpretSenseInfo(
                                     break;
                                 }
 
+#ifndef SARCH_XBOX
+                                /* MANUAL_INTERVENTION / FORMAT_IN_PROGRESS /
+                                 * OPERATION_IN_PROGRESS / LONG_WRITE_IN_PROGRESS /
+                                 * SPACE_ALLOC_IN_PROGRESS are emitted only by
+                                 * removable optical writers, tape libraries,
+                                 * and thinly-provisioned LUNs - none of which
+                                 * exist on Xbox storage. */
                                 case SCSI_SENSEQ_MANUAL_INTERVENTION_REQUIRED: {
                                     TracePrint((TRACE_LEVEL_INFORMATION, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: "
                                                 "Manual intervention required\n"));
@@ -4916,6 +5048,7 @@ ClassInterpretSenseInfo(
 
                                     break;
                                 }
+#endif
 
                                 case SCSI_SENSEQ_CAUSE_NOT_REPORTABLE: {
 
@@ -5060,6 +5193,14 @@ ClassInterpretSenseInfo(
                     TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: "
                                 "Hardware error\n"));
 
+#ifdef SARCH_XBOX
+                    /* LegacyErrorHandling is set only via a WIN8+ registry
+                     * probe that never runs on Xbox; the legacy retry-
+                     * everything arm is unreachable. */
+                    retry = FALSE;
+                    *Status = STATUS_DEVICE_HARDWARE_ERROR;
+                    logError = FALSE;
+#else
                     if (fdoData->LegacyErrorHandling == FALSE) {
                         //
                         // Hardware errors indicate something has seriously gone
@@ -5099,6 +5240,7 @@ ClassInterpretSenseInfo(
                             logError = FALSE;
                         }
                     }
+#endif
 
                     //
                     // If CRC error was returned, retry after a slight delay.
@@ -5111,6 +5253,10 @@ ClassInterpretSenseInfo(
                         logError = FALSE;
                     }
 
+#ifndef SARCH_XBOX
+                    /* The hardware-error event log entry has no Xbox
+                     * consumer; logging is plumbing for the system
+                     * event log which is stubbed out. */
                     //
                     // Hardware errors warrant a more descriptive error.
                     // Specifically, we need to ensure this disk is easily
@@ -5144,6 +5290,7 @@ ClassInterpretSenseInfo(
                                                                cdb,
                                                                NULL);
                     }
+#endif
 
                     break;
                 } // end SCSI_SENSE_HARDWARE_ERROR
@@ -5157,6 +5304,10 @@ ClassInterpretSenseInfo(
 
                     switch (addlSenseCode) {
 
+#ifndef SARCH_XBOX
+                        /* The following ILLEGAL_REQUEST sub-codes only
+                         * arise from offload data transfer (ODX/XCOPY)
+                         * which is never exposed to Xbox titles. */
                         case SCSI_ADSENSE_NO_SENSE: {
 
                             switch (addlSenseCodeQual) {
@@ -5257,6 +5408,7 @@ ClassInterpretSenseInfo(
                             *Status = STATUS_DATA_OVERRUN;
                             break;
                         }
+#endif
 
                         case SCSI_ADSENSE_ILLEGAL_COMMAND: {
                             TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: "
@@ -5276,6 +5428,11 @@ ClassInterpretSenseInfo(
 
                             *Status = STATUS_NONEXISTENT_SECTOR;
 
+#ifndef SARCH_XBOX
+                            /* The Fujitsu-IDE transient-illegal-LBA retry
+                             * is irrelevant on Xbox (no qualifying
+                             * drives), and the 16-byte READ/WRITE CDB +
+                             * ODX paths never apply to Xbox HDDs. */
                             if (Fdo->DeviceType == FILE_DEVICE_DISK) {
 
                                 if (IS_SCSIOP_READWRITE(cdbOpcode) && cdb) {
@@ -5326,9 +5483,13 @@ ClassInterpretSenseInfo(
                                     NT_ASSERTMSG("Number of blocks specified exceeds LUN capacity", FALSE);
                                 }
                             }
+#endif
                             break;
                         }
 
+#ifndef SARCH_XBOX
+                        /* INVALID_TOKEN is ODX-only; the
+                         * INVALID_CDB ODX-path is also unreachable. */
                         //
                         //  1. Generic error - cause not reportable
                         //  2. Insufficient resources to create ROD
@@ -5355,8 +5516,10 @@ ClassInterpretSenseInfo(
                             *Status = STATUS_INVALID_TOKEN;
                             break;
                         }
+#endif
 
                         case SCSI_ADSENSE_INVALID_CDB: {
+#ifndef SARCH_XBOX
                             if (ClasspIsOffloadDataTransferCommand(cdb)) {
 
                                 //
@@ -5374,7 +5537,9 @@ ClassInterpretSenseInfo(
                                 //
                                 *Status = STATUS_INVALID_INITIATOR_TARGET_PATH;
 
-                            } else {
+                            } else
+#endif
+                            {
 
                                 TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL,  "ClassInterpretSenseInfo: "
                                             "Invalid CDB\n"));
@@ -5403,6 +5568,9 @@ ClassInterpretSenseInfo(
                             break;
                         }
 
+#ifndef SARCH_XBOX
+                        /* INVALID_FIELD_PARAMETER_LIST sub-codes here are
+                         * ODX descriptor validation errors only. */
                         case SCSI_ADSENSE_INVALID_FIELD_PARAMETER_LIST: {
 
                             switch (addlSenseCodeQual) {
@@ -5475,7 +5643,12 @@ ClassInterpretSenseInfo(
                             }
                             break;
                         }
+#endif
 
+#ifndef SARCH_XBOX
+                        /* DVD CSS authentication / region failures don't
+                         * apply to Xbox media; the DVD path runs raw
+                         * xiso reads via nxcdrom with no CSS handshake. */
                         case SCSI_ADSENSE_COPY_PROTECTION_FAILURE: {
                             TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL,  "ClassInterpretSenseInfo: "
                                         "Copy protection failure\n"));
@@ -5526,6 +5699,7 @@ ClassInterpretSenseInfo(
 
                             break;
                         }
+#endif
 
                         case SCSI_ADSENSE_MUSIC_AREA: {
                             TracePrint((TRACE_LEVEL_INFORMATION, TRACE_FLAG_GENERAL,  "ClassInterpretSenseInfo: "
@@ -5586,6 +5760,10 @@ ClassInterpretSenseInfo(
                             break;
                         }
 
+#ifndef SARCH_XBOX
+                        /* Capacity-changed + thin-provisioning soft-threshold
+                         * sense codes never fire from Xbox IDE HDDs.  Gating
+                         * drops the LB-provisioning log-page chain. */
                         case SCSI_ADSENSE_PARAMETERS_CHANGED: {
                             logRetryableError = FALSE;
                             if (addlSenseCodeQual == SCSI_SENSEQ_CAPACITY_DATA_CHANGED) {
@@ -5631,7 +5809,12 @@ ClassInterpretSenseInfo(
                             } // end  switch (addlSenseCodeQual)
                             break;
                         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+                        /* Firmware-changed and inquiry-changed events
+                         * cannot fire on an Xbox IDE HDD; no firmware
+                         * update path, no PnP bus rescan. */
                         case SCSI_ADSENSE_OPERATING_CONDITIONS_CHANGED: {
 
                             if (addlSenseCodeQual == SCSI_SENSEQ_MICROCODE_CHANGED) {
@@ -5674,7 +5857,11 @@ ClassInterpretSenseInfo(
                             }
                             break;
                         }
+#endif
 
+#ifndef SARCH_XBOX
+                        /* No physical eject button or write-protect
+                         * operator switch on Xbox; SMC owns the tray. */
                         case SCSI_ADSENSE_OPERATOR_REQUEST: {
                             switch (addlSenseCodeQual) {
 
@@ -5700,7 +5887,12 @@ ClassInterpretSenseInfo(
                                 }
                             }
                         }
+#endif
 
+#ifndef SARCH_XBOX
+                        /* SMART predict-failure UA only fires in response
+                         * to title-issued SMART commands; titles never
+                         * speak SMART through classpnp. */
                         case SCSI_ADSENSE_FAILURE_PREDICTION_THRESHOLD_EXCEEDED: {
 
                             UCHAR wmiEventData[sizeof(ULONG)+sizeof(UCHAR)] = {0};
@@ -5743,6 +5935,7 @@ ClassInterpretSenseInfo(
 
                             break;
                         }
+#endif
 
                         default: {
                             TracePrint((TRACE_LEVEL_INFORMATION, TRACE_FLAG_GENERAL,  "ClassInterpretSenseInfo: "
@@ -5788,6 +5981,10 @@ ClassInterpretSenseInfo(
                     {
                         switch (addlSenseCodeQual) {
 
+#ifndef SARCH_XBOX
+                            /* Thin-provisioning resource exhaustion is a
+                             * logical-block-provisioning (SBC-3) sense;
+                             * PATA/ATAPI devices cannot produce it. */
                             case SCSI_SENSEQ_SPACE_ALLOC_FAILED_WRITE_PROTECT: {
 
                                 TracePrint((TRACE_LEVEL_WARNING, TRACE_FLAG_GENERAL, "ClassInterpretSenseInfo: "
@@ -5805,6 +6002,7 @@ ClassInterpretSenseInfo(
                                 *Status = STATUS_DISK_RESOURCES_EXHAUSTED;
                                 break;
                             }
+#endif
                             default:
                             {
                                 break;
@@ -5835,6 +6033,10 @@ ClassInterpretSenseInfo(
                     break;
                 } // end SCSI_SENSE_BLANK_CHECK
 
+#ifndef SARCH_XBOX
+                /* COPY_ABORTED + the ABORTED_COMMAND ODX sub-tree fire
+                 * only for XCOPY / offload-data-transfer commands,
+                 * which Xbox titles never issue. */
                 case SCSI_SENSE_COPY_ABORTED: {
 
                     switch (addlSenseCode) {
@@ -5864,8 +6066,10 @@ ClassInterpretSenseInfo(
                     }
                     break;
                 }
+#endif
 
                 case SCSI_SENSE_ABORTED_COMMAND: {
+#ifndef SARCH_XBOX
                     if (ClasspIsOffloadDataTransferCommand(cdb)) {
 
                         switch (addlSenseCode) {
@@ -5917,7 +6121,9 @@ ClassInterpretSenseInfo(
                                 break;
                             }
                         }
-                    } else {
+                    } else
+#endif
+                    {
                         TracePrint((TRACE_LEVEL_ERROR, TRACE_FLAG_GENERAL,  "ClassInterpretSenseInfo: "
                                     "Command aborted\n"));
                         *Status = STATUS_IO_DEVICE_ERROR;
@@ -6106,7 +6312,10 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
                             logErrorInternal = FALSE;
                             logError = FALSE;
                         }
-                    } else if (ClasspIsReceiveTokenInformation(cdb)) {
+                    }
+#ifndef SARCH_XBOX
+                    /* RECEIVE_TOKEN_INFORMATION is ODX-only. */
+                    else if (ClasspIsReceiveTokenInformation(cdb)) {
                         ULONG allocationLength;
                         REVERSE_BYTES(&(cdb->RECEIVE_TOKEN_INFORMATION.AllocationLength), &allocationLength);
                         if (SrbGetDataTransferLength(Srb) <= allocationLength) {
@@ -6115,6 +6324,7 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
                             logError = FALSE;
                         }
                     }
+#endif
 
                     break;
                 }
@@ -6214,6 +6424,14 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
 
     if (fdoExtension->CommonExtension.DevInfo->ClassError != NULL) {
 
+#ifdef SARCH_XBOX
+        /* Xbox never builds STORAGE_REQUEST_BLOCK SRBs so the
+         * extended-to-legacy conversion path is unreachable. */
+        fdoExtension->CommonExtension.DevInfo->ClassError(Fdo,
+                                                          (PSCSI_REQUEST_BLOCK)Srb,
+                                                          Status,
+                                                          &retry);
+#else
         SCSI_REQUEST_BLOCK tempSrb = {0};
         PSCSI_REQUEST_BLOCK srbPtr = (PSCSI_REQUEST_BLOCK)Srb;
 
@@ -6233,6 +6451,7 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
                                                           srbPtr,
                                                           Status,
                                                           &retry);
+#endif
     }
 
     //
@@ -6243,6 +6462,9 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
         *RetryInterval = retryInterval;
     }
 
+#ifndef SARCH_XBOX
+    /* IOCTL_STORAGE_RESERVE / RELEASE are gated out on Xbox; the
+     * 6-to-10 byte CDB fallback retry path has no upstream caller. */
     //
     // The RESERVE(6) / RELEASE(6) commands are optional. So
     // if they aren't supported, try the 10-byte equivalents
@@ -6265,6 +6487,7 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
             retry = TRUE;
         }
     }
+#endif
 
 #if DBG
 
@@ -6278,6 +6501,10 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
 
 #endif
 
+#ifndef SARCH_XBOX
+    /* The internal ErrorLogs ring is read only by the classpnp WMI
+     * debugger extension, which is dead on Xbox; the system error log
+     * writes have no consumer (see gate below). */
     /*
      *  LOG the error:
      *      If logErrorInternal is set, log the error in our internal log.
@@ -6441,9 +6668,13 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
         /*
          *  Save the entire contents of the SRB.
          */
+#ifndef SARCH_XBOX
+        /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
         if (Srb->Function == SRB_FUNCTION_STORAGE_REQUEST_BLOCK) {
             ClasspConvertToScsiRequestBlock(&staticErrLogData.Srb, (PSTORAGE_REQUEST_BLOCK)Srb);
-        } else {
+        } else
+#endif
+        {
             staticErrLogData.Srb = *(PSCSI_REQUEST_BLOCK)Srb;
         }
 
@@ -6602,6 +6833,7 @@ __ClassInterpretSenseInfo_ProcessingInvalidSenseBuffer:
             }
         }
     }
+#endif
 
     return retry;
 
@@ -7035,7 +7267,11 @@ ClassSendSrbAsynchronous(
 
     ULONG savedFlags;
 
-    if (Srb->Function != SRB_FUNCTION_STORAGE_REQUEST_BLOCK) {
+#ifndef SARCH_XBOX
+    /* Always legacy SCSI SRB on Xbox; modern-SRB skip never taken. */
+    if (Srb->Function != SRB_FUNCTION_STORAGE_REQUEST_BLOCK)
+#endif
+    {
         //
         // Write length to SRB.
         //
@@ -7087,6 +7323,8 @@ ClassSendSrbAsynchronous(
     // If caller wants to this request to be tagged, save this fact.
     //
 
+#ifndef SARCH_XBOX
+    /* ATAPI port driver disables tagged queuing; flag is never set on Xbox. */
     if ( TEST_FLAG(SrbGetSrbFlags(Srb), SRB_FLAGS_QUEUE_ACTION_ENABLE) &&
          ( SRB_SIMPLE_TAG_REQUEST == SrbGetRequestAttribute(Srb) ||
            SRB_HEAD_OF_QUEUE_TAG_REQUEST == SrbGetRequestAttribute(Srb) ||
@@ -7097,6 +7335,7 @@ ClassSendSrbAsynchronous(
             SET_FLAG(savedFlags, SRB_FLAGS_NO_QUEUE_FREEZE);
         }
     }
+#endif
 
     if (BufferAddress != NULL) {
 
@@ -7322,7 +7561,9 @@ ClassDeviceControl(
     PCOMMON_DEVICE_EXTENSION commonExtension = DeviceObject->DeviceExtension;
 
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(Irp);
+#ifndef SARCH_XBOX
     PIO_STACK_LOCATION nextStack = NULL;
+#endif
 
     ULONG controlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
 
@@ -7334,6 +7575,10 @@ ClassDeviceControl(
     GUID activityId = {0};
 
 
+#ifndef SARCH_XBOX
+    /* Atapi handles SCSI pass-through directly and no upper-stack
+     * caller on Xbox issues these IOCTLs.  The forward-only arm is
+     * statically dead. */
     //
     // If this is a pass through I/O control, set the minor function code
     // and device address and pass it to the port driver.
@@ -7400,6 +7645,7 @@ ClassDeviceControl(
         goto SetStatusAndReturn;
 
     }
+#endif
 
     Irp->IoStatus.Information = 0;
 
@@ -7480,6 +7726,10 @@ ClassDeviceControl(
             break;
         }
 
+#ifndef SARCH_XBOX
+        /* IOCTL_MOUNTDEV_QUERY_SUGGESTED_LINK_NAME walks the per-device
+         * drive-letter assignment in HKLM\System\DISK; nothing populates
+         * that key on Xbox and the mount manager isn't built. */
         case IOCTL_MOUNTDEV_QUERY_SUGGESTED_LINK_NAME: {
 
             PMOUNTDEV_SUGGESTED_LINK_NAME suggestedName;
@@ -7581,6 +7831,7 @@ ClassDeviceControl(
 
             break;
         }
+#endif
 
         default:
             status = STATUS_PENDING;
@@ -7596,6 +7847,10 @@ ClassDeviceControl(
         return status;
     }
 
+#ifndef SARCH_XBOX
+    /* All SCSI-emitting IOCTL arms are gated on Xbox; only
+     * IOCTL_STORAGE_GET_DEVICE_NUMBER and the default forward remain,
+     * neither of which consumes the SRB.  Skip the allocation. */
     if (commonExtension->IsFdo){
 
         PULONG_PTR function;
@@ -7664,6 +7919,9 @@ ClassDeviceControl(
     } else {
         srb = NULL;
     }
+#else
+    srb = NULL;
+#endif
 
     //
     // Change the device type to storage for the switch statement, but only
@@ -7689,6 +7947,7 @@ ClassDeviceControl(
 
     switch (modifiedIoControlCode) {
 
+#ifndef SARCH_XBOX
         case IOCTL_STORAGE_GET_HOTPLUG_INFO: {
 
             FREE_POOL(srb);
@@ -7827,7 +8086,12 @@ ClassDeviceControl(
 
             break;
         }
+#endif /* SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+        /* No CHECK_VERIFY senders on Xbox; HDD is fixed media and DVD
+         * arrival is signalled via the SMC tray switch, not TUR.
+         * Gating drops the ClassCheckVerifyComplete completion chain. */
         case IOCTL_STORAGE_CHECK_VERIFY:
         case IOCTL_STORAGE_CHECK_VERIFY2: {
 
@@ -8015,7 +8279,12 @@ ClassDeviceControl(
 
             break;
         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+        /* Xbox titles do not issue eject/MCN IOCTLs; the DVD is owned
+         * by nxcdrom and the HDD is fixed media.  Gating drops the
+         * ClasspEjectionControl and ClasspMcnControl chains. */
         case IOCTL_STORAGE_MEDIA_REMOVAL:
         case IOCTL_STORAGE_EJECTION_CONTROL: {
 
@@ -8122,7 +8391,9 @@ ClassDeviceControl(
             }
             goto SetStatusAndReturn;
         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
         case IOCTL_STORAGE_RESERVE:
         case IOCTL_STORAGE_RELEASE: {
 
@@ -8204,7 +8475,11 @@ ClassDeviceControl(
             break;
 
         }
+#endif /* SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+        /* Xbox titles do not issue SCSI eject/load IOCTLs; the dashboard
+         * actuates the tray via SMC and nxcdrom owns the DVD device. */
         case IOCTL_STORAGE_EJECT_MEDIA:
         case IOCTL_STORAGE_LOAD_MEDIA:
         case IOCTL_STORAGE_LOAD_MEDIA2:{
@@ -8308,7 +8583,9 @@ ClassDeviceControl(
 
             break;
         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
         case IOCTL_STORAGE_FIND_NEW_DEVICES: {
 
             FREE_POOL(srb);
@@ -8335,6 +8612,7 @@ ClassDeviceControl(
             }
             break;
         }
+#endif /* SARCH_XBOX */
 
         case IOCTL_STORAGE_GET_DEVICE_NUMBER: {
 
@@ -8368,6 +8646,9 @@ ClassDeviceControl(
         }
 
 
+#ifndef SARCH_XBOX
+        /* No upper-stack senders of IOCTL_STORAGE_READ_CAPACITY on
+         * Xbox; partmgr/mountmgr/FSDs don't issue it. */
         case IOCTL_STORAGE_READ_CAPACITY: {
 
             FREE_POOL(srb);
@@ -8446,7 +8727,12 @@ ClassDeviceControl(
 
             break;
         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
+        /* No upper-stack callers on Xbox; classpnp's internal queries
+         * via ClassSendDeviceIoControlSynchronous target LowerDevice
+         * directly (atapi), bypassing this dispatcher. */
         case IOCTL_STORAGE_QUERY_PROPERTY: {
 
             PSTORAGE_PROPERTY_QUERY query = Irp->AssociatedIrp.SystemBuffer;
@@ -8479,12 +8765,21 @@ ClassDeviceControl(
 
             switch ( query->PropertyId ) {
 
+#ifndef SARCH_XBOX
+                /* No title queries StorageDeviceUniqueIdProperty on
+                 * Xbox; gating drops the device-DUID assembly chain. */
                 case StorageDeviceUniqueIdProperty: {
 
                     status = ClasspDuidQueryProperty(DeviceObject, Irp);
                     break;
                 }
+#endif
 
+#ifndef SARCH_XBOX
+                /* SSD / modern-SCSI property paths are not exercised by
+                 * the Xbox IDE HDD or DVD; titles only query the basic
+                 * StorageDevice/AdapterProperty.  Gating drops several
+                 * KB of SCSI mode-sense / VPD-page interpretation. */
                 case StorageDeviceWriteCacheProperty: {
 
                     status = ClasspWriteCacheProperty(DeviceObject, Irp, srb);
@@ -8529,6 +8824,7 @@ ClassDeviceControl(
                     status = ClasspDeviceMediaTypeProperty(DeviceObject, Irp, srb);
                     break;
                 }
+#endif /* !SARCH_XBOX */
 
                 default: {
 
@@ -8547,7 +8843,9 @@ ClassDeviceControl(
             FREE_POOL(srb);
             break;
         }
+#endif /* !SARCH_XBOX */
 
+#ifndef SARCH_XBOX
         case IOCTL_STORAGE_CHECK_PRIORITY_HINT_SUPPORT: {
 
             FREE_POOL(srb);
@@ -8675,8 +8973,9 @@ ClassDeviceControl(
             status = ClasspStorageEventNotification(DeviceObject, Irp);
             break;
         }
+#endif /* SARCH_XBOX */
 
-#if (NTDDI_VERSION >= NTDDI_WINTRHESHOLD)
+#if (NTDDI_VERSION >= NTDDI_WINTRHESHOLD) && !defined(SARCH_XBOX)
         case IOCTL_STORAGE_FIRMWARE_GET_INFO: {
             FREE_POOL(srb);
 
@@ -9469,6 +9768,12 @@ ClassQueryTimeOutRegistryValue(
     _In_ PDEVICE_OBJECT DeviceObject
     )
 {
+#ifdef SARCH_XBOX
+    /* NT default timeout when the key is absent. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    PAGED_CODE();
+    return 10;
+#else
     //
     // Find the appropriate reg. key
     //
@@ -9546,6 +9851,7 @@ ClassQueryTimeOutRegistryValue(
 
 
     return timeOut;
+#endif /* SARCH_XBOX */
 
 } // end ClassQueryTimeOutRegistryValue()
 
@@ -10322,6 +10628,7 @@ ClassRemoveDevice(
 
     _Analysis_assume_(driverExtension != NULL);
 
+#ifndef SARCH_XBOX
     /*
      *  Deregister from WMI.
      */
@@ -10340,6 +10647,7 @@ ClassRemoveDevice(
         RtlFreeUnicodeString(&commonExtension->MountedDeviceInterfaceName);
         RtlInitUnicodeString(&commonExtension->MountedDeviceInterfaceName, NULL);
     }
+#endif
 
     //
     // If this is a surprise removal we leave the device around - which means
@@ -10738,6 +11046,16 @@ ClassUpdateInformationInRegistry(
     _In_ ULONG            InquiryDataLength
     )
 {
+#ifdef SARCH_XBOX
+    /* Populates HKLM\HARDWARE\DEVICEMAP\Scsi; no configuration manager on Xbox. */
+    UNREFERENCED_PARAMETER(Fdo);
+    UNREFERENCED_PARAMETER(DeviceName);
+    UNREFERENCED_PARAMETER(DeviceNumber);
+    UNREFERENCED_PARAMETER(InquiryData);
+    UNREFERENCED_PARAMETER(InquiryDataLength);
+    PAGED_CODE();
+    return;
+#else
     NTSTATUS          status;
     SCSI_ADDRESS      scsiAddress = {0};
     OBJECT_ATTRIBUTES objectAttributes = {0};
@@ -10895,6 +11213,7 @@ ClassUpdateInformationInRegistry(
         }
 
     } _SEH2_END;
+#endif /* SARCH_XBOX */
 
 } // end ClassUpdateInformationInRegistry()
 
@@ -10971,6 +11290,12 @@ ClasspRegisterMountedDeviceInterface(
     IN PDEVICE_OBJECT DeviceObject
     )
 {
+#ifdef SARCH_XBOX
+    /* Device-interface PnP notification is unlinked; the interface name
+       stays empty, exactly as the former IoRegisterDeviceInterface stub
+       returned. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+#else
 
     PCOMMON_DEVICE_EXTENSION commonExtension = DeviceObject->DeviceExtension;
     BOOLEAN isFdo = commonExtension->IsFdo;
@@ -11022,6 +11347,7 @@ ClasspRegisterMountedDeviceInterface(
                              NULL);
     }
     return;
+#endif /* SARCH_XBOX */
 } // end ClasspRegisterMountedDeviceInterface()
 
 /*++////////////////////////////////////////////////////////////////////////////
@@ -11811,9 +12137,13 @@ ClasspReleaseQueue(
         irp = fdoExtension->PrivateFdoData->ReleaseQueueIrp;
     }
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExtension->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         srb = (PSTORAGE_REQUEST_BLOCK_HEADER)&(fdoExtension->PrivateFdoData->ReleaseQueueSrb.SrbEx);
-    } else {
+    } else
+#endif
+    {
         srb = (PSTORAGE_REQUEST_BLOCK_HEADER)&(fdoExtension->ReleaseQueueSrb);
     }
 
@@ -11845,9 +12175,13 @@ ClasspReleaseQueue(
        function = SRB_FUNCTION_RELEASE_QUEUE;
     }
 
+#ifndef SARCH_XBOX
+    /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
     if (fdoExtension->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
         ((PSTORAGE_REQUEST_BLOCK)srb)->SrbFunction = function;
-    } else {
+    } else
+#endif
+    {
         srb->Function = (UCHAR)function;
     }
 
@@ -12556,6 +12890,7 @@ ClasspInitializeHotplugInfo(
     // Query the default removal policy from the kernel
     //
 
+#ifndef SARCH_XBOX
     status = IoGetDeviceProperty(FdoExtension->LowerPdo,
                                  DevicePropertyRemovalPolicy,
                                  sizeof(DEVICE_REMOVAL_POLICY),
@@ -12568,6 +12903,7 @@ ClasspInitializeHotplugInfo(
     if (resultLength != sizeof(DEVICE_REMOVAL_POLICY)) {
         return STATUS_UNSUCCESSFUL;
     }
+#endif
 
     //
     // Look into the registry to see if the user has chosen
@@ -12652,6 +12988,12 @@ ClasspScanForSpecialInRegistry(
     IN PFUNCTIONAL_DEVICE_EXTENSION FdoExtension
     )
 {
+#ifdef SARCH_XBOX
+    /* No HackFlags subkey on Xbox; leave PrivateFdoData->HackFlags as-is. */
+    UNREFERENCED_PARAMETER(FdoExtension);
+    PAGED_CODE();
+    return;
+#else
     HANDLE             deviceParameterHandle; // device instance key
     HANDLE             classParameterHandle; // classpnp subkey
     OBJECT_ATTRIBUTES  objectAttributes = {0};
@@ -12755,6 +13097,7 @@ cleanupScanForSpecial:
     //
 
     return;
+#endif /* SARCH_XBOX */
 }
 
 /*++////////////////////////////////////////////////////////////////////////////
@@ -12860,12 +13203,16 @@ InterpretSenseInfoWithoutHistory(
 
     if (fdoData->InterpretSenseInfo != NULL)
     {
+#ifndef SARCH_XBOX
         SCSI_REQUEST_BLOCK tempSrb = {0};
+#endif
         PSCSI_REQUEST_BLOCK srbPtr = Srb;
 
         // SAL annotations and ClassInitializeEx() both validate this
         NT_ASSERT(fdoData->InterpretSenseInfo->Interpret != NULL);
 
+#ifndef SARCH_XBOX
+        /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
         //
         // If class driver does not support extended SRB and this is
         // an extended SRB, convert to legacy SRB and pass to class
@@ -12877,6 +13224,7 @@ InterpretSenseInfoWithoutHistory(
             ClasspConvertToScsiRequestBlock(&tempSrb, (PSTORAGE_REQUEST_BLOCK)Srb);
             srbPtr = &tempSrb;
         }
+#endif
 
         retry = fdoData->InterpretSenseInfo->Interpret(Fdo,
                                                        OriginalRequest,

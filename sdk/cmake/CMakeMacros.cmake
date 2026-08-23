@@ -263,6 +263,15 @@ macro(dir_to_num dir var)
 endmacro()
 
 function(add_cd_file)
+    # SARCH=xbox builds skip the bootcd/livecd/regtest CD images and
+    # the registry-hive plumbing they depend on (see CMakeLists.txt at
+    # add_subdirectory(boot)).  Every add_cd_file() callsite is therefore a
+    # no-op on Xbox, which lets us leave the calls in place without having
+    # to thread SARCH gates through every subdir.
+    if(SARCH STREQUAL "xbox")
+        return()
+    endif()
+
     cmake_parse_arguments(_CD "NO_CAB" "DESTINATION;NAME_ON_CD;TARGET" "FILE;FOR" ${ARGN})
     if(NOT (_CD_TARGET OR _CD_FILE))
         message(FATAL_ERROR "You must provide a target or a file to install!")

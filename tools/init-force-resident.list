@@ -1,0 +1,41 @@
+# Force-resident denylist for tools/find-init-candidates.py.
+#
+# Functions here are NEVER placed in the discardable INIT section, even when
+# they look statically init-only.  They are runtime-installed driver entry
+# points -- IRP dispatch routines, AddDevice, video/SMBus bring-up helpers --
+# reachable from code that runs (or whose function pointer can be invoked)
+# after MiFreeInitializationCode discards INIT.  For dispatch handlers the
+# address is written into a long-lived resident DRIVER_OBJECT/DEVICE_OBJECT at
+# boot; that store is invisible to static analysis, so discarding the handler
+# would be a latent use-after-free (e.g. a DVD media-change PnP IRP dispatched
+# to a freed handler).  The safety call is therefore explicit here rather than
+# inferred.
+#
+# Denying a function also keeps its whole reachable callee set resident: the
+# closure only moves a callee when every caller is INIT or chosen, and a denied
+# caller is never chosen.  So this list only needs the roots that static
+# analysis can't see are runtime-reachable; the rest fall out automatically.
+# (find-init-candidates.py only places functions -- discardable *data* is governed
+# by DATA_SEG("INITDATA") tags in the source, not this list.)
+#
+# Base names: no leading _/@, no @N / .constprop / .lto_priv suffix.
+
+# --- Storage / PCI-IDE driver entry points (installed into DRIVER_OBJECTs) ---
+AtaAddChannel
+AtaDispatchPnp
+CdromAddDevice
+ClassAddDevice
+ClassDispatchPnp
+DiskAddDevice
+PartMgrPnp
+PciIdeXAddDevice
+PciIdeXDispatchPnp
+PciPnpControl
+
+# --- Video / SMBus bring-up helpers reachable from resident display code ---
+I2CTransmitByteGetReturn
+I2CTransmitWord
+I2CWriteBytetoRegister
+ReadfromSMBus
+WriteToSMBus
+xbv_malloc

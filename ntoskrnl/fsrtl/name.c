@@ -32,7 +32,9 @@ FsRtlIsNameInExpressionPrivate(IN PUNICODE_STRING Expression,
     USHORT ExpressionPosition, NamePosition = 0, MatchingChars = 1;
     BOOLEAN EndOfName = FALSE;
     BOOLEAN Result;
+#ifndef SARCH_XBOX
     BOOLEAN DontSkipDot;
+#endif
     WCHAR CompareChar;
     PAGED_CODE();
 
@@ -193,6 +195,12 @@ FsRtlIsNameInExpressionPrivate(IN PUNICODE_STRING Expression,
                     BackTracking[BackTrackingPosition++] = (ExpressionPosition * 2) + 3;
                     continue;
                 }
+#ifndef SARCH_XBOX
+                /* DOS_STAR/DOS_DOT/DOS_QM are NT short-name machinery;
+                 * FATX has no short names and retail matches NOTHING for
+                 * masks carrying them, so treating them as ordinary literals
+                 * reproduces retail.  The dynamic backtracking buffer above
+                 * stays: it scales with title-controlled '*' counts. */
                 /* Check DOS_STAR */
                 else if (Expression->Buffer[ExpressionPosition / sizeof(WCHAR)] == DOS_STAR)
                 {
@@ -231,6 +239,7 @@ FsRtlIsNameInExpressionPrivate(IN PUNICODE_STRING Expression,
 
                     BackTracking[BackTrackingPosition++] = (ExpressionPosition + sizeof(WCHAR)) * 2;
                 }
+#endif /* !SARCH_XBOX */
 
                 /* Leave from loop */
                 break;

@@ -14,6 +14,146 @@
 #include <debug.h>
 
 EPROCESS_QUOTA_BLOCK PspDefaultQuotaBlock;
+
+#ifdef SARCH_XBOX
+
+/* Xbox runs every title as the single system process; pool quota
+ * accounting is a no-op and only the symbols below have external
+ * callers (Ob handle table, Fsrtl notify, ARM3 procsup/virtual/mdlsup,
+ * Ex handle, kill cleanup). */
+
+VOID
+NTAPI
+PsInitializeQuotaSystem(VOID)
+{
+    PsGetCurrentProcess()->QuotaBlock = &PspDefaultQuotaBlock;
+}
+
+VOID
+NTAPI
+PspInheritQuota(
+    _In_ PEPROCESS Process,
+    _In_opt_ PEPROCESS ParentProcess)
+{
+    UNREFERENCED_PARAMETER(ParentProcess);
+    Process->QuotaBlock = &PspDefaultQuotaBlock;
+}
+
+VOID
+NTAPI
+PspDereferenceQuotaBlock(
+    _In_opt_ PEPROCESS Process,
+    _In_ PEPROCESS_QUOTA_BLOCK QuotaBlock)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(QuotaBlock);
+}
+
+PEPROCESS_QUOTA_BLOCK
+NTAPI
+PsChargeSharedPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ SIZE_T AmountToChargePaged,
+    _In_ SIZE_T AmountToChargeNonPaged)
+{
+    UNREFERENCED_PARAMETER(AmountToChargePaged);
+    UNREFERENCED_PARAMETER(AmountToChargeNonPaged);
+    return Process->QuotaBlock;
+}
+
+VOID
+NTAPI
+PsReturnSharedPoolQuota(
+    _In_ PEPROCESS_QUOTA_BLOCK QuotaBlock,
+    _In_ SIZE_T AmountToReturnPaged,
+    _In_ SIZE_T AmountToReturnNonPaged)
+{
+    UNREFERENCED_PARAMETER(QuotaBlock);
+    UNREFERENCED_PARAMETER(AmountToReturnPaged);
+    UNREFERENCED_PARAMETER(AmountToReturnNonPaged);
+}
+
+VOID
+NTAPI
+PsChargePoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ POOL_TYPE PoolType,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(Amount);
+}
+
+NTSTATUS
+NTAPI
+PsChargeProcessNonPagedPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Amount);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+NTAPI
+PsChargeProcessPagedPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Amount);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+NTAPI
+PsChargeProcessPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ POOL_TYPE PoolType,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(Amount);
+    return STATUS_SUCCESS;
+}
+
+VOID
+NTAPI
+PsReturnPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ POOL_TYPE PoolType,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(Amount);
+}
+
+VOID
+NTAPI
+PsReturnProcessNonPagedPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Amount);
+}
+
+VOID
+NTAPI
+PsReturnProcessPagedPoolQuota(
+    _In_ PEPROCESS Process,
+    _In_ SIZE_T Amount)
+{
+    UNREFERENCED_PARAMETER(Process);
+    UNREFERENCED_PARAMETER(Amount);
+}
+
+#else /* !SARCH_XBOX */
+
 static LIST_ENTRY PspQuotaBlockList = {&PspQuotaBlockList, &PspQuotaBlockList};
 static KSPIN_LOCK PspQuotaLock;
 
@@ -1202,5 +1342,7 @@ PspSetQuotaLimits(
 
     return Status;
 }
+
+#endif /* !SARCH_XBOX */
 
 /* EOF */

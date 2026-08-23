@@ -15,8 +15,17 @@
 
 /* GLOBALS ******************************************************************/
 
+#ifdef SARCH_XBOX
+/* The cache serves map/pin requests from 16 KiB blocks and rejects
+ * cross-block spans; FAT chunks stay within one block.  All FAT
+ * walkers compute their own alignment from this size. */
+#define  CACHEPAGESIZE(pDeviceExt) \
+    ((pDeviceExt)->FatInfo.BytesPerCluster > PAGE_SIZE ? \
+     min((pDeviceExt)->FatInfo.BytesPerCluster, 16384UL) : PAGE_SIZE)
+#else
 #define  CACHEPAGESIZE(pDeviceExt) ((pDeviceExt)->FatInfo.BytesPerCluster > PAGE_SIZE ? \
 		   (pDeviceExt)->FatInfo.BytesPerCluster : PAGE_SIZE)
+#endif
 
 /* FUNCTIONS ****************************************************************/
 
@@ -125,6 +134,14 @@ FAT12GetNextCluster(
     ULONG CurrentCluster,
     PULONG NextCluster)
 {
+#ifdef SARCH_XBOX
+    /* Xbox volumes are FATX; FAT12 is unreachable. */
+    UNREFERENCED_PARAMETER(DeviceExt);
+    UNREFERENCED_PARAMETER(CurrentCluster);
+    UNREFERENCED_PARAMETER(NextCluster);
+    ASSERT(FALSE);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PUSHORT CBlock;
     ULONG Entry;
     PVOID BaseAddress;
@@ -164,6 +181,7 @@ FAT12GetNextCluster(
     CcUnpinData(Context);
 //    return Entry == 0xffffffff ? STATUS_END_OF_FILE : STATUS_SUCCESS;
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
@@ -245,6 +263,12 @@ FAT12FindAndMarkAvailableCluster(
     PDEVICE_EXTENSION DeviceExt,
     PULONG Cluster)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DeviceExt);
+    UNREFERENCED_PARAMETER(Cluster);
+    ASSERT(FALSE);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     ULONG FatLength;
     ULONG StartCluster;
     ULONG Entry;
@@ -303,6 +327,7 @@ FAT12FindAndMarkAvailableCluster(
     }
     CcUnpinData(Context);
     return STATUS_DISK_FULL;
+#endif
 }
 
 /*
@@ -546,12 +571,20 @@ CountAvailableClusters(
     ExAcquireResourceExclusiveLite (&DeviceExt->FatResource, TRUE);
     if (!DeviceExt->AvailableClustersValid)
     {
+#ifdef SARCH_XBOX
+        /* Xbox volumes are FATX16 / FATX32; FAT12 is unreachable. */
+        if (DeviceExt->FatInfo.FatType == FATX16)
+            Status = FAT16CountAvailableClusters(DeviceExt);
+        else
+            Status = FAT32CountAvailableClusters(DeviceExt);
+#else
         if (DeviceExt->FatInfo.FatType == FAT12)
             Status = FAT12CountAvailableClusters(DeviceExt);
         else if (DeviceExt->FatInfo.FatType == FAT16 || DeviceExt->FatInfo.FatType == FATX16)
             Status = FAT16CountAvailableClusters(DeviceExt);
         else
             Status = FAT32CountAvailableClusters(DeviceExt);
+#endif
     }
     if (Clusters != NULL)
     {
@@ -573,6 +606,14 @@ FAT12WriteCluster(
     ULONG NewValue,
     PULONG OldValue)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DeviceExt);
+    UNREFERENCED_PARAMETER(ClusterToWrite);
+    UNREFERENCED_PARAMETER(NewValue);
+    UNREFERENCED_PARAMETER(OldValue);
+    ASSERT(FALSE);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     ULONG FATOffset;
     PUCHAR CBlock;
     PVOID BaseAddress;
@@ -612,6 +653,7 @@ FAT12WriteCluster(
     CcSetDirtyPinnedData(Context, NULL);
     CcUnpinData(Context);
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
@@ -823,6 +865,11 @@ GetNextClusterExtend(
     ExReleaseResourceLite(&DeviceExt->FatResource);
     return Status;
 }
+
+#ifndef SARCH_XBOX
+/* FATX has no boot-sector dirty bit and no FSInfo sector: the superblock
+ * fails the 0xaa55 signature checks below, so none of these routines can
+ * ever take effect on a FATX volume. */
 
 /*
  * FUNCTION: Retrieve the dirty status
@@ -1291,5 +1338,6 @@ FAT32UpdateFreeClustersCount(
     return Status;
 #endif
 }
+#endif /* !SARCH_XBOX */
 
 /* EOF */

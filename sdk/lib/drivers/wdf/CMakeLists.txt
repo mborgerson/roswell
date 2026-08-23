@@ -218,7 +218,7 @@ target_include_directories(wdf01000
     )
 
 target_link_libraries(wdf01000 aux_klib usbdex ntoskrnl_vista ${PSEH_LIB})
-add_importlibs(wdf01000 wdfldr ntoskrnl hal)
+add_importlibs(wdf01000 wdfldr ntoskrnl) # HAL exports live in the kernel image
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_compile_options(wdf01000

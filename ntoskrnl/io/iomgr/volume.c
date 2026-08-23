@@ -4,7 +4,7 @@
  * FILE:            ntoskrnl/io/iomgr/volume.c
  * PURPOSE:         Volume and File System I/O Support
  * PROGRAMMERS:     Alex Ionescu (alex.ionescu@reactos.org)
- *                  Hervé Poussineau (hpoussin@reactos.org)
+ *                  Hervï¿½ Poussineau (hpoussin@reactos.org)
  *                  Eric Kohl
  *                  Pierre Schweitzer (pierre.schweitzer@reactos.org)
  */
@@ -664,6 +664,7 @@ IopMountVolume(IN PDEVICE_OBJECT DeviceObject,
                 }
 
                 /* Otherwise, check if we need to load the FS driver */
+#ifndef SARCH_XBOX
                 if (Status == STATUS_FS_DRIVER_REQUIRED)
                 {
                     /* We need to release the lock */
@@ -720,6 +721,7 @@ IopMountVolume(IN PDEVICE_OBJECT DeviceObject,
                     LocalList.Flink = FsList->Flink;
                     ListEntry = &LocalList;
                 }
+#endif
 
                 /*
                  * Check if we failed with any other error then an unrecognized
@@ -953,7 +955,9 @@ IoVerifyVolume(IN PDEVICE_OBJECT DeviceObject,
         VpbStatus = IopCreateVpb(DeviceObject);
         if (NT_SUCCESS(VpbStatus))
         {
+#ifndef SARCH_XBOX
             PoVolumeDevice(DeviceObject);
+#endif
 
             /* Mount it */
             VpbStatus = IopMountVolume(DeviceObject,
@@ -1225,6 +1229,13 @@ NTSTATUS
 NTAPI
 IoSetSystemPartition(IN PUNICODE_STRING VolumeNameString)
 {
+#ifdef SARCH_XBOX
+    /* No persistent HKLM\SYSTEM\Setup on Xbox; mountmgr's call site is
+     * cosmetic.  Stub so the registry walk + IopCreateRegistryKeyEx
+     * machinery drops out via --gc-sections. */
+    UNREFERENCED_PARAMETER(VolumeNameString);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     HANDLE RootHandle, KeyHandle;
     UNICODE_STRING HKLMSystem, KeyString;
@@ -1269,6 +1280,7 @@ IoSetSystemPartition(IN PUNICODE_STRING VolumeNameString)
     ZwClose(KeyHandle);
 
     return Status;
+#endif
 }
 
 /*

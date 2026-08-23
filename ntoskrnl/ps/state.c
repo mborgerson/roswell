@@ -226,6 +226,11 @@ NTAPI
 NtAlertResumeThread(IN HANDLE ThreadHandle,
                     OUT PULONG SuspendCount)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ThreadHandle);
+    UNREFERENCED_PARAMETER(SuspendCount);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     PETHREAD Thread;
     NTSTATUS Status;
@@ -283,6 +288,7 @@ NtAlertResumeThread(IN HANDLE ThreadHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 NTSTATUS
@@ -290,6 +296,27 @@ NTAPI
 NtResumeThread(IN HANDLE ThreadHandle,
                OUT PULONG SuspendCount OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    /* Kernel-mode callers only; skip the user-pointer probes and
+     * write-back SEH. */
+    PETHREAD Thread;
+    ULONG Prev;
+    NTSTATUS Status;
+    PAGED_CODE();
+
+    Status = ObReferenceObjectByHandle(ThreadHandle,
+                                       THREAD_SUSPEND_RESUME,
+                                       PsThreadType,
+                                       KernelMode,
+                                       (PVOID*)&Thread,
+                                       NULL);
+    if (!NT_SUCCESS(Status)) return Status;
+
+    Status = PsResumeThread(Thread, &Prev);
+    if (SuspendCount) *SuspendCount = Prev;
+    ObDereferenceObject(Thread);
+    return Status;
+#else
     PETHREAD Thread;
     ULONG Prev;
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
@@ -345,6 +372,7 @@ NtResumeThread(IN HANDLE ThreadHandle,
     /* Dereference and return */
     ObDereferenceObject(Thread);
     return Status;
+#endif
 }
 
 NTSTATUS
@@ -352,6 +380,27 @@ NTAPI
 NtSuspendThread(IN HANDLE ThreadHandle,
                 OUT PULONG PreviousSuspendCount OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    /* Kernel-mode callers only; skip the user-pointer probes and
+     * write-back SEH. */
+    PETHREAD Thread;
+    ULONG Prev;
+    NTSTATUS Status;
+    PAGED_CODE();
+
+    Status = ObReferenceObjectByHandle(ThreadHandle,
+                                       THREAD_SUSPEND_RESUME,
+                                       PsThreadType,
+                                       KernelMode,
+                                       (PVOID*)&Thread,
+                                       NULL);
+    if (!NT_SUCCESS(Status)) return Status;
+
+    Status = PsSuspendThread(Thread, &Prev);
+    ObDereferenceObject(Thread);
+    if (NT_SUCCESS(Status) && PreviousSuspendCount) *PreviousSuspendCount = Prev;
+    return Status;
+#else
     PETHREAD Thread;
     ULONG Prev;
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
@@ -404,6 +453,7 @@ NtSuspendThread(IN HANDLE ThreadHandle,
 
     /* Return */
     return Status;
+#endif
 }
 
 NTSTATUS

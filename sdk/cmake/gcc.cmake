@@ -44,6 +44,12 @@ endif()
 # note: -fno-common is default since GCC 10
 add_compile_options(-pipe -fms-extensions -fno-strict-aliasing -fno-common)
 
+# drop GCC's CFI unwind tables.  The kernel doesn't unwind through
+# stack frames (no C++ exceptions, no _Unwind_Backtrace), and .eh_frame is
+# 300+ KB of pure metadata on a 5 MB ntoskrnl image.  We need every byte
+# below PA 0x61000 to make room for the title's hardcoded contig pool.
+add_compile_options(-fno-asynchronous-unwind-tables -fno-unwind-tables)
+
 # A long double is 64 bits
 add_compile_options(-mlong-double-64)
 
@@ -162,19 +168,24 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
             add_compile_options(-femit-struct-debug-detailed=none -feliminate-unused-debug-symbols)
         endif()
     endif()
+elseif(COVERAGE)
+    # Line tables (plus inline-subroutine info) so trace addresses map
+    # back to source; struct detail is dead weight for that purpose.
+    add_compile_options(-gdwarf-4 -gstrict-dwarf)
+    if(NOT CMAKE_C_COMPILER_ID STREQUAL Clang)
+        add_compile_options(-femit-struct-debug-detailed=none -feliminate-unused-debug-symbols)
+    endif()
 endif()
 
 # Tuning
 add_compile_options(-march=${OARCH} -mtune=${TUNE})
 
-# Warnings, errors
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND
-   NOT ARCH STREQUAL "amd64" AND
-   NOT CMAKE_BUILD_TYPE STREQUAL "Release" AND
-   NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND
-   NOT CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-    add_compile_options(-Werror)
-endif()
+# -Werror is dropped.  Upstream ReactOS only enables it for Debug
+# (Release/RelWithDebInfo/MinSizeRel skip it), but upstream code isn't kept
+# clean for it either -- the Debug path hits an unbounded stream of warnings
+# in random subsystems (macro redefinitions in wdm.h vs ntoskrnl-internal
+# headers, C99 static/inline issues, third-party freetype warnings, ...) that
+# aren't worth fighting in a fork.  Build with warnings visible but not fatal.
 
 add_compile_options(-Wall -Wpointer-arith)
 
@@ -208,12 +219,58 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     )
 endif()
 
+# upstream code isn't kept clean for -Wunused-variable /
+# -Wunused-but-set-variable.  Release silences both; Debug normally
+# triggers them as -Werrors and the build fails on first-party
+# offenders (e.g. sdk/lib/cmlib/hivecell.c).  Apply the same -Wno- in
+# every build type so Debug doesn't trip over hygiene the rest of the
+# upstream tree doesn't enforce either.  -Wunused-function and
+# -Wunused-label fall in the same bucket -- our SARCH=xbox gating
+# removes the only callers of dozens of vendored driver helpers
+# (classpnp::ClassDeleteDriverList, pdo paths, etc.) without removing
+# their definitions; the source files stay vendor-identical and rely
+# on --gc-sections to actually drop the dead code from the image.
+add_compile_options(-Wno-unused-variable)
+add_compile_options(-Wno-unused-but-set-variable)
+add_compile_options(-Wno-unused-function)
+add_compile_options(-Wno-unused-label)
+# -Warray-bounds= trips on NT's "cast UCHAR[N] to a struct overlay"
+# idiom (e.g. PCI_COMMON_HEADER over a 9-byte stub buffer, KTSS over
+# a 104-byte boot scratch area).  These are documented NT patterns,
+# not OOB accesses; GCC just can't see the per-callsite sizing.
+add_compile_options(-Wno-array-bounds)
+
 # Optimizations
 # FIXME: Revisit this to see if we even need these levels
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O2 -DNDEBUG=)
-    add_compile_options(-Wno-unused-variable)
-    add_compile_options(-Wno-unused-but-set-variable)
+    if(SARCH STREQUAL "xbox")
+        # nxkrnl prioritises footprint over throughput -- Xbox titles do their
+        # heavy lifting on the GPU/APU and run-time is bottlenecked on I/O,
+        # so the typical 5-10% code-size win from -Os is worth the small
+        # scheduler/scalar penalty.
+        add_compile_options(-Os -DNDEBUG=)
+        # Per-function sections so --gc-sections can drop unused symbols at
+        # function granularity instead of whole-.o granularity.  Not
+        # -fdata-sections: on GCC's pei-i386 it emits each zero-init global
+        # into .data$<name> (CONTENTS=yes) instead of a .bss$<name>, so the
+        # whole BSS ends up loaded from file -- wiping the gains.  Code-only
+        # split is the better trade.
+        # The init-section.lds linker script's *(INIT) match composes fine;
+        # CODE_SEG("INIT") writes still land in the INIT section.
+        add_compile_options(-ffunction-sections)
+        # -flto works: configure with -DLTCG=TRUE (-52 KB resident).  The
+        # historical "hangs before the boot screen" was two real bugs, both
+        # fixed: KiIdleLoop inlined into its INIT-section caller (the idle
+        # thread parked in pages MiFreeInitializationCode discards), and
+        # ld's .def-driven PE export table neither rooting LTO-defined
+        # export implementations nor seeing their addresses (titles got
+        # NULL thunks).  See xb/gen-export-roots.py + xb/fix-edata.py and
+        # the LTCG block below.  Default-on for release (non-DBG) builds
+        # since sdk/cmake/config.cmake's LTCG default flip; opt out with
+        # -DLTCG=FALSE.
+    else()
+        add_compile_options(-O2 -DNDEBUG=)
+    endif()
 else()
     if(OPTIMIZE STREQUAL "1")
         add_compile_options(-Os)
@@ -237,7 +294,33 @@ endif()
 
 # Link-time code generation
 if(LTCG)
-    add_compile_options(-flto -fno-fat-lto-objects)
+    # Fat objects, not slim: two link-time problems need the real COFF
+    # kept alongside the bytecode.  (1) gen-import-table.py scans the
+    # folded driver archives with `nm -u` for __imp_ references, but
+    # dllimport refs don't exist in LTO IR -- they materialize at code
+    # generation, so slim members scan empty and the import table comes
+    # out missing.  (2) GCC materializes libcalls (memcmp/strstr/
+    # sprintf/towlower) during ltrans, after archive symbol resolution;
+    # slim CRT members not pulled by then leave undefined references.
+    # The linker plugin still claims the bytecode for optimization, so
+    # the image is identical -- fat only costs build time and .obj size.
+    add_compile_options(-flto -ffat-lto-objects)
+    # Parallel LTRANS at link time; without this lto-wrapper warns
+    # "using serial compilation of N LTRANS jobs" and the kernel link
+    # serializes on one core.  No make jobserver under ninja, so =auto
+    # falls back to the CPU count.  Supported since GCC 10.
+    add_link_options(-flto=auto)
+    # Incremental LTO is a GCC 16 feature: the `cache` partitioning model
+    # and -flto-incremental keep LTRANS results between links so a one-TU
+    # edit only re-optimizes the partitions it invalidates.  Older GCC
+    # (e.g. Ubuntu 24.04's mingw GCC 13 on CI) errors with "unknown LTO
+    # partitioning model 'cache'", so gate on the version -- LTO itself
+    # stays on either way, only the rebuild-speed optimization is gated.
+    if(CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+        file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/lto-cache)
+        add_link_options(-flto-incremental=${CMAKE_BINARY_DIR}/lto-cache
+                         -flto-partition=cache)
+    endif()
 endif()
 
 if(ARCH STREQUAL "i386")
@@ -405,14 +488,28 @@ function(set_module_type_toolchain MODULE TYPE)
             set(TYPE "wdmdriver")
         endif()
 
-        target_link_options(${MODULE} PRIVATE -Wl,--exclude-all-symbols,-file-alignment=0x1000,-section-alignment=0x1000)
+        # File alignment 0x200 (PE-spec minimum) instead of 0x1000.  Each
+        # section's SizeOfRawData rounds up to FileAlignment, so the gap
+        # between content size and section size used to cost up to 4 KB per
+        # section.  Our PE loader (boot/nxldr/pe.c) reads PointerToRawData
+        # from the section header verbatim -- it doesn't assume any
+        # particular file layout -- so this is safe.  Section alignment
+        # stays at page size; the OS maps sections at page-aligned VAs.
+        target_link_options(${MODULE} PRIVATE -Wl,--exclude-all-symbols,-file-alignment=0x200,-section-alignment=0x1000)
 
         if(${TYPE} STREQUAL "wdmdriver")
             target_link_options(${MODULE} PRIVATE "-Wl,--wdmdriver")
         endif()
 
-        # Place INIT &.rsrc section at the tail of the module, before .reloc
-        add_linker_script(${MODULE} ${REACTOS_SOURCE_DIR}/sdk/cmake/init-section.lds)
+        # Place INIT &.rsrc section at the tail of the module, before .reloc.
+        # The xbox kernel uses a full script (not an INSERT one) so the
+        # .xdata/.edata orphan pages fold into .data/.rdata and the empty
+        # .idata never gets emitted; see xbox-kernel.lds.
+        if(SARCH STREQUAL "xbox")
+            add_linker_script(${MODULE} ${REACTOS_SOURCE_DIR}/sdk/cmake/xbox-kernel.lds)
+        else()
+            add_linker_script(${MODULE} ${REACTOS_SOURCE_DIR}/sdk/cmake/init-section.lds)
+        endif()
 
         # Fixup section characteristics
         #  - Remove flags that LD overzealously puts (alignment flag, Initialized flags for code sections)
@@ -451,11 +548,16 @@ function(fixup_load_config _target)
 endfunction()
 
 function(generate_import_lib _libname _dllname _spec_file __version_arg __dbg_arg)
+    if(IS_ABSOLUTE ${_spec_file})
+        set(_spec_path ${_spec_file})
+    else()
+        set(_spec_path ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file})
+    endif()
     # Generate the def for the import lib
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${_libname}_implib.def
-        COMMAND native-spec2def ${__version_arg} ${__dbg_arg} -n=${_dllname} -a=${ARCH2} ${ARGN} --implib -d=${CMAKE_CURRENT_BINARY_DIR}/${_libname}_implib.def ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file} native-spec2def)
+        COMMAND native-spec2def ${__version_arg} ${__dbg_arg} -n=${_dllname} -a=${ARCH2} ${ARGN} --implib -d=${CMAKE_CURRENT_BINARY_DIR}/${_libname}_implib.def ${_spec_path}
+        DEPENDS ${_spec_path} native-spec2def)
 
     # With this, we let DLLTOOL create an import library
     # Note: previously we re-archived the import library created by dlltool into
@@ -526,11 +628,17 @@ function(spec2def _dllname _spec_file)
         set(__dbg_arg "--dbg")
     endif()
 
+    if(IS_ABSOLUTE ${_spec_file})
+        set(_spec_path ${_spec_file})
+    else()
+        set(_spec_path ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file})
+    endif()
+
     # Generate exports def and C stubs file for the DLL
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${_file}.def ${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c
-        COMMAND native-spec2def -n=${_dllname} -a=${ARCH2} -d=${CMAKE_CURRENT_BINARY_DIR}/${_file}.def -s=${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c ${__with_relay_arg} ${__version_arg} ${__dbg_arg} ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file} native-spec2def)
+        COMMAND native-spec2def -n=${_dllname} -a=${ARCH2} -d=${CMAKE_CURRENT_BINARY_DIR}/${_file}.def -s=${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c ${__with_relay_arg} ${__version_arg} ${__dbg_arg} ${_spec_path}
+        DEPENDS ${_spec_path} native-spec2def)
 
     # Do not use precompiled headers for the stub file
     set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)

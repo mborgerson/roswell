@@ -17,6 +17,14 @@
 
 /* PRIVATE FUNCTIONS **********************************************************/
 
+/* With the nxmm array supply, list membership lives in the supply, not
+ * the MMPFN entry (free pages keep their last owner's PFN state). */
+#ifdef NXK_MM_PHYS
+#define MI_CONTIG_PFN_FREE(Pfn1) NxkPageSupplyIsFree(MiGetPfnEntryIndex(Pfn1))
+#else
+#define MI_CONTIG_PFN_FREE(Pfn1) (!MiIsPfnInUse(Pfn1))
+#endif
+
 PFN_NUMBER
 NTAPI
 MiFindContiguousPages(IN PFN_NUMBER LowestPfn,
@@ -31,6 +39,46 @@ MiFindContiguousPages(IN PFN_NUMBER LowestPfn,
     KIRQL OldIrql;
     PAGED_CODE();
     ASSERT(SizeInPages != 0);
+
+#ifdef NXK_MM_PHYS
+    /*
+     * One shared page pool: an ascending scan would hand kernel DMA
+     * buffers (ATAPI, OHCI) the bottom of the title's contiguous-pin
+     * window.  Prefer, in order: the kernel-preferred class (the high
+     * zone on the retail layout, the upper 64 MB on the devkit), then
+     * the free slack below the title pool floor (where retail keeps
+     * its USB/DMA structures, inside the resident-kernel slot), then
+     * top-down anywhere in range -- the same competition order
+     * single-page spills use.  Boundary-crossing requests are rare on
+     * this hardware; fall through to the legacy scan for those.
+     */
+    if (BoundaryPfn == 0)
+    {
+        extern BOOLEAN NxkMmRetailShapedMap(VOID);
+        BOOLEAN Retail = NxkMmRetailShapedMap();
+        PFN_NUMBER KLow = Retail ? (0x03400000UL >> PAGE_SHIFT)
+                                 : (0x04000000UL >> PAGE_SHIFT);
+        PFN_NUMBER KHigh = Retail ? ((0x03C00000UL >> PAGE_SHIFT) - 1)
+                                  : MmHighestPhysicalPage;
+        PFN_NUMBER FloorPfn = 0x00061000UL >> PAGE_SHIFT;
+        PFN_NUMBER Got = 0;
+
+        KeEnterGuardedRegion();
+        OldIrql = MiAcquirePfnLock();
+        if (KLow <= HighestPfn && KHigh >= LowestPfn)
+            Got = NxkPageSupplyTakeRun(SizeInPages,
+                                       max(LowestPfn, KLow),
+                                       min(HighestPfn, KHigh), 1);
+        if (Got == 0 && LowestPfn < FloorPfn)
+            Got = NxkPageSupplyTakeRun(SizeInPages, LowestPfn,
+                                       min(HighestPfn, FloorPfn - 1), 1);
+        if (Got == 0)
+            Got = NxkPageSupplyTakeRun(SizeInPages, LowestPfn, HighestPfn, 1);
+        MiReleasePfnLock(OldIrql);
+        KeLeaveGuardedRegion();
+        return Got;
+    }
+#endif
 
     //
     // Convert the boundary PFN into an alignment mask
@@ -76,7 +124,7 @@ MiFindContiguousPages(IN PFN_NUMBER LowestPfn,
             //
             // If this PFN is in use, ignore it
             //
-            if (MiIsPfnInUse(Pfn1))
+            if (!MI_CONTIG_PFN_FREE(Pfn1))
             {
                 Length = 0;
                 continue;
@@ -115,7 +163,7 @@ MiFindContiguousPages(IN PFN_NUMBER LowestPfn,
                     //
                     // Things might've changed for us. Is the page still free?
                     //
-                    if (MiIsPfnInUse(Pfn1)) break;
+                    if (!MI_CONTIG_PFN_FREE(Pfn1)) break;
 
                     //
                     // So far so good. Is this the last confirmed valid page?
@@ -138,7 +186,15 @@ MiFindContiguousPages(IN PFN_NUMBER LowestPfn,
                             //
                             MI_SET_USAGE(MI_USAGE_CONTINOUS_ALLOCATION);
                             MI_SET_PROCESS2("Kernel Driver");
+#ifdef NXK_MM_PHYS
+                            if (!NxkPageSupplyTakeSpecific(MiGetPfnEntryIndex(Pfn1)))
+                            {
+                                ASSERT(FALSE);
+                                break;
+                            }
+#else
                             MiUnlinkFreeOrZeroedPage(Pfn1);
+#endif
                             Pfn1->u3.e2.ReferenceCount = 1;
                             Pfn1->u2.ShareCount = 1;
                             Pfn1->u3.e1.PageLocation = ActiveAndValid;
@@ -451,7 +507,10 @@ MiAllocateContiguousMemory(IN SIZE_T NumberOfBytes,
                                          CacheType);
     if (!BaseAddress)
     {
-        DPRINT1("Unable to allocate contiguous memory for %d bytes (%d pages), out of memory!\n", NumberOfBytes, SizeInPages);
+        DPRINT1("Unable to allocate contiguous memory for %d bytes (%d pages), out of memory! [LowPfn=%lx HighPfn=%lx BoundaryPfn=%lx Avail=%lx]\n",
+                NumberOfBytes, SizeInPages,
+                (ULONG)LowestAcceptablePfn, (ULONG)HighestAcceptablePfn,
+                (ULONG)BoundaryPfn, (ULONG)MmAvailablePages);
     }
     return BaseAddress;
 }
@@ -473,7 +532,13 @@ MiFreeContiguousMemory(IN PVOID BaseAddress)
          (BaseAddress < (PVOID)((ULONG_PTR)MmNonPagedPoolStart +
                                 MmSizeOfNonPagedPoolInBytes))) ||
         ((BaseAddress >= MmNonPagedPoolExpansionStart) &&
-         (BaseAddress < MmNonPagedPoolEnd)))
+         (BaseAddress < MmNonPagedPoolEnd))
+#ifdef NXK_MM_POOLPAGES
+        /* Pool lives in the nxmm window now; the ARM3 ranges above are
+         * vestigial. */
+        || NxPoolPagesOwns(BaseAddress)
+#endif
+       )
     {
         //
         // It did, so just use the pool to free this
@@ -566,6 +631,29 @@ MiFreeContiguousMemory(IN PVOID BaseAddress)
 
 /* PUBLIC FUNCTIONS ***********************************************************/
 
+#ifdef SARCH_XBOX
+/* On Xbox the contiguous allocator is unified: these NT entry points
+ * delegate to the nxmm reserved-PA-range allocator (xb/mm/contig.c) that
+ * also backs the title MmAllocateContiguousMemory* ordinals.  The ARM3
+ * free-list implementation above is then unreferenced and dropped by the
+ * linker.  Xbox PAs are 32-bit, so PHYSICAL_ADDRESS.LowPart carries the
+ * full address; nxmm maps cached today (Protect is advisory), which is
+ * coherent for DMA on the snooping nForce northbridge. */
+extern PVOID NTAPI NxMmAllocateContiguousMemoryEx(
+    IN SIZE_T NumberOfBytes, IN ULONG_PTR LowestAcceptableAddress,
+    IN ULONG_PTR HighestAcceptableAddress, IN ULONG_PTR Alignment,
+    IN ULONG Protect);
+extern VOID NTAPI NxMmFreeContiguousMemory(IN PVOID BaseAddress);
+
+static ULONG
+MiXboxCacheToProtect(IN MEMORY_CACHING_TYPE CacheType)
+{
+    if (CacheType == MmNonCached)     return PAGE_READWRITE | PAGE_NOCACHE;
+    if (CacheType == MmWriteCombined) return PAGE_READWRITE | PAGE_WRITECOMBINE;
+    return PAGE_READWRITE;
+}
+#endif
+
 /*
  * @implemented
  */
@@ -577,6 +665,14 @@ MmAllocateContiguousMemorySpecifyCache(IN SIZE_T NumberOfBytes,
                                        IN PHYSICAL_ADDRESS BoundaryAddressMultiple OPTIONAL,
                                        IN MEMORY_CACHING_TYPE CacheType OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    ASSERT(NumberOfBytes != 0);
+    return NxMmAllocateContiguousMemoryEx(NumberOfBytes,
+                                          (ULONG_PTR)LowestAcceptableAddress.LowPart,
+                                          (ULONG_PTR)HighestAcceptableAddress.LowPart,
+                                          (ULONG_PTR)BoundaryAddressMultiple.LowPart,
+                                          MiXboxCacheToProtect(CacheType));
+#else
     PFN_NUMBER LowestPfn, HighestPfn, BoundaryPfn;
 
     //
@@ -616,6 +712,7 @@ MmAllocateContiguousMemorySpecifyCache(IN SIZE_T NumberOfBytes,
                                       HighestPfn,
                                       BoundaryPfn,
                                       CacheType);
+#endif
 }
 
 /*
@@ -626,6 +723,12 @@ NTAPI
 MmAllocateContiguousMemory(IN SIZE_T NumberOfBytes,
                            IN PHYSICAL_ADDRESS HighestAcceptableAddress)
 {
+#ifdef SARCH_XBOX
+    ASSERT(NumberOfBytes != 0);
+    return NxMmAllocateContiguousMemoryEx(NumberOfBytes, 0,
+                                          (ULONG_PTR)HighestAcceptableAddress.LowPart,
+                                          0, PAGE_READWRITE);
+#else
     PFN_NUMBER HighestPfn;
 
     //
@@ -643,6 +746,7 @@ MmAllocateContiguousMemory(IN SIZE_T NumberOfBytes,
     // Let the contiguous memory allocator handle it
     //
     return MiAllocateContiguousMemory(NumberOfBytes, 0, HighestPfn, 0, MmCached);
+#endif
 }
 
 /*
@@ -652,10 +756,14 @@ VOID
 NTAPI
 MmFreeContiguousMemory(IN PVOID BaseAddress)
 {
+#ifdef SARCH_XBOX
+    NxMmFreeContiguousMemory(BaseAddress);
+#else
     //
     // Let the contiguous memory allocator handle it
     //
     MiFreeContiguousMemory(BaseAddress);
+#endif
 }
 
 /*
@@ -667,10 +775,14 @@ MmFreeContiguousMemorySpecifyCache(IN PVOID BaseAddress,
                                    IN SIZE_T NumberOfBytes,
                                    IN MEMORY_CACHING_TYPE CacheType)
 {
+#ifdef SARCH_XBOX
+    NxMmFreeContiguousMemory(BaseAddress);
+#else
     //
     // Just call the non-cached version (there's no cache issues for freeing)
     //
     MiFreeContiguousMemory(BaseAddress);
+#endif
 }
 
 /* EOF */

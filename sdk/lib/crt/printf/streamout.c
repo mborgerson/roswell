@@ -71,7 +71,7 @@ enum
 #define get_exp(f) (int)floor(f == 0 ? 0 : (f >= 0 ? log10(f) : log10(-f)))
 #define round(x) floor((x) + 0.5)
 
-#ifndef _USER32_WSPRINTF
+#if !defined(_USER32_WSPRINTF) && !defined(SARCH_XBOX)
 
 void
 #ifdef _LIBCNT_
@@ -558,11 +558,20 @@ streamout(FILE *stream, const _TCHAR *format, va_list argptr)
 #else
                 flags &= ~FLAG_WIDECHAR;
 #endif
+#ifdef SARCH_XBOX
+                /* No floating-point formatting; consume the argument so
+                   later specifiers stay aligned, emit nothing. */
+                (void)(va_arg_ffp(argptr, flags));
+                len = 0;
+                precision = 0;
+                break;
+#else
                 /* Use external function, one for kernel one for user mode */
                 format_float(chr, flags, precision, &string, &prefix, &argptr);
                 len = _tcslen(string);
                 precision = 0;
                 break;
+#endif
 #endif
 
             case _T('d'):

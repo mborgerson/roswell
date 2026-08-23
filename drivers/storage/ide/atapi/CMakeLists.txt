@@ -22,15 +22,22 @@ list(APPEND SOURCE
     smart.c
     wmi.c)
 
-add_library(atapi MODULE ${SOURCE} atapi.rc)
-
-if (STACK_PROTECTOR)
-    target_sources(atapi PRIVATE $<TARGET_OBJECTS:gcc_ssp_nt>)
+if(SARCH STREQUAL "xbox")
+    # No WMI provider surface on Xbox; the IRP_MJ_SYSTEM_CONTROL dispatcher
+    # is guarded out in atapi.c so wmi.c's only entry point is unreachable.
+    list(REMOVE_ITEM SOURCE wmi.c)
+    # dev_power.c stays in -- satl.c needs AtaDeviceGetFlushCacheCommand
+    # at runtime.  With -ffunction-sections the unused power helpers GC
+    # individually.
 endif()
 
-set_module_type(atapi kernelmodedriver)
+# the ATA/ATAPI driver is linked into the kernel image as a static
+# library; ntoskrnl runs AtapiDriverEntry via IoCreateDriver.  wmilib and
+# sptilib are folded in alongside.  The kernel already links gcc_ssp_nt, so
+# atapi does not pull its own copy.
+add_library(atapi ${SOURCE})
 target_link_libraries(atapi memcmp sptilib ${PSEH_LIB})
 add_pch(atapi atapi.h SOURCE)
-add_importlibs(atapi ntoskrnl hal wmilib)
-add_cd_file(TARGET atapi DESTINATION reactos/system32/drivers NO_CAB FOR all)
+target_compile_definitions(atapi PRIVATE DriverEntry=AtapiDriverEntry)
+add_dependencies(atapi psdk xdk bugcodes)
 add_registry_inf(atapi_reg.inf)

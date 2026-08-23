@@ -14,53 +14,10 @@
 /* INCLUDES ******************************************************************/
 
 #include "halxbox.h"
+#include <xb-debug.h>
+
 
 /* PRIVATE FUNCTIONS *********************************************************/
-
-static VOID
-SMBusWriteByte(
-    _In_ UCHAR Address,
-    _In_ UCHAR Register,
-    _In_ UCHAR Data)
-{
-    INT Retries = 50;
-
-    /* Wait while bus is busy with any master traffic */
-    while (READ_PORT_USHORT((PUSHORT)SMB_GLOBAL_STATUS) & 0x800)
-    {
-        NOTHING;
-    }
-
-    while (Retries--)
-    {
-        UCHAR b;
-
-        WRITE_PORT_UCHAR((PUCHAR)SMB_HOST_ADDRESS, Address << 1);
-        WRITE_PORT_UCHAR((PUCHAR)SMB_HOST_COMMAND, Register);
-
-        WRITE_PORT_UCHAR((PUCHAR)SMB_HOST_DATA, Data);
-
-        /* Clear down all preexisting errors */
-        WRITE_PORT_USHORT((PUSHORT)SMB_GLOBAL_STATUS, READ_PORT_USHORT((PUSHORT)SMB_GLOBAL_STATUS));
-
-        /* Let I2C SMBus know we're sending a single byte here */
-        WRITE_PORT_UCHAR((PUCHAR)SMB_GLOBAL_ENABLE, 0x1A);
-
-        b = 0;
-
-        while (!(b & 0x36))
-        {
-            b = READ_PORT_UCHAR((PUCHAR)SMB_GLOBAL_STATUS);
-        }
-
-        if (b & 0x10)
-        {
-            return;
-        }
-
-        KeStallExecutionProcessor(1);
-    }
-}
 
 static DECLSPEC_NORETURN
 VOID
@@ -71,7 +28,7 @@ HalpXboxPowerAction(
     _disable();
 
     /* Send the command */
-    SMBusWriteByte(SMB_DEVICE_SMC_PIC16LC, SMC_REG_POWER, Action);
+    HalpXboxSmBusWriteByte(SMB_DEVICE_SMC_PIC16LC, SMC_REG_POWER, Action);
 
     /* Halt the CPU */
     __halt();
@@ -118,7 +75,7 @@ HalReturnToFirmware(
         default:
         {
             /* Print message and break */
-            DbgPrint("HalReturnToFirmware(%d) called!\n", Action);
+            XbDbg("HalReturnToFirmware(%d) called!\n", Action);
             DbgBreakPoint();
         }
     }

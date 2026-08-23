@@ -1402,12 +1402,11 @@ void __PREfastPagedCodeLocked(void);
 #define PAGED_ASSERT( exp ) ASSERT( exp )
 #endif
 
-#define PAGED_CODE() { \
-  if (KeGetCurrentIrql() > APC_LEVEL) { \
-    KdPrint( ("NTDDK: Pageable code called at IRQL > APC_LEVEL (%d)\n", KeGetCurrentIrql() )); \
-    PAGED_ASSERT(FALSE); \
-  } \
-}
+/* The IRQL-above-APC check would assert and bugcheck a DBG kernel.  Xbox
+ * titles run ring 0 and routinely signal events, look up handles, etc. from
+ * DPC routines (DISPATCH_LEVEL) -- legal because no kernel section is
+ * pageable here, so the assert caught no real bug, only the retail pattern. */
+#define PAGED_CODE() { /* neutralized */ }
 
 #define PAGED_CODE_LOCKED() NOP_FUNCTION;
 

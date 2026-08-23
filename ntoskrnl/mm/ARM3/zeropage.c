@@ -39,9 +39,18 @@ MmZeroPageThread(VOID)
     PVOID StartAddress, EndAddress;
     PVOID WaitObjects[2];
 
-    /* Get the discardable sections to free them */
-    MiFindInitializationCode(&StartAddress, &EndAddress);
-    if (StartAddress) MiFreeInitializationCode(StartAddress, EndAddress);
+    /* Get the discardable sections to free them.  Phase1Initialization
+     * (ex/init.c) runs this same MiFindInitializationCode /
+     * MiFreeInitializationCode pair before the eager KSEG0 paint -- by the
+     * time MmZeroPageThread runs here, MiFindInitializationCode itself
+     * has been unmapped and freed, so calling it would page-fault on its
+     * own code page.  Skip when NxInitFreesDone is set. */
+    extern volatile LONG NxInitFreesDone;
+    if (!NxInitFreesDone)
+    {
+        MiFindInitializationCode(&StartAddress, &EndAddress);
+        if (StartAddress) MiFreeInitializationCode(StartAddress, EndAddress);
+    }
     DPRINT("Free pages: %lx\n", MmAvailablePages);
 
     /* Set our priority to 0 */

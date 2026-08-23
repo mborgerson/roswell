@@ -60,8 +60,31 @@ set(OPTIMIZE "4" CACHE STRING
  6 = Optimize yet more (-O3)
  7 = Disregard strict standards compliance (-Ofast)")
 
-set(LTCG FALSE CACHE BOOL
+# LTO is the default for all Release-type builds: -52 KB resident on
+# the free build and -202 KB raw on the DBG image,
+# whose flash payload also has to fit the 256 KB ROM target.  Configure
+# with -DLTCG=FALSE for fast rebuilds during iteration; MSVC LTCG is
+# untested here.  Note this is the cache default -- existing build
+# trees keep their cached value until reconfigured with -ULTCG or a
+# fresh directory.
+set(COVERAGE FALSE CACHE BOOL
+"Whether to emit DWARF line info in Release builds so execution traces
+can be mapped back to source lines (tools/trace2lcov.py).  Only affects
+the unstripped image; the flash payload is stripped either way.
+Forces LTCG off: GCC's LTO drops early debug info on PE targets.")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT MSVC AND NOT COVERAGE)
+    set(LTCG TRUE CACHE BOOL
 "Whether to build with link-time code generation")
+else()
+    set(LTCG FALSE CACHE BOOL
+"Whether to build with link-time code generation")
+endif()
+
+if(COVERAGE AND LTCG)
+    message(FATAL_ERROR "COVERAGE needs a non-LTO build (PE LTO emits no "
+                        "DWARF); reconfigure with -DLTCG=FALSE or -ULTCG.")
+endif()
 
 set(GDB FALSE CACHE BOOL
 "Whether to use by default KDGDB.DLL instead of KDCOM.DLL for debugging with GDB.

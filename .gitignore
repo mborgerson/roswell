@@ -13,3 +13,27 @@ modules/[Aa][Hh][Kk]_[Tt]ests
 .settings
 .vscode
 sdk/tools/winesync/winesync.cfg
+
+# Build artifacts (out-of-tree build dir created by tools/build-reactos).
+/build/
+*.o
+*.obj
+*.a
+*.d
+*.elf
+*.exe
+*.iso
+
+# nxdk-built test XBEs.
+tests/xbe/*/bin/
+tests/xbe/*/*/bin/
+tests/xbe/**/*.iso
+
+# Machine-specific xemu config (run-xemu uses these for paths/rom; they
+# carry absolute paths to the dev disk and shouldn't be tracked).
+xemu.toml
+testconfig.toml
+
+# Misc.
+*.swp
+*~

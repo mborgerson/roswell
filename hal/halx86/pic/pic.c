@@ -118,6 +118,22 @@ extern ULONG KiI8259MaskTable[32];
 /* This table indicates which IRQs, if pending, can preempt a given IRQL level */
 extern ULONG FindHigherIrqlMask[32];
 
+/* Soft-IRR storage moved off the PCR.
+ *
+ * Upstream ReactOS keeps the soft-IRR pending-bit mask and in-service mask in
+ * the PCR (offsets 0x28 and 0x2C).  Xbox titles expect PCR+0x28 to hold the
+ * current KTHREAD pointer (the Xbox-shape KPCR puts CurrentThread directly in
+ * the PCR, not in PrcbData).  To keep the HAL's soft-IRR machinery from
+ * fighting that, the pending/in-service masks live in module-scope globals
+ * here instead.  We are uniprocessor on Xbox, so a per-CPU PCR field and a
+ * global C variable are isomorphic.
+ *
+ * Module-scope (not static): C99 forbids non-static inline functions
+ * referencing static storage, and the ReactOS HAL has several non-static
+ * inline interrupt handlers that read these. */
+volatile ULONG NxkPicSoftIrr;
+volatile ULONG NxkPicSoftIrrActive;
+
 /* Denotes minimum required IRQL before we can process pending SW interrupts */
 KIRQL SWInterruptLookUpTable[8] =
 {
@@ -328,10 +344,9 @@ KeRaiseIrqlToDpcLevel(VOID)
     CurrentIrql = Pcr->Irql;
     Pcr->Irql = DISPATCH_LEVEL;
 
-#if DBG
-    /* Validate correct raise */
-    if (CurrentIrql > DISPATCH_LEVEL) KeBugCheck(IRQL_NOT_GREATER_OR_EQUAL);
-#endif
+    /* The retail Xbox PIC HAL is built without DBG and does not enforce this
+     * check; titles raise IRQL from states the check disagrees with and run
+     * fine on retail.  Drop the bugcheck so a DBG kernel matches retail. */
 
     /* Return the previous value */
     return CurrentIrql;
@@ -381,15 +396,10 @@ KfRaiseIrql(IN KIRQL NewIrql)
     /* Read current IRQL */
     CurrentIrql = Pcr->Irql;
 
-#if DBG
-    /* Validate correct raise */
-    if (CurrentIrql > NewIrql)
-    {
-        /* Crash system */
-        Pcr->Irql = PASSIVE_LEVEL;
-        KeBugCheck(IRQL_NOT_GREATER_OR_EQUAL);
-    }
-#endif
+    /* The retail Xbox PIC HAL is built without DBG and does not enforce this
+     * raise-only check; titles call KfRaiseIrql with NewIrql lower than
+     * CurrentIrql (treating it as "set IRQL") and run fine on retail.  Just
+     * set the IRQL the title asked for and return the previous value. */
 
     /* Set new IRQL */
     Pcr->Irql = NewIrql;
@@ -411,15 +421,9 @@ KfLowerIrql(IN KIRQL OldIrql)
     PKPCR Pcr = KeGetPcr();
     PIC_MASK Mask;
 
-#if DBG
-    /* Validate correct lower */
-    if (OldIrql > Pcr->Irql)
-    {
-        /* Crash system */
-        Pcr->Irql = HIGH_LEVEL;
-        KeBugCheck(IRQL_NOT_LESS_OR_EQUAL);
-    }
-#endif
+    /* The retail Xbox PIC HAL is built without DBG and does not enforce this
+     * lower-only check; symmetric to KfRaiseIrql, titles call KfLowerIrql with
+     * OldIrql > current and run on retail.  Just write the requested IRQL. */
 
     /* Save EFlags and disable interrupts */
     EFlags = __readeflags();
@@ -429,7 +433,7 @@ KfLowerIrql(IN KIRQL OldIrql)
     Pcr->Irql = OldIrql;
 
     /* Check for pending software interrupts and compare with current IRQL */
-    PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[OldIrql];
+    PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[OldIrql];
     if (PendingIrqlMask)
     {
         /* Check if pending IRQL affects hardware state */
@@ -442,7 +446,7 @@ KfLowerIrql(IN KIRQL OldIrql)
             __outbyte(PIC2_DATA_PORT, Mask.Slave);
 
             /* Clear IRR bit */
-            Pcr->IRR ^= (1 << PendingIrql);
+            NxkPicSoftIrr ^= (1 << PendingIrql);
         }
 
         /* Now handle pending interrupt */
@@ -471,10 +475,10 @@ HalRequestSoftwareInterrupt(IN KIRQL Irql)
     _disable();
 
     /* Mask out the requested bit */
-    Pcr->IRR |= (1 << Irql);
+    NxkPicSoftIrr |= (1 << Irql);
 
     /* Check for pending software interrupts and compare with current IRQL */
-    PendingIrql = SWInterruptLookUpTable[Pcr->IRR & 3];
+    PendingIrql = SWInterruptLookUpTable[NxkPicSoftIrr & 3];
     if (PendingIrql > Pcr->Irql) SWInterruptHandlerTable[PendingIrql]();
 
     /* Restore interrupt state */
@@ -489,7 +493,7 @@ FASTCALL
 HalClearSoftwareInterrupt(IN KIRQL Irql)
 {
     /* Mask out the requested bit */
-    KeGetPcr()->IRR &= ~(1 << Irql);
+    NxkPicSoftIrr &= ~(1 << Irql);
 }
 
 PHAL_SW_INTERRUPT_HANDLER_2ND_ENTRY
@@ -510,11 +514,11 @@ HalpEndSoftwareInterrupt2(IN KIRQL OldIrql,
     while (TRUE)
     {
         /* Check for pending software interrupts and compare with current IRQL */
-        PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[OldIrql];
+        PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[OldIrql];
         if (!PendingIrqlMask) return NULL;
 
         /* Check for in-service delayed interrupt */
-        if (Pcr->IrrActive & 0xFFFFFFF0) return NULL;
+        if (NxkPicSoftIrrActive & 0xFFFFFFF0) return NULL;
 
         /* Check if pending IRQL affects hardware state */
         BitScanReverse(&PendingIrql, PendingIrqlMask);
@@ -527,14 +531,14 @@ HalpEndSoftwareInterrupt2(IN KIRQL OldIrql,
 
             /* Set active bit otherwise, and clear it from IRR */
             PendingIrqMask = (1 << PendingIrql);
-            Pcr->IrrActive |= PendingIrqMask;
-            Pcr->IRR ^= PendingIrqMask;
+            NxkPicSoftIrrActive |= PendingIrqMask;
+            NxkPicSoftIrr ^= PendingIrqMask;
 
             /* Handle delayed hardware interrupt */
             SWInterruptHandlerTable[PendingIrql]();
 
             /* Handling complete */
-            Pcr->IrrActive ^= PendingIrqMask;
+            NxkPicSoftIrrActive ^= PendingIrqMask;
         }
         else
         {
@@ -618,7 +622,7 @@ _HalpDismissIrqGeneric(IN KIRQL Irql,
     }
 
     /* Update the IRR so that we deliver this interrupt when the IRQL is proper */
-    Pcr->IRR |= (1 << (Irq + 4));
+    NxkPicSoftIrr |= (1 << (Irq + 4));
 
     /* Set new PIC mask to real IRQL level, since the optimization is lost now */
     Mask.Both = (KiI8259MaskTable[CurrentIrql] | Pcr->IDR) & 0xFFFF;
@@ -746,9 +750,6 @@ _HalpDismissIrqLevel(IN KIRQL Irql,
     __outbyte(PIC1_DATA_PORT, Mask.Master);
     __outbyte(PIC2_DATA_PORT, Mask.Slave);
 
-    /* Update the IRR so that we clear this interrupt when the IRQL is proper */
-    Pcr->IRR |= (1 << (Irq + 4));
-
     /* Save current IRQL */
     CurrentIrql = Pcr->Irql;
 
@@ -806,6 +807,15 @@ _HalpDismissIrqLevel(IN KIRQL Irql,
         _enable();
         return TRUE;
     }
+
+    /* Spurious: latch the IRR so the soft retry picks this IRQ up once the
+     * IRQL has dropped.  Moved here from before the success check: with the
+     * level retry path now using the int-$0x3N stub (HalpHardwareInterruptN
+     * via HalEnableSystemInterrupt), an unconditional set on the success
+     * path would cause HalEndSystemInterrupt2 to re-issue the IRQ via
+     * software int and double-fire the ISR.  Mirroring the edge dismiss's
+     * spurious-only set keeps the success path clean. */
+    NxkPicSoftIrr |= (1 << (Irq + 4));
 
     /* Now lie and say this was spurious */
     return FALSE;
@@ -918,17 +928,17 @@ HalpHardwareInterruptLevel2(VOID)
     ULONG PendingIrqlMask, PendingIrql;
 
     /* Check for pending software interrupts and compare with current IRQL */
-    PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[Pcr->Irql];
+    PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[Pcr->Irql];
     if (PendingIrqlMask)
     {
         /* Check for in-service delayed interrupt */
-        if (Pcr->IrrActive & 0xFFFFFFF0) return NULL;
+        if (NxkPicSoftIrrActive & 0xFFFFFFF0) return NULL;
 
         /* Check if pending IRQL affects hardware state */
         BitScanReverse(&PendingIrql, PendingIrqlMask);
 
         /* Clear IRR bit */
-        Pcr->IRR ^= (1 << PendingIrql);
+        NxkPicSoftIrr ^= (1 << PendingIrql);
 
         /* Now handle pending interrupt */
         return SWInterruptHandlerTable[PendingIrql];
@@ -959,10 +969,17 @@ HalEnableSystemInterrupt(IN ULONG Vector,
     /* Check for level interrupt */
     if (InterruptMode == LevelSensitive)
     {
-        /* Switch handler to level */
-        SWInterruptHandlerTable[Irq + 4] = HalpHardwareInterruptLevel;
-
-        /* Switch dismiss to level */
+        /* Switch dismiss to level (level EOI/PIC-mask semantics).  Do NOT
+         * swap SWInterruptHandlerTable[Irq+4] to HalpHardwareInterruptLevel:
+         * that function clears NxkPicSoftIrr but never re-invokes the ISR, leaving
+         * the soft-IRR retry path a no-op.  The level dispatch is supposed to
+         * be retried by the PIC re-asserting the still-high device line --
+         * which works on real level-triggered hardware but NOT on platforms
+         * (like the Xbox) where ELCR forces this IRQ to edge.  Keeping the
+         * default int-$0x3N retry stub means a spurious-dismiss returns
+         * properly via NxkPicSoftIrr latch, and the next IRQL drop re-enters KID
+         * via software int -- delivering the ISR even when the PIC won't
+         * auto-re-fire. */
         HalpSpecialDismissTable[Irq] = HalpSpecialDismissLevelTable[Irq];
     }
 
@@ -1048,12 +1065,22 @@ HalEndSystemInterrupt2(IN KIRQL OldIrql,
     /* Set old IRQL */
     Pcr->Irql = OldIrql;
 
+    /* Restore PIC mask to match the new IRQL level.  HalpDismissIrq* elevated
+     * the PIC mask when this interrupt fired (KiI8259MaskTable[Irql] | IDR);
+     * we have to put it back when we lower IRQL.  ReactOS upstream only did
+     * this when a soft-IRR was pending below -- that left the mask stuck at
+     * the elevated value indefinitely whenever an ISR ran without spurious
+     * dismiss, which silently blocked subsequent hardware IRQs at the PIC. */
+    Mask.Both = (KiI8259MaskTable[OldIrql] | Pcr->IDR) & 0xFFFF;
+    __outbyte(PIC1_DATA_PORT, Mask.Master);
+    __outbyte(PIC2_DATA_PORT, Mask.Slave);
+
     /* Check for pending software interrupts and compare with current IRQL */
-    PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[OldIrql];
+    PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[OldIrql];
     if (PendingIrqlMask)
     {
         /* Check for in-service delayed interrupt */
-        if (Pcr->IrrActive & 0xFFFFFFF0) return NULL;
+        if (NxkPicSoftIrrActive & 0xFFFFFFF0) return NULL;
 
         /* Loop checking for pending interrupts */
         while (TRUE)
@@ -1069,20 +1096,20 @@ HalEndSystemInterrupt2(IN KIRQL OldIrql,
 
                 /* Now check if this specific interrupt is already in-service */
                 PendingIrqMask = (1 << PendingIrql);
-                if (Pcr->IrrActive & PendingIrqMask) return NULL;
+                if (NxkPicSoftIrrActive & PendingIrqMask) return NULL;
 
                 /* Set active bit otherwise, and clear it from IRR */
-                Pcr->IrrActive |= PendingIrqMask;
-                Pcr->IRR ^= PendingIrqMask;
+                NxkPicSoftIrrActive |= PendingIrqMask;
+                NxkPicSoftIrr ^= PendingIrqMask;
 
                 /* Handle delayed hardware interrupt */
                 SWInterruptHandlerTable[PendingIrql]();
 
                 /* Handling complete */
-                Pcr->IrrActive ^= PendingIrqMask;
+                NxkPicSoftIrrActive ^= PendingIrqMask;
 
                 /* Check if there's still interrupts pending */
-                PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[Pcr->Irql];
+                PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[Pcr->Irql];
                 if (!PendingIrqlMask) break;
             }
             else
@@ -1111,7 +1138,7 @@ _HalpApcInterruptHandler(IN PKTRAP_FRAME TrapFrame)
     Pcr->Irql = APC_LEVEL;
 
     /* Remove DPC from IRR */
-    Pcr->IRR &= ~(1 << APC_LEVEL);
+    NxkPicSoftIrr &= ~(1 << APC_LEVEL);
 
     /* Enable interrupts and call the kernel's APC interrupt handler */
     _enable();
@@ -1166,7 +1193,7 @@ _HalpDispatchInterruptHandler(VOID)
     Pcr->Irql = DISPATCH_LEVEL;
 
     /* Remove DPC from IRR */
-    Pcr->IRR &= ~(1 << DISPATCH_LEVEL);
+    NxkPicSoftIrr &= ~(1 << DISPATCH_LEVEL);
 
     /* Enable interrupts and call the kernel's DPC interrupt handler */
     _enable();
@@ -1210,7 +1237,7 @@ HalpDispatchInterrupt2(VOID)
     Pcr->Irql = OldIrql;
 
     /* Check for pending software interrupts and compare with current IRQL */
-    PendingIrqlMask = Pcr->IRR & FindHigherIrqlMask[OldIrql];
+    PendingIrqlMask = NxkPicSoftIrr & FindHigherIrqlMask[OldIrql];
     if (PendingIrqlMask)
     {
         /* Check if pending IRQL affects hardware state */
@@ -1223,7 +1250,7 @@ HalpDispatchInterrupt2(VOID)
             __outbyte(PIC2_DATA_PORT, Mask.Slave);
 
             /* Clear IRR bit */
-            Pcr->IRR ^= (1 << PendingIrql);
+            NxkPicSoftIrr ^= (1 << PendingIrql);
         }
 
         /* Now handle pending interrupt */

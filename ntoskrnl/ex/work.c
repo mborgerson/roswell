@@ -16,8 +16,15 @@
 
 /* Number of worker threads for each Queue */
 #define EX_HYPERCRITICAL_WORK_THREADS               1
+#ifdef SARCH_XBOX
+/* Every kernel-stack page is title-visible RAM; the critical queue
+ * grows on demand via the balance-set manager, so start minimal. */
+#define EX_DELAYED_WORK_THREADS                     1
+#define EX_CRITICAL_WORK_THREADS                    2
+#else
 #define EX_DELAYED_WORK_THREADS                     3
 #define EX_CRITICAL_WORK_THREADS                    5
+#endif
 
 /* Magic flag for dynamic worker threads */
 #define EX_DYNAMIC_WORK_THREAD                      0x80000000
@@ -490,6 +497,10 @@ ExpWorkerThreadBalanceManager(IN PVOID Context)
             PsTerminateSystemThread(STATUS_SYSTEM_SHUTDOWN);
         }
 
+#ifndef SARCH_XBOX
+        /* No WinDBG/KdEnableDebugger on Xbox -- ExpDebuggerWork is
+         * never set to WinKdWorkerStart. Gating drops
+         * ExpDebuggerWorker + NtSystemDebugControl + .xdata$x chain. */
         /*
          * If WinDBG wants to attach or kill a user-mode process, and/or
          * page-in an address region, queue a debugger worker thread.
@@ -500,6 +511,7 @@ ExpWorkerThreadBalanceManager(IN PVOID Context)
              ExpDebuggerWork = WinKdWorkerInitialized;
              ExQueueWorkItem(&ExpDebuggerWorkItem, DelayedWorkQueue);
         }
+#endif
     }
 }
 
@@ -555,8 +567,15 @@ ExpInitializeWorkerThreads(VOID)
         KeInitializeQueue(&ExWorkerQueue[WorkQueueType].WorkerQueue, 0);
     }
 
+#ifndef SARCH_XBOX
     /* Dynamic threads are only used for the critical queue */
     ExWorkerQueue[CriticalWorkQueue].Info.MakeThreadsAsNecessary = TRUE;
+#else
+    /* Fixed single-title workload: no dynamic worker scaling, so the
+     * static worker set is the whole pool and the balance manager (below)
+     * is unnecessary -- it only grows the pool and detects deadlocks. */
+    ExWorkerQueue[CriticalWorkQueue].Info.MakeThreadsAsNecessary = FALSE;
+#endif
 
     /* Initialize the balance set manager events */
     KeInitializeEvent(&ExpThreadSetManagerEvent, SynchronizationEvent, FALSE);
@@ -583,6 +602,7 @@ ExpInitializeWorkerThreads(VOID)
     /* Create the built-in worker thread for the hypercritical queue */
     ExpCreateWorkerThread(HyperCriticalWorkQueue, FALSE);
 
+#ifndef SARCH_XBOX
     /* Create the balance set manager thread */
     Status = PsCreateSystemThread(&ThreadHandle,
                                   THREAD_ALL_ACCESS,
@@ -607,6 +627,13 @@ ExpInitializeWorkerThreads(VOID)
 
     /* Close the handle and return */
     ObCloseHandle(ThreadHandle, KernelMode);
+#else
+    /* No balance manager on the console -- the static pool is fixed. */
+    (void)ThreadHandle;
+    (void)Thread;
+    (void)Status;
+    ExpWorkerThreadBalanceManagerPtr = NULL;
+#endif
 }
 
 VOID

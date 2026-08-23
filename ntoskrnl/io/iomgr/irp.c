@@ -244,7 +244,9 @@ IopCompleteRequest(IN PKAPC Apc,
     PFILE_OBJECT FileObject;
     PIRP Irp;
     PMDL Mdl, NextMdl;
+#ifndef SARCH_XBOX
     PVOID Port = NULL, Key = NULL;
+#endif
     BOOLEAN SignaledCreateRequest = FALSE;
 
     /* Get data from the APC */
@@ -260,6 +262,7 @@ IopCompleteRequest(IN PKAPC Apc,
     ASSERT(Irp->IoStatus.Status != (NTSTATUS)0xFFFFFFFF);
 
     /* Check if we have a file object */
+#ifndef SARCH_XBOX
     if (*SystemArgument2)
     {
         /* Check if we're reparsing */
@@ -277,6 +280,7 @@ IopCompleteRequest(IN PKAPC Apc,
             IopDoNameTransmogrify(Irp, FileObject, ReparseData);
         }
     }
+#endif
 
     /* Handle Buffered case first */
     if (Irp->Flags & IRP_BUFFERED_IO)
@@ -286,12 +290,15 @@ IopCompleteRequest(IN PKAPC Apc,
             (Irp->IoStatus.Status != STATUS_VERIFY_REQUIRED) &&
             !(NT_ERROR(Irp->IoStatus.Status)))
         {
+#ifndef SARCH_XBOX
             _SEH2_TRY
             {
+#endif
                 /* Copy the buffer back to the user */
                 RtlCopyMemory(Irp->UserBuffer,
                               Irp->AssociatedIrp.SystemBuffer,
                               Irp->IoStatus.Information);
+#ifndef SARCH_XBOX
             }
             _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
             {
@@ -299,6 +306,7 @@ IopCompleteRequest(IN PKAPC Apc,
                 Irp->IoStatus.Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#endif
         }
 
         /* Also check if we should de-allocate it */
@@ -332,6 +340,7 @@ IopCompleteRequest(IN PKAPC Apc,
         (Irp->PendingReturned &&
          !IsIrpSynchronous(Irp, FileObject)))
     {
+#ifndef SARCH_XBOX
         /* Get any information we need from the FO before we kill it */
         if ((FileObject) && (FileObject->CompletionContext))
         {
@@ -339,21 +348,26 @@ IopCompleteRequest(IN PKAPC Apc,
             Port = FileObject->CompletionContext->Port;
             Key = FileObject->CompletionContext->Key;
         }
+#endif
 
         /* Check for UserIos */
         if (Irp->UserIosb != NULL)
         {
+#ifndef SARCH_XBOX
             /* Use SEH to make sure we don't write somewhere invalid */
             _SEH2_TRY
             {
+#endif
                 /*  Save the IOSB Information */
                 *Irp->UserIosb = Irp->IoStatus;
+#ifndef SARCH_XBOX
             }
             _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
             {
                 /* Ignore any error */
             }
             _SEH2_END;
+#endif
         }
 
         /* Check if we have an event or a file object */
@@ -459,6 +473,7 @@ IopCompleteRequest(IN PKAPC Apc,
             /* Queue it */
             KeInsertQueueApc(&Irp->Tail.Apc, Irp->UserIosb, NULL, 2);
         }
+#ifndef SARCH_XBOX
         else if ((Port) &&
                  (Irp->Overlay.AsynchronousParameters.UserApcContext))
         {
@@ -467,6 +482,7 @@ IopCompleteRequest(IN PKAPC Apc,
             Irp->Tail.Overlay.PacketType = IopCompletionPacketIrp;
             KeInsertQueue(Port, &Irp->Tail.Overlay.ListEntry);
         }
+#endif
         else
         {
             /* Free the IRP since we don't need it anymore */

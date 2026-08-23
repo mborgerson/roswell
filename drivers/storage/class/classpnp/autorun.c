@@ -195,6 +195,14 @@ ClassSendNotification(
     _In_reads_bytes_opt_(ExtraDataSize) PVOID  ExtraData
     )
 {
+#ifdef SARCH_XBOX
+    /* No PnP target-change notification surface on Xbox. */
+    UNREFERENCED_PARAMETER(FdoExtension);
+    UNREFERENCED_PARAMETER(Guid);
+    UNREFERENCED_PARAMETER(ExtraDataSize);
+    UNREFERENCED_PARAMETER(ExtraData);
+    return;
+#else
     PTARGET_DEVICE_CUSTOM_NOTIFICATION notification;
     ULONG requiredSize;
     NTSTATUS status;
@@ -244,6 +252,7 @@ ClassSendNotification(
 
     FREE_POOL(notification);
     return;
+#endif
 }
 
 
@@ -559,8 +568,10 @@ Notes:
             if (FdoExtension->CommonExtension.DevInfo->ClassError != NULL) {
 
                 SCSI_REQUEST_BLOCK srb = {0};
+#ifndef SARCH_XBOX
                 UCHAR srbExBuffer[CLASS_SRBEX_SCSI_CDB16_BUFFER_SIZE] = {0};
                 PSTORAGE_REQUEST_BLOCK srbEx = (PSTORAGE_REQUEST_BLOCK)srbExBuffer;
+#endif
                 PSCSI_REQUEST_BLOCK srbPtr;
 
                 SENSE_DATA sense = {0};
@@ -581,6 +592,8 @@ Notes:
                 //
                 // Send the right type of SRB to the class driver
                 //
+#ifndef SARCH_XBOX
+                /* Class drivers only declare legacy SRB support on Xbox. */
                 if ((FdoExtension->CommonExtension.DriverExtension->SrbSupport &
                      CLASS_SRB_STORAGE_REQUEST_BLOCK) != 0) {
 #ifdef _MSC_VER
@@ -607,7 +620,9 @@ Notes:
                         srb.SenseInfoBufferLength = sizeof(SENSE_DATA);
                         srbPtr = &srb;
                     }
-                } else {
+                } else
+#endif /* !SARCH_XBOX */
+                {
                     srb.CdbLength = 6;
                     srb.Length    = sizeof(SCSI_REQUEST_BLOCK);
                     srb.SrbStatus = SRB_STATUS_AUTOSENSE_VALID | SRB_STATUS_ERROR;
@@ -1962,6 +1977,8 @@ ClasspInitializePolling(
                 // Register for screen state notification. Will use this to
                 // determine user presence.
                 //
+#ifndef SARCH_XBOX
+                /* No GUID_CONSOLE_DISPLAY_STATE on Xbox. */
                 if (ScreenStateNotificationHandle == NULL) {
                     PoRegisterPowerSettingCallback(fdo,
                                                    &GUID_CONSOLE_DISPLAY_STATE,
@@ -1969,6 +1986,7 @@ ClasspInitializePolling(
                                                    NULL,
                                                    &ScreenStateNotificationHandle);
                 }
+#endif
 
                 return STATUS_SUCCESS;
             }
@@ -3551,16 +3569,30 @@ ClasspTimerTick(
         // Do any media change detection work
         //
 
+#ifndef SARCH_XBOX
+        /* MCN is for cdrom-style removable-media surprise eject /
+         * insert; the Xbox kernel does not arm MediaChangeDetectionInfo
+         * (nxcdrom owns the DVD and disk.c does not call
+         * ClassInitializeMediaChangeDetection on Xbox), so this branch
+         * is dead.  Gating the call lets the linker drop ~5 KB of MCN
+         * / GESN machinery. */
         if ((fdoExtension->MediaChangeDetectionInfo != NULL) &&
             (fdoExtension->FunctionSupportInfo->AsynchronousNotificationSupported == FALSE)) {
 
             ClassCheckMediaState(fdoExtension);
 
         }
+#endif
 
         //
         // Do any failure prediction work
         //
+#ifndef SARCH_XBOX
+        /* ClassSetFailurePredictionPoll lives in diskwmi.c (excluded
+         * on Xbox), so FailurePredictionInfo is never allocated and
+         * this branch is statically dead. Gating it lets the linker
+         * drop ClasspFailurePredict, ClasspPowerActivate/IdleDevice,
+         * and the rest of the FP chain (~3-4 KB). */
         if ((info != NULL) && (info->Method != FailurePredictionNone)) {
 
             ULONG countDown;
@@ -3630,6 +3662,7 @@ ClasspTimerTick(
             }
 
         } // end failure prediction polling
+#endif
 
         //
         // Give driver a chance to do its own specific work

@@ -1,3 +1,11 @@
+if(SARCH STREQUAL "xbox")
+    add_subdirectory(class)
+    add_subdirectory(ide)
+    add_subdirectory(mountmgr)
+    add_subdirectory(partmgr)
+    return()
+endif()
+
 add_subdirectory(class)
 add_subdirectory(floppy)
 add_subdirectory(ide)

@@ -748,6 +748,21 @@ typedef enum _KDPC_IMPORTANCE {
   MediumHighImportance
 } KDPC_IMPORTANCE;
 
+#ifdef SARCH_XBOX
+/* Retail KDPC: 28 bytes, no DpcData/Importance/Number.  The queued gate
+   is the Inserted boolean (ke/dpc.c).  Titles initialize and queue their
+   own KDPCs through the kernel ordinals, so the layout is ABI. */
+typedef struct _KDPC {
+  CSHORT Type;
+  BOOLEAN Inserted;
+  UCHAR Padding;
+  LIST_ENTRY DpcListEntry;
+  PKDEFERRED_ROUTINE DeferredRoutine;
+  PVOID DeferredContext;
+  PVOID SystemArgument1;
+  PVOID SystemArgument2;
+} KDPC, *PKDPC, *RESTRICTED_POINTER PRKDPC;
+#else
 typedef struct _KDPC {
   UCHAR Type;
   UCHAR Importance;
@@ -759,6 +774,7 @@ typedef struct _KDPC {
   PVOID SystemArgument2;
   volatile PVOID DpcData;
 } KDPC, *PKDPC, *RESTRICTED_POINTER PRKDPC;
+#endif
 
 typedef struct _KDPC_WATCHDOG_INFORMATION {
   ULONG DpcTimeLimit;
@@ -897,7 +913,15 @@ typedef struct _KMUTANT {
   UCHAR ApcDisable;
 } KMUTANT, *PKMUTANT, *RESTRICTED_POINTER PRKMUTANT, KMUTEX, *PKMUTEX, *RESTRICTED_POINTER PRKMUTEX;
 
+#ifdef SARCH_XBOX
+/* 32 buckets: titles run only tens of timers, so a small wheel keeps the
+ * per-tick KiTimerExpiration scan cheap while costing 512 B instead of 4 KB.
+ * Header.Hand (a UCHAR) holds every hand with room to spare, and the index
+ * mask & (TIMER_TABLE_SIZE - 1) stays a power-of-two. */
+#define TIMER_TABLE_SIZE 32
+#else
 #define TIMER_TABLE_SIZE 512
+#endif
 #define TIMER_TABLE_SHIFT 9
 
 typedef struct _KTIMER {

@@ -53,7 +53,9 @@ UCHAR KiTrapIoTable[] =
     0x6F,                      /* OUTS                                 */
 };
 
+#ifndef SARCH_XBOX
 PFAST_SYSTEM_CALL_EXIT KiFastCallExitHandler;
+#endif
 #if DBG && defined(_M_IX86) && !defined(_WINKD_)
 PKDBG_PRESERVICEHOOK KeWin32PreServiceHook = NULL;
 PKDBG_POSTSERVICEHOOK KeWin32PostServiceHook = NULL;
@@ -125,6 +127,24 @@ VOID
 FASTCALL
 KiEoiHelper(IN PKTRAP_FRAME TrapFrame)
 {
+    /* Xbox titles read PRCB+0x24C/0x250 expecting NULL on retail, but those
+     * offsets land inside KPRCB.ProcessorState.ContextFrame.ExtendedRegisters
+     * in NT's KPRCB layout, where an interrupt path writes them.  Zero before
+     * returning to a title thread so the title never sees a non-zero value.
+     * Title threads are identified by XeXboxFs4 != 0. */
+    {
+        PKTHREAD CurrentThread = KeGetCurrentThread();
+        if (CurrentThread != NULL && CurrentThread->XeXboxFs4 != 0)
+        {
+            PULONG Prcb = (PULONG)KeGetCurrentPrcb();
+            if (Prcb != NULL)
+            {
+                Prcb[0x24C / 4] = 0;
+                Prcb[0x250 / 4] = 0;
+            }
+        }
+    }
+
     /* Common trap exit code */
     KiCommonExit(TrapFrame, TRUE);
 
@@ -144,6 +164,7 @@ KiEoiHelper(IN PKTRAP_FRAME TrapFrame)
     KiTrapReturnNoSegmentsRet8(TrapFrame);
 }
 
+#ifndef SARCH_XBOX
 DECLSPEC_NORETURN
 VOID
 FASTCALL
@@ -182,6 +203,7 @@ KiServiceExit(IN PKTRAP_FRAME TrapFrame,
     /* Exit to kernel mode */
     KiSystemCallReturn(TrapFrame);
 }
+#endif /* !SARCH_XBOX */
 
 DECLSPEC_NORETURN
 VOID
@@ -432,6 +454,7 @@ KiTrap01Handler(IN PKTRAP_FRAME TrapFrame)
     /* Check for VDM trap */
     ASSERT(KiVdmTrap(TrapFrame) == FALSE);
 
+#ifndef SARCH_XBOX
     /* Check if this was a single step after sysenter */
     if (TrapFrame->Eip == (ULONG)KiFastCallEntry)
     {
@@ -444,6 +467,7 @@ KiTrap01Handler(IN PKTRAP_FRAME TrapFrame)
         /* End this trap */
         KiEoiHelper(TrapFrame);
     }
+#endif
 
     /* Enable interrupts if the trap came from user-mode */
     if (KiUserTrap(TrapFrame)) _enable();
@@ -588,6 +612,33 @@ KiTrap03Handler(IN PKTRAP_FRAME TrapFrame)
     /* Save trap frame */
     KiEnterTrap(TrapFrame);
 
+    /* Title int3 policy: if the title registered its own SEH frame
+     * (fs:[0] differs from the baseline recorded at thread start),
+     * dispatch normally so the handler runs.  If only the system-thread
+     * catch-all wrapper is on the chain, dispatching would terminate
+     * the thread (the wrapper "handles" everything), so log and resume.
+     *
+     * Stays as a loud tripwire: every observed title int3 was inter-function
+     * padding reached because a kernel call on a should-not-return path
+     * returned, not a deliberate title assertion.  Reporting the title EIP
+     * here beats silently killing the thread. */
+    {
+        PKTHREAD CurrentThread = KeGetCurrentThread();
+        if (CurrentThread != NULL && CurrentThread->XeXboxFs4 != 0 &&
+            (PVOID)__readfsdword(0) == CurrentThread->XeBaseSeh)
+        {
+            static ULONG NxSkippedTitleInt3 = 0;
+            if (NxSkippedTitleInt3 < 8)
+            {
+                DbgPrint("title int3 @ eip=%08lx with no title SEH "
+                         "frame, resuming (count=%lu)\n",
+                         TrapFrame->Eip - 1, NxSkippedTitleInt3 + 1);
+                NxSkippedTitleInt3++;
+            }
+            KiEoiHelper(TrapFrame);
+        }
+    }
+
     /* Continue with the common handler */
     KiDebugHandler(TrapFrame, BREAKPOINT_BREAK, 0, 0);
 }
@@ -642,6 +693,7 @@ KiTrap06Handler(IN PKTRAP_FRAME TrapFrame)
 {
     PUCHAR Instruction;
     ULONG i;
+#ifndef SARCH_XBOX
     KIRQL OldIrql;
 
     /* Check for V86 GPF */
@@ -680,6 +732,7 @@ KiTrap06Handler(IN PKTRAP_FRAME TrapFrame)
         /* Do a quick V86 exit if possible */
         KiExitV86Trap(TrapFrame);
     }
+#endif
 
     /* Save trap frame */
     KiEnterTrap(TrapFrame);
@@ -867,6 +920,16 @@ KiTrap08Handler(VOID)
     // TssGdt->HighWord.Bits.Type &= ~0x2; /* I386_ACTIVE_TSS --> I386_TSS */
     TssGdt->HighWord.Bits.Type = I386_TSS; // Busy bit cleared in the TSS selector.
 
+    /* a double fault here is usually a kernel-stack overflow (Xbox
+     * titles run in ring 0, so a title's stack is the kernel stack).  Dump the
+     * faulting thread's stack bounds vs the saved Esp so we can tell an
+     * overflow from a genuine trap. */
+    DbgPrint("#DF thread=%p StackBase=%p StackLimit=%p Esp=%lx "
+             "(used=%ld of %ld)\n",
+             Thread, Thread->StackBase, Thread->StackLimit, Tss->Esp,
+             (LONG)((ULONG_PTR)Thread->StackBase - Tss->Esp),
+             (LONG)((ULONG_PTR)Thread->StackBase - (ULONG_PTR)Thread->StackLimit));
+
     /* Bugcheck the system */
     KeBugCheckWithTf(UNEXPECTED_KERNEL_MODE_TRAP,
                      EXCEPTION_DOUBLE_FAULT,
@@ -944,6 +1007,7 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
     UCHAR Instruction = 0;
     KIRQL OldIrql;
 
+#ifndef SARCH_XBOX
     /* Check for V86 GPF */
     if (__builtin_expect(KiV86Trap(TrapFrame), 1))
     {
@@ -980,10 +1044,15 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
         /* Do a quick V86 exit if possible */
         KiExitV86Trap(TrapFrame);
     }
+#else
+    /* Xbox: no V8086 mode; silence unused-variable warning. */
+    (void)OldIrql;
+#endif
 
     /* Save trap frame */
     KiEnterTrap(TrapFrame);
 
+#ifndef SARCH_XBOX
     /* Check for user-mode GPF */
     if (KiUserTrap(TrapFrame))
     {
@@ -1113,6 +1182,12 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
                                  0xFFFFFFFF,
                                  TrapFrame);
     }
+#else
+    /* Xbox: all code runs in ring 0; a #GP from CPL!=0 is impossible.
+     * Silence unused-variable warnings for the user-trap-only locals. */
+    (void)i; (void)j; (void)Iopl; (void)Privileged;
+    (void)Instructions; (void)Instruction;
+#endif
 
     /*
      * Check for a fault during checking of the user instruction.
@@ -1171,6 +1246,7 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
          * Why? Because part of the trap frame actually corresponds to the IRET
          * stack during the trap exit!
          */
+#ifndef SARCH_XBOX
         if ((TrapFrame->HardwareEsp == (ULONG)Ki386BiosCallReturnAddress) &&
             (TrapFrame->HardwareSegSs == (KGDT_R0_CODE | RPL_MASK)))
         {
@@ -1178,6 +1254,7 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
             Ki386BiosCallReturnAddress(TrapFrame);
         }
         else
+#endif
         {
             /* Otherwise, this is another kind of IRET fault */
             UNIMPLEMENTED_FATAL();
@@ -1320,13 +1397,16 @@ VOID
 FASTCALL
 KiTrap0EHandler(IN PKTRAP_FRAME TrapFrame)
 {
+#ifndef SARCH_XBOX
     PKTHREAD Thread;
+#endif
     ULONG_PTR Cr2;
     NTSTATUS Status;
 
     /* Save trap frame */
     KiEnterTrap(TrapFrame);
 
+#ifndef SARCH_XBOX
     /* Check if this is the base frame */
     Thread = KeGetCurrentThread();
     if (KeGetTrapFrame(Thread) != TrapFrame)
@@ -1339,6 +1419,7 @@ KiTrap0EHandler(IN PKTRAP_FRAME TrapFrame)
             UNIMPLEMENTED_FATAL();
         }
     }
+#endif
 
     /* Save CR2 */
     Cr2 = __readcr2();
@@ -1349,6 +1430,77 @@ KiTrap0EHandler(IN PKTRAP_FRAME TrapFrame)
     /* Check if we came in with interrupts disabled */
     if (!(TrapFrame->EFlags & EFLAGS_INTERRUPT_MASK))
     {
+        /* dump the trap frame before the bugcheck so the bare
+         * (CR2, -1, ErrCode, EIP) args don't drop everything we'd need to
+         * tell who jumped into the dark.  Registers + the top of stack +
+         * the bytes at the faulting EIP almost always pin the cause. */
+        /* For a same-ring trap (Ring 0 -> Ring 0) the CPU does not save SS:ESP,
+         * so TrapFrame->HardwareEsp is a leftover sentinel.  The real ESP at
+         * fault time is `&TrapFrame->ErrCode + 16` (CPU pushed ErrCode, EIP,
+         * CS, EFLAGS in that order onto the same stack).  For a Ring 3 trap
+         * HardwareEsp is genuine. */
+        {
+#ifndef SARCH_XBOX
+            BOOLEAN userMode = KiUserTrap(TrapFrame);
+            ULONG_PTR realEsp = userMode
+                ? TrapFrame->HardwareEsp
+                : (ULONG_PTR)&TrapFrame->ErrCode + 16;
+#else
+            /* PL0-only Xbox: same-ring trap always. */
+            ULONG_PTR realEsp = (ULONG_PTR)&TrapFrame->ErrCode + 16;
+#endif
+
+            DbgPrint("trap0e (IF=0): CR2=%p ErrCode=%x EIP=%p EFlags=%x\n",
+                     (PVOID)Cr2, TrapFrame->ErrCode,
+                     (PVOID)TrapFrame->Eip, TrapFrame->EFlags);
+#ifndef SARCH_XBOX
+            DbgPrint("  CS=%04x ring=%d  tf@=%p  realESP=%p\n",
+                     TrapFrame->SegCs, userMode ? 3 : 0,
+                     TrapFrame, (PVOID)realEsp);
+#else
+            DbgPrint("  CS=%04x  tf@=%p  realESP=%p\n",
+                     TrapFrame->SegCs, TrapFrame, (PVOID)realEsp);
+#endif
+            DbgPrint("  EAX=%08x EBX=%08x ECX=%08x EDX=%08x\n",
+                     TrapFrame->Eax, TrapFrame->Ebx,
+                     TrapFrame->Ecx, TrapFrame->Edx);
+            DbgPrint("  ESI=%08x EDI=%08x EBP=%08x ESPhw=%08x\n",
+                     TrapFrame->Esi, TrapFrame->Edi,
+                     TrapFrame->Ebp, TrapFrame->HardwareEsp);
+        {
+            ULONG i;
+            PUCHAR pc = (PUCHAR)TrapFrame->Eip;
+            PULONG sp = (PULONG)realEsp;
+
+            /* Read window: title low-VA + KSEG0 contig + NT pool/kimage.
+             * Touching anything outside risks a second fault inside the
+             * bugcheck path, which would be a much worse experience. */
+            #define NX_VA_OK(a) (((ULONG_PTR)(a) >= 0x00010000ul && \
+                                  (ULONG_PTR)(a) <  0x40000000ul) || \
+                                 ((ULONG_PTR)(a) >= 0x80000000ul && \
+                                  (ULONG_PTR)(a) <  0xC0000000ul))
+
+            DbgPrint("  bytes @EIP:");
+            for (i = 0; i < 16; i++)
+            {
+                if (!NX_VA_OK(pc + i)) { DbgPrint(" ??"); continue; }
+                DbgPrint(" %02x", pc[i]);
+            }
+            DbgPrint("\n");
+
+            for (i = 0; i < 12; i++)
+            {
+                if (!NX_VA_OK(sp + i))
+                {
+                    DbgPrint("  stack[%u]=%p (skip, off-window)\n",
+                             i, (PVOID)(sp + i));
+                    continue;
+                }
+                DbgPrint("  stack[%u] @%p = %08x\n", i, (PVOID)(sp + i), sp[i]);
+            }
+            #undef NX_VA_OK
+        }
+        }   /* close userMode/realEsp block */
         /* This is completely illegal, bugcheck the system */
         KeBugCheckWithTf(IRQL_NOT_LESS_OR_EQUAL,
                          Cr2,
@@ -1388,6 +1540,7 @@ KiTrap0EHandler(IN PKTRAP_FRAME TrapFrame)
     }
 #endif
 
+#ifndef SARCH_XBOX
     /* Check for VDM trap */
     if (KiVdmTrap(TrapFrame))
     {
@@ -1401,6 +1554,7 @@ KiTrap0EHandler(IN PKTRAP_FRAME TrapFrame)
         }
         DPRINT1("VDM page fault with status 0x%lx NOT resolved\n", Status);
     }
+#endif /* SARCH_XBOX: no V8086 */
 
     /* Either kernel or user trap (non VDM) so dispatch exception */
     if (Status == STATUS_ACCESS_VIOLATION)
@@ -1602,6 +1756,18 @@ KiRaiseSecurityCheckFailureHandler(IN PKTRAP_FRAME TrapFrame)
     {
         EXCEPTION_RECORD ExceptionRecord;
 
+        /* surface the EIP + ECX BEFORE bugchecking so we have
+         * something to triage with -- the post-bugcheck KdSendPacket only
+         * shows the breakpoint inside KdpReportException, not where the
+         * __fastfail (INT 29h) was raised.  HardwareEsp is NOT valid for
+         * kernel-mode traps (no privilege change, CPU doesn't push SS:ESP),
+         * so we just dump what the CPU did save. */
+        DbgPrint("__fastfail code=%lx EIP=%08lx "
+                 "(Eax=%08lx Ebx=%08lx Ecx=%08lx Edx=%08lx Esi=%08lx Edi=%08lx Ebp=%08lx)\n",
+                 TrapFrame->Ecx, TrapFrame->Eip,
+                 TrapFrame->Eax, TrapFrame->Ebx, TrapFrame->Ecx, TrapFrame->Edx,
+                 TrapFrame->Esi, TrapFrame->Edi, TrapFrame->Ebp);
+
         /* Bugcheck the system */
         ExceptionRecord.ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
         ExceptionRecord.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
@@ -1619,6 +1785,9 @@ KiRaiseSecurityCheckFailureHandler(IN PKTRAP_FRAME TrapFrame)
     }
 }
 
+/* On Xbox the int 0x2a / int 0x2b vectors point at the unexpected-trap
+ * entry; their handlers and the user-callback machinery are not built. */
+#ifndef SARCH_XBOX
 VOID
 FASTCALL
 KiGetTickCountHandler(IN PKTRAP_FRAME TrapFrame)
@@ -1661,6 +1830,7 @@ KiCallbackReturnHandler(IN PKTRAP_FRAME TrapFrame)
     /* If we got here, something went wrong. Return an error to the caller */
     KiServiceExit(TrapFrame, Status);
 }
+#endif /* !SARCH_XBOX */
 
 DECLSPEC_NORETURN
 VOID
@@ -1716,6 +1886,7 @@ KiDbgPostServiceHook(ULONG SystemCallNumber, ULONG_PTR Result)
     return Result;
 }
 
+#ifndef SARCH_XBOX
 DECLSPEC_NORETURN
 VOID
 FASTCALL
@@ -1852,6 +2023,7 @@ ExitCall:
     /* Exit from system call */
     KiServiceExit(TrapFrame, Status);
 }
+#endif /* !SARCH_XBOX */
 
 VOID
 FASTCALL

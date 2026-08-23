@@ -26,7 +26,12 @@ KeInitExceptions(VOID)
     USHORT FlippedSelector;
 
     /* Loop the IDT */
+#ifdef SARCH_XBOX
+    /* KiIdt is trimmed to 64 entries (vectors 0..0x3F); don't flip past it. */
+    for (i = 0; i <= 0x3F; i++)
+#else
     for (i = 0; i <= MAXIMUM_IDTVECTOR; i++)
+#endif
     {
         /* Save the current Selector */
         FlippedSelector = KiIdt[i].Selector;
@@ -319,7 +324,9 @@ KeContextToTrapFrame(IN PCONTEXT Context,
 {
     PFX_SAVE_AREA FxSaveArea;
     ULONG i;
+#ifndef SARCH_XBOX
     BOOLEAN V86Switch = FALSE;
+#endif
     KIRQL OldIrql;
     ULONG DrMask = 0;
 
@@ -330,6 +337,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
     /* Start with the basic Registers */
     if ((ContextFlags & CONTEXT_CONTROL) == CONTEXT_CONTROL)
     {
+#ifndef SARCH_XBOX
         /* Check if we went through a V86 switch */
         if ((Context->EFlags & EFLAGS_V86_MASK) !=
             (TrapFrame->EFlags & EFLAGS_V86_MASK))
@@ -337,6 +345,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             /* We did, remember this for later */
             V86Switch = TRUE;
         }
+#endif
 
         /* Copy EFLAGS and sanitize them*/
         TrapFrame->EFlags = Ke386SanitizeFlags(Context->EFlags, PreviousMode);
@@ -345,6 +354,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
         TrapFrame->Ebp = Context->Ebp;
         TrapFrame->Eip = Context->Eip;
 
+#ifndef SARCH_XBOX
         /* Check if we were in V86 Mode */
         if (TrapFrame->EFlags & EFLAGS_V86_MASK)
         {
@@ -352,6 +362,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             TrapFrame->SegCs = Context->SegCs;
         }
         else
+#endif
         {
             /* We weren't in V86, so sanitize the CS */
             TrapFrame->SegCs = Ke386SanitizeSeg(Context->SegCs, PreviousMode);
@@ -370,8 +381,10 @@ KeContextToTrapFrame(IN PCONTEXT Context,
         /* Write ESP back; take into account Edited Trap Frames */
         KiEspToTrapFrame(TrapFrame, Context->Esp);
 
+#ifndef SARCH_XBOX
         /* Handle our V86 Bias if we went through a switch */
         if (V86Switch) Ki386AdjustEsp0(TrapFrame);
+#endif
     }
 
     /* Process the Integer Registers */
@@ -389,6 +402,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
     /* Process the Context Segments */
     if ((ContextFlags & CONTEXT_SEGMENTS) == CONTEXT_SEGMENTS)
     {
+#ifndef SARCH_XBOX
         /* Check if we were in V86 Mode */
         if (TrapFrame->EFlags & EFLAGS_V86_MASK)
         {
@@ -398,7 +412,9 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             TrapFrame->V86Fs = Context->SegFs;
             TrapFrame->V86Gs = Context->SegGs;
         }
-        else if (!KiUserTrap(TrapFrame))
+        else
+#endif
+        if (!KiUserTrap(TrapFrame))
         {
             /* For kernel mode, write the standard values */
             TrapFrame->SegDs = KGDT_R3_DATA | RPL_MASK;
@@ -406,6 +422,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             TrapFrame->SegFs = Ke386SanitizeSeg(Context->SegFs, PreviousMode);
             TrapFrame->SegGs = 0;
         }
+#ifndef SARCH_XBOX
         else
         {
             /* For user mode, return the values directly */
@@ -425,8 +442,10 @@ KeContextToTrapFrame(IN PCONTEXT Context,
                 TrapFrame->SegGs = Context->SegGs;
             }
         }
+#endif
     }
 
+#ifndef SARCH_XBOX
     /* Handle the extended registers */
     if (((ContextFlags & CONTEXT_EXTENDED_REGISTERS) ==
         CONTEXT_EXTENDED_REGISTERS) && KiUserTrap(TrapFrame))
@@ -522,6 +541,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             FxSaveArea->Cr0NpxState |= Context->FloatSave.Cr0NpxState & (CR0_EM | CR0_MP);
         }
     }
+#endif
 
     /* Handle the Debug Registers */
     if ((ContextFlags & CONTEXT_DEBUG_REGISTERS) == CONTEXT_DEBUG_REGISTERS)
@@ -532,6 +552,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
         TrapFrame->Dr2 = Context->Dr2;
         TrapFrame->Dr3 = Context->Dr3;
 
+#ifndef SARCH_XBOX
         /* If we're in user-mode */
         if (PreviousMode != KernelMode)
         {
@@ -541,6 +562,7 @@ KeContextToTrapFrame(IN PCONTEXT Context,
             if (Context->Dr2 > (ULONG)MmHighestUserAddress) TrapFrame->Dr2 = 0;
             if (Context->Dr3 > (ULONG)MmHighestUserAddress) TrapFrame->Dr3 = 0;
         }
+#endif
 
         /* Now sanitize and save DR6 */
         TrapFrame->Dr6 = Context->Dr6 & DR6_LEGAL;
@@ -556,12 +578,14 @@ KeContextToTrapFrame(IN PCONTEXT Context,
         TrapFrame->Dr7 = Context->Dr7 & DR7_LEGAL;
         KiRecordDr7(&TrapFrame->Dr7, &DrMask);
 
+#ifndef SARCH_XBOX
         /* If we're in user-mode */
         if (PreviousMode != KernelMode)
         {
             /* Save the mask */
             KeGetCurrentThread()->Header.DebugActive = (UCHAR)DrMask;
         }
+#endif
     }
 
     /* Check if thread has IOPL and force it enabled if so */
@@ -807,6 +831,7 @@ KiDispatchException(IN PEXCEPTION_RECORD ExceptionRecord,
     /* Set the context flags */
     Context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
 
+#ifndef SARCH_XBOX
     /* Check if User Mode or if the kernel debugger is enabled */
     if ((PreviousMode == UserMode) || (KeGetPcr()->KdVersionBlock))
     {
@@ -820,6 +845,7 @@ KiDispatchException(IN PEXCEPTION_RECORD ExceptionRecord,
             Context.ContextFlags |= CONTEXT_EXTENDED_REGISTERS;
         }
     }
+#endif
 
     /* Get a Context */
     KeTrapFrameToContext(TrapFrame, ExceptionFrame, &Context);
@@ -891,6 +917,7 @@ KiDispatchException(IN PEXCEPTION_RECORD ExceptionRecord,
                      (ULONG_PTR)TrapFrame,
                      0);
     }
+#ifndef SARCH_XBOX
     else
     {
         /* User mode exception, was it first-chance? */
@@ -1031,6 +1058,7 @@ DispatchToUser:
                 ExceptionRecord->ExceptionInformation[0],
                 ExceptionRecord->ExceptionInformation[1]);
 
+        /* No usermode -- titles bugcheck directly. */
         ZwTerminateProcess(NtCurrentProcess(), ExceptionRecord->ExceptionCode);
         KeBugCheckEx(KMODE_EXCEPTION_NOT_HANDLED,
                      ExceptionRecord->ExceptionCode,
@@ -1038,6 +1066,7 @@ DispatchToUser:
                      (ULONG_PTR)TrapFrame,
                      0);
     }
+#endif
 
 Handled:
     /* Convert the context back into Trap/Exception Frames */
@@ -1106,6 +1135,9 @@ KiSystemFatalException(IN ULONG ExceptionCode,
 
 /* PUBLIC FUNCTIONS ***********************************************************/
 
+/* No ring 3 on Xbox; raising an exception in a user-mode caller is
+ * impossible and the call sites are gated. */
+#ifndef SARCH_XBOX
 /*
  * @implemented
  */
@@ -1139,3 +1171,4 @@ KeRaiseUserException(IN NTSTATUS ExceptionCode)
     /* Return the old EIP */
     return (NTSTATUS)OldEip;
 }
+#endif /* !SARCH_XBOX */

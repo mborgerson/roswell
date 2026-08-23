@@ -15,6 +15,8 @@
 
 /* FUNCTIONS *****************************************************************/
 
+#ifndef SARCH_XBOX
+/* Xbox volumes are FATX -- 8.3 short-name decoding is dead. */
 VOID
 vfat8Dot3ToString(
     PFAT_DIR_ENTRY pEntry,
@@ -75,6 +77,7 @@ vfat8Dot3ToString(
     NameU->Buffer[NameU->Length / sizeof(WCHAR)] = 0;
     DPRINT("'%wZ'\n", NameU);
 }
+#endif
 
 /*
  * FUNCTION: Find a file
@@ -134,10 +137,13 @@ FindFile(
         if (rcFcb)
         {
             ULONG startIndex = rcFcb->startIndex;
+#ifndef SARCH_XBOX
+            /* Synthesized-dot index bias; not emitted on Xbox FATX. */
             if (IsFatX && !vfatFCBIsRoot(Parent))
             {
                 startIndex += 2;
             }
+#endif
             if(startIndex >= DirContext->DirIndex)
             {
                 RtlCopyUnicodeString(&DirContext->LongNameU, &rcFcb->LongNameU);
@@ -350,6 +356,7 @@ VfatOpenFile(
         return STATUS_CANNOT_DELETE;
     }
 
+#ifndef SARCH_XBOX
     /* If that one was marked for closing, remove it */
     if (BooleanFlagOn(Fcb->Flags, FCB_DELAYED_CLOSE))
     {
@@ -387,6 +394,7 @@ VfatOpenFile(
 
         DPRINT("Reusing delayed close FCB for %wZ\n", &Fcb->PathNameU);
     }
+#endif /* !SARCH_XBOX */
 
     DPRINT("Attaching FCB to fileObject\n");
     Status = vfatAttachFCBToFileObject(DeviceExt, Fcb, FileObject);

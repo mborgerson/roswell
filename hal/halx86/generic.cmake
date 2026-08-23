@@ -1,13 +1,9 @@
 
 list(APPEND HAL_GENERIC_SOURCE
-    generic/beep.c
     generic/cmos.c
     generic/display.c
     generic/dma.c
-    generic/drive.c
     generic/halinit.c
-    generic/kdpci.c
-    generic/memory.c
     generic/misc.c
     generic/nmi.c
     generic/pic.c
@@ -15,6 +11,17 @@ list(APPEND HAL_GENERIC_SOURCE
     generic/sysinfo.c
     generic/usage.c
     generic/x86bios.c)
+
+if(NOT SARCH STREQUAL "xbox")
+    # beep.c, drive.c, kdpci.c, memory.c -- no live symbols on Xbox.
+    # PC speaker beep, BIOS-disk DRIVE_LAYOUT, KD-over-PCI debug, BIOS
+    # memory map -- none reachable from Xbox kernel.
+    list(APPEND HAL_GENERIC_SOURCE
+        generic/beep.c
+        generic/drive.c
+        generic/kdpci.c
+        generic/memory.c)
+endif()
 
 if(ARCH STREQUAL "i386")
     list(APPEND HAL_GENERIC_SOURCE

@@ -297,6 +297,13 @@ ClasspCleanupProtectedLocks(
     IN PFILE_OBJECT_EXTENSION FsContext
     )
 {
+#ifdef SARCH_XBOX
+    /* The ejection-lock IOCTLs are gated out on Xbox, so LockCount is
+     * always 0; the cleanup body would be a no-op apart from the SRB
+     * unlock command path.  Early-return to drop ~650 B. */
+    UNREFERENCED_PARAMETER(FsContext);
+    return;
+#else
     PCOMMON_DEVICE_EXTENSION commonExtension =
         FsContext->DeviceObject->DeviceExtension;
 
@@ -427,6 +434,7 @@ ClasspCleanupProtectedLocks(
                FALSE);
     KeLeaveCriticalRegion();
     return;
+#endif /* SARCH_XBOX */
 }
 
 
@@ -435,6 +443,12 @@ ClasspCleanupDisableMcn(
     IN PFILE_OBJECT_EXTENSION FsContext
     )
 {
+#ifdef SARCH_XBOX
+    /* MCN is gated out on Xbox, so McnDisableCount is always 0 and
+     * the ClassEnableMediaChangeDetection chain is dead. */
+    UNREFERENCED_PARAMETER(FsContext);
+    return;
+#else
     PCOMMON_DEVICE_EXTENSION commonExtension =
         FsContext->DeviceObject->DeviceExtension;
 
@@ -461,6 +475,7 @@ ClasspCleanupDisableMcn(
     }
 
     return;
+#endif
 }
 
 
@@ -635,6 +650,8 @@ ClasspEjectionControl(
                 _SEH2_LEAVE;
             }
 
+#ifndef SARCH_XBOX
+            /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
             if (FdoExtension->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
 
                 //
@@ -651,7 +668,9 @@ ClasspEjectionControl(
                     _SEH2_LEAVE;
                 }
 
-            } else {
+            } else
+#endif
+            {
                 RtlZeroMemory(srb, sizeof(SCSI_REQUEST_BLOCK));
             }
 

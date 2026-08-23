@@ -21,6 +21,7 @@ Revision History:
 --*/
 
 #include "disk.h"
+#include <ndk/section_attribs.h>
 
 
 #ifdef DEBUG_USE_WPP
@@ -89,6 +90,7 @@ Return Value:
     // See if we should be allowing file systems to mount on partition zero.
     //
 
+#ifndef SARCH_XBOX
     TRY {
         HANDLE deviceKey = NULL;
 
@@ -162,6 +164,10 @@ Return Value:
                         PhysicalDeviceObject));
         }
     }
+#else
+    // No configuration manager: default to allowing volume mounts.
+    rootPartitionMountable = TRUE;
+#endif
 
     //
     // Create device objects for disk
@@ -272,11 +278,13 @@ Return Value:
 
     }
 
+#ifndef SARCH_XBOX
     //
     // Look for controllers that require special flags.
     //
 
     ClassScanForSpecial(fdoExtension, DiskBadControllers, DiskSetSpecialHacks);
+#endif
 
     //
     // Clear buffer for drive geometry.
@@ -348,6 +356,11 @@ Return Value:
 
     if (TEST_FLAG(Fdo->Characteristics, FILE_REMOVABLE_MEDIA)) {
 
+#ifndef SARCH_XBOX
+        /* Xbox has no FILE_REMOVABLE_MEDIA disk going through disk.c
+         * (the HDD is fixed; the DVD is owned by nxcdrom, not disk.c).
+         * Skipping these calls lets --gc-sections drop the Scsi devicemap
+         * registry helper and the MCN/GESN autorun.c machinery. */
         ClassUpdateInformationInRegistry( Fdo,
                                           "PhysicalDrive",
                                           fdoExtension->DeviceNumber,
@@ -358,6 +371,7 @@ Return Value:
         //
         ClassInitializeMediaChangeDetection(fdoExtension,
                                             (PUCHAR)"Disk");
+#endif
 
     } else {
 
@@ -451,6 +465,10 @@ Return Value:
         DiskReadSignature(Fdo);
         DiskReadDriveCapacity(Fdo);
 
+#ifndef SARCH_XBOX
+        /* Xbox HDDs are FATX-partitioned and atapi reports geometry from
+         * IDENTIFY DEVICE, so GeometrySource is never DiskGeometryUnknown.
+         * Gating drops DiskIsNT4Geometry + its IRP-on-stack MBR-read path. */
         if (diskData->GeometrySource == DiskGeometryUnknown)
         {
             //
@@ -469,6 +487,7 @@ Return Value:
                 diskData->GeometrySource = DiskGeometryFromNT4;
             }
         }
+#endif
     }
 
 #endif
@@ -520,6 +539,10 @@ Return Value:
     // and enable failure prediction polling.
     //
 
+#ifndef SARCH_XBOX
+    /* Failure-prediction polling lives in diskwmi.c (excluded from the
+     * Xbox build). The Xbox HDD has no SMART consumers, so leaving
+     * FailurePredictionCapability at FailurePredictionNone is correct. */
     if (InitSafeBootMode == 0) // __REACTOS__
     {
         DiskDetectFailurePrediction(fdoExtension,
@@ -556,7 +579,9 @@ Return Value:
                      Fdo,
                      status));
         }
-    } else {
+    } else
+#endif
+    {
 
         //
         // In safe boot mode we do not enable failure prediction, as perhaps
@@ -595,6 +620,10 @@ Return Value:
 
 } // end DiskInitFdo()
 
+#ifndef SARCH_XBOX
+/* Stop/remove callbacks are not planted on Xbox (classpnp's STOP/REMOVE
+ * arms are gated); keeping the bodies compiled anchors teardown imports
+ * (ZwMakeTemporaryObject, ClassDeleteSrbLookasideList). */
 NTSTATUS
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
 DiskStopDevice(
@@ -607,6 +636,7 @@ DiskStopDevice(
     UNREFERENCED_PARAMETER(Type);
     return STATUS_SUCCESS;
 }
+#endif /* SARCH_XBOX */
 
 NTSTATUS
 DiskGenerateDeviceName(
@@ -838,6 +868,7 @@ Return Value:
 }
 
 
+#ifndef SARCH_XBOX
 NTSTATUS
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
 DiskRemoveDevice(
@@ -904,6 +935,7 @@ Return Value:
 
     return STATUS_SUCCESS;
 }
+#endif /* SARCH_XBOX */
 
 
 NTSTATUS
@@ -955,6 +987,11 @@ Return Value:
     //       dependencies. Get the hotplug info instead
     //
 
+#ifndef SARCH_XBOX
+    /* Skipped on Xbox: classpnp IOCTL_STORAGE_GET_HOTPLUG_INFO handler
+     * is gated (HDD is fixed; DVD is owned by nxcdrom, not disk.c).
+     * hotplugInfo stays zero-initialised which gives us the same
+     * fixed-non-hotpluggable defaults the IOCTL would have populated. */
     {
         PIRP irp;
         KEVENT event;
@@ -988,6 +1025,7 @@ Return Value:
             NT_ASSERT(NT_SUCCESS(status));
         }
     }
+#endif
 
     //
     // Clear the DEV_WRITE_CACHE flag now  and set

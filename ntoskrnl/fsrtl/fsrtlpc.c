@@ -160,7 +160,9 @@ BOOLEAN
 NTAPI
 FsRtlInitSystem(VOID)
 {
+#ifndef SARCH_XBOX
     ULONG i;
+#endif
 
     /* Initialize the list for granted locks */
     ExInitializePagedLookasideList(&FsRtlFileLockLookasideList,
@@ -173,6 +175,7 @@ FsRtlInitSystem(VOID)
 
     FsRtlInitializeTunnels();
     FsRtlInitializeLargeMcbs();
+#ifndef SARCH_XBOX
     KeInitializeSemaphore(&FsRtlpUncSemaphore, 1, MAXLONG);
 
     /* Allocate the Resource Buffer */
@@ -186,6 +189,7 @@ FsRtlInitSystem(VOID)
     {
         ExInitializeResource(&FsRtlPagingIoResources[i]);
     }
+#endif
 
     return NT_SUCCESS(FsRtlInitializeWorkerThread());
 }

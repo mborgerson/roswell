@@ -25,9 +25,19 @@
 /* INCLUDES *****************************************************************/
 
 #include <rtl.h>
+#include <ndk/section_attribs.h>
 
 #define NDEBUG
 #include <debug.h>
+
+/* On Xbox the PE resource walker is only used at boot (boot-logo bitmap +
+ * bugcheck message-table caching; the runtime bugcheck reads the cached
+ * table directly), so keep it out of the resident image. */
+#ifdef SARCH_XBOX
+#define RES_INIT_SEG CODE_SEG("INIT")
+#else
+#define RES_INIT_SEG
+#endif
 
 NTSTATUS find_entry( PVOID BaseAddress, LDR_RESOURCE_INFO *info,
                      ULONG level, void **ret, int want_dir );
@@ -174,6 +184,7 @@ CompareResourceString(
  *
  * Find an entry by name in a resource directory
  */
+RES_INIT_SEG
 IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( IMAGE_RESOURCE_DIRECTORY *dir,
                                               LPCWSTR name, void *root,
                                               int want_dir )
@@ -208,6 +219,8 @@ IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( IMAGE_RESOURCE_DIRECTORY *dir,
     return NULL;
 }
 
+/* Stays resident: its i386 LdrAccessResource wrapper (a resident CRT-area
+ * thunk) calls it, so it can't move without that wrapper following. */
 #ifdef __i386__
 NTSTATUS NTAPI LdrpAccessResource( PVOID BaseAddress, IMAGE_RESOURCE_DATA_ENTRY *entry,
                                    void **ptr, ULONG *size )
@@ -250,6 +263,7 @@ static NTSTATUS LdrpAccessResource( PVOID BaseAddress, IMAGE_RESOURCE_DATA_ENTRY
 /*
  * @implemented
  */
+RES_INIT_SEG
 NTSTATUS NTAPI
 LdrFindResource_U(PVOID BaseAddress,
                   PLDR_RESOURCE_INFO ResourceInfo,

@@ -204,6 +204,7 @@ PspComputeQuantumAndPriority(IN PEPROCESS Process,
     /* Make sure that the process isn't idle */
     if (Process->PriorityClass != PROCESS_PRIORITY_CLASS_IDLE)
     {
+#ifndef SARCH_XBOX
         /* Does the process have a job? */
         if ((Process->Job) && (PspUseJobSchedulingClasses))
         {
@@ -212,6 +213,7 @@ PspComputeQuantumAndPriority(IN PEPROCESS Process,
                                                    SchedulingClass];
         }
         else
+#endif
         {
             /* Use calculated quantum */
             LocalQuantum = PspForegroundQuantum[i];
@@ -283,6 +285,7 @@ PsChangeQuantumTable(IN BOOLEAN Immediate,
         QuantumTable += MmIsThisAnNtAsSystem() ? 3 : 0;
     }
 
+#ifndef SARCH_XBOX
     /* Check if we're using long fixed quantums */
     if (QuantumTable == &PspFixedQuantums[3])
     {
@@ -294,6 +297,7 @@ PsChangeQuantumTable(IN BOOLEAN Immediate,
         /* Otherwise, we don't */
         PspUseJobSchedulingClasses = FALSE;
     }
+#endif
 
     /* Copy the selected table into the Foreground Quantum table */
     RtlCopyMemory(PspForegroundQuantum,
@@ -315,6 +319,7 @@ PsChangeQuantumTable(IN BOOLEAN Immediate,
             /* Make sure that the process isn't idle */
             if (Process->PriorityClass != PROCESS_PRIORITY_CLASS_IDLE)
             {
+#ifndef SARCH_XBOX
                 /* Does the process have a job? */
                 if ((Process->Job) && (PspUseJobSchedulingClasses))
                 {
@@ -322,6 +327,7 @@ PsChangeQuantumTable(IN BOOLEAN Immediate,
                     Quantum = PspJobSchedulingClasses[Process->Job->SchedulingClass];
                 }
                 else
+#endif
                 {
                     /* Use calculated quantum */
                     Quantum = PspForegroundQuantum[i];
@@ -342,6 +348,11 @@ PsChangeQuantumTable(IN BOOLEAN Immediate,
     }
 }
 
+#ifdef SARCH_XBOX
+/* Only boot-time Phase 0 creates a process; titles run ring 0 on
+   system-process threads and the user process-creation services are
+   compiled out. */
+#endif
 NTSTATUS
 NTAPI
 PspCreateProcess(OUT PHANDLE ProcessHandle,
@@ -383,6 +394,12 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
     /* Validate flags */
     if (Flags & ~PROCESS_CREATE_FLAGS_LEGAL_MASK) return STATUS_INVALID_PARAMETER;
 
+#ifdef SARCH_XBOX
+    /* Only PsCreateSystemProcess ever lands here on Xbox; ParentProcess is
+     * always NULL and jobs don't exist. */
+    Parent = NULL;
+    Affinity = KeActiveProcessors;
+#else
     /* Check for parent */
     if (ParentProcess)
     {
@@ -412,6 +429,7 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         Parent = NULL;
         Affinity = KeActiveProcessors;
     }
+#endif
 
     /* Save working set data */
     MinWs = PsMinimumWorkingSet;
@@ -458,6 +476,11 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         Process->DefaultHardErrorProcessing = SEM_FAILCRITICALERRORS;
     }
 
+#ifdef SARCH_XBOX
+    /* SectionHandle is always NULL on Xbox and there's no Parent to inherit
+     * a section from. */
+    SectionObject = NULL;
+#else
     /* Check for a section handle */
     if (SectionHandle)
     {
@@ -499,9 +522,14 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
             }
         }
     }
+#endif
 
     /* Save the pointer to the section object */
     Process->SectionObject = SectionObject;
+
+#ifndef SARCH_XBOX
+    /* Titles never set DebugPort/ExceptionPort and there's no Parent to
+     * inherit from, so the whole port-attach dance is unreachable. */
 
     /* Check for the debug port */
     if (DebugPort)
@@ -546,6 +574,7 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         /* Save the exception port */
         Process->ExceptionPort = ExceptionPortObject;
     }
+#endif
 
     /* Save the pointer to the section object */
     Process->SectionObject = SectionObject;
@@ -589,8 +618,10 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
                                       SEM_NOALIGNMENTFAULTEXCEPT));
 
     /* Duplicate Parent Token */
+#ifndef SARCH_XBOX
     Status = PspInitializeProcessSecurity(Process, Parent);
     if (!NT_SUCCESS(Status)) goto CleanupWithRef;
+#endif
 
     /* Set default priority class */
     Process->PriorityClass = PROCESS_PRIORITY_CLASS_NORMAL;
@@ -716,7 +747,11 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         DPRINT1("Jobs not yet supported\n");
     }
 
-    /* Create PEB only for User-Mode Processes */
+#ifndef SARCH_XBOX
+    /* Create PEB only for User-Mode Processes.  Xbox has no user mode --
+     * titles run ring 0 with no PEB and processes are never spawned through
+     * the NtCreateProcess(SectionHandle) path -- so this whole block is dead
+     * and MmCreatePeb GCs out. */
     if ((Parent) && (NeedsPeb))
     {
         //
@@ -746,6 +781,7 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         }
 
     }
+#endif
 
     /* The process can now be activated */
     KeAcquireGuardedMutex(&PspActiveProcessMutex);
@@ -787,6 +823,10 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
 
     /* Check if we have a parent other then the initial system process */
     Process->GrantedAccess = PROCESS_TERMINATE;
+#ifdef SARCH_XBOX
+    /* No SRM/tokens on Xbox -- grant everything. */
+    Process->GrantedAccess = PROCESS_ALL_ACCESS;
+#else
     if ((Parent) && (Parent != PsInitialSystemProcess))
     {
         /* Get the process's SD */
@@ -843,10 +883,15 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
         /* Set full granted access */
         Process->GrantedAccess = PROCESS_ALL_ACCESS;
     }
+#endif
 
     /* Set the Creation Time */
     KeQuerySystemTime(&Process->CreateTime);
 
+#ifdef SARCH_XBOX
+    /* Always kernel-mode callers; no PEB/TEB to publish either. */
+    *ProcessHandle = hProcess;
+#else
     /* Protect against bad user-mode pointer */
     _SEH2_TRY
     {
@@ -865,6 +910,7 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
        Status = _SEH2_GetExceptionCode();
     }
     _SEH2_END;
+#endif
 
     /* Run the Notification Routines */
     PspRunCreateProcessNotifyRoutines(Process, TRUE);
@@ -1351,6 +1397,19 @@ NtCreateProcessEx(OUT PHANDLE ProcessHandle,
                   IN HANDLE ExceptionPort OPTIONAL,
                   IN BOOLEAN InJob)
 {
+#ifdef SARCH_XBOX
+    /* No usermode -- titles never call this. */
+    UNREFERENCED_PARAMETER(ProcessHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(ParentProcess);
+    UNREFERENCED_PARAMETER(Flags);
+    UNREFERENCED_PARAMETER(SectionHandle);
+    UNREFERENCED_PARAMETER(DebugPort);
+    UNREFERENCED_PARAMETER(ExceptionPort);
+    UNREFERENCED_PARAMETER(InJob);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     NTSTATUS Status;
     PAGED_CODE();
@@ -1395,6 +1454,7 @@ NtCreateProcessEx(OUT PHANDLE ProcessHandle,
 
     /* Return Status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -1442,6 +1502,13 @@ NtOpenProcess(OUT PHANDLE ProcessHandle,
               IN POBJECT_ATTRIBUTES ObjectAttributes,
               IN PCLIENT_ID ClientId)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ProcessHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    UNREFERENCED_PARAMETER(ClientId);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode = KeGetPreviousMode();
     CLIENT_ID SafeClientId;
     ULONG Attributes = 0;
@@ -1613,6 +1680,7 @@ NtOpenProcess(OUT PHANDLE ProcessHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /* EOF */

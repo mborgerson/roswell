@@ -146,6 +146,10 @@ IsOffline(PUNICODE_STRING SymbolicName)
 
     Default = 0;
 
+#ifdef SARCH_XBOX
+    /* No persisted offline-volume list. */
+    IsOffline = 0;
+#else
     /* Query status */
     Status = RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE,
                                     OfflinePath,
@@ -156,6 +160,7 @@ IsOffline(PUNICODE_STRING SymbolicName)
     {
         IsOffline = 0;
     }
+#endif
 
     return (IsOffline != 0);
 }
@@ -322,9 +327,9 @@ QueryDeviceInformation(
     /* If we've been asked for a GPT drive letter */
     if (GptDriveLetter)
     {
-        /* Consider it has one */
+        /* Consider it has one (no GPT volumes here) */
         *GptDriveLetter = TRUE;
-
+#ifndef SARCH_XBOX
         if (!IsRemovable)
         {
             /* Query the GPT attributes */
@@ -346,14 +351,14 @@ QueryDeviceInformation(
                 *GptDriveLetter = FALSE;
             }
         }
+#endif
     }
 
-    /* If caller wants to know if this is a FT volume */
+    /* If caller wants to know if this is a FT volume (no FT volumes here) */
     if (IsFT)
     {
-        /* Suppose it's not */
         *IsFT = FALSE;
-
+#ifndef SARCH_XBOX
         /* FT volume can't be removable */
         if (!IsRemovable)
         {
@@ -395,6 +400,7 @@ QueryDeviceInformation(
                     *IsFT = FALSE; // Succeeded, so this cannot be a FT volume.
             }
         }
+#endif
     }
 
     /* If caller needs device name */
@@ -537,6 +543,7 @@ QueryDeviceInformation(
     /* If user wants to know about GUID */
     if (HasGuid)
     {
+#ifndef SARCH_XBOX
         /* Query device stable GUID */
         NTSTATUS IntStatus;
         IntStatus = MountMgrSendSyncDeviceIoCtl(IOCTL_MOUNTDEV_QUERY_STABLE_GUID,
@@ -547,6 +554,10 @@ QueryDeviceInformation(
                                                 sizeof(GUID),
                                                 FileObject);
         *HasGuid = NT_SUCCESS(IntStatus);
+#else
+        UNREFERENCED_PARAMETER(StableGuid);
+        *HasGuid = FALSE;
+#endif
     }
 
     ObDereferenceObject(DeviceObject);
@@ -718,6 +729,11 @@ VOID
 NTAPI
 MountMgrUnload(IN PDRIVER_OBJECT DriverObject)
 {
+#ifdef SARCH_XBOX
+    /* Xbox titles never unload drivers; the unload path is dead. */
+    UNREFERENCED_PARAMETER(DriverObject);
+    return;
+#else
     PLIST_ENTRY NextEntry;
     PUNIQUE_ID_WORK_ITEM WorkItem;
     PDEVICE_EXTENSION DeviceExtension;
@@ -813,6 +829,7 @@ MountMgrUnload(IN PDRIVER_OBJECT DriverObject)
 
     GlobalDeleteSymbolicLink(&DosDevicesMount);
     IoDeleteDevice(gdeviceObject);
+#endif
 }
 
 /**
@@ -824,6 +841,11 @@ BOOLEAN
 MountmgrReadNoAutoMount(
     _In_ PUNICODE_STRING RegistryPath)
 {
+#ifdef SARCH_XBOX
+    /* No persisted AutoMount preference. */
+    UNREFERENCED_PARAMETER(RegistryPath);
+    return FALSE;
+#else
     NTSTATUS Status;
     ULONG Result, Default = 0;
     RTL_QUERY_REGISTRY_TABLE QueryTable[2];
@@ -846,6 +868,7 @@ MountmgrReadNoAutoMount(
         Result = Default;
 
     return (Result != 0);
+#endif
 }
 
 /*
@@ -911,6 +934,13 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
                                     &IsFT);
     if (!NT_SUCCESS(Status))
     {
+#ifdef SARCH_XBOX
+        /* QueryDeviceInformation never fails for the fixed Xbox HDD/DVD; the
+         * offline-device list path is dead. */
+        FreePool(DeviceInformation->SymbolicName.Buffer);
+        FreePool(DeviceInformation);
+        return Status;
+#else
         KeWaitForSingleObject(&(DeviceExtension->DeviceLock), Executive, KernelMode, FALSE, NULL);
 
         for (NextEntry = DeviceExtension->OfflineDeviceListHead.Flink;
@@ -937,6 +967,7 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         KeReleaseSemaphore(&(DeviceExtension->DeviceLock), IO_NO_INCREMENT, 1, FALSE);
 
         return Status;
+#endif
     }
 
     /* Save gathered data */
@@ -954,6 +985,11 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         }
     }
 
+#ifdef SARCH_XBOX
+    /* PartMgr returns NOT_IMPLEMENTED for IOCTL_MOUNTDEV_QUERY_SUGGESTED_LINK_NAME. */
+    SuggestedLinkName.Buffer = NULL;
+    (void)UseOnlyIfThereAreNoOtherLinks;
+#else
     /* Check suggested link name */
     Status = QuerySuggestedLinkName(&(DeviceInformation->SymbolicName),
                                     &SuggestedLinkName,
@@ -968,6 +1004,7 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
     {
         DeviceInformation->SuggestedDriveLetter = (UCHAR)SuggestedLinkName.Buffer[LETTER_POSITION];
     }
+#endif
 
     /* Acquire driver exclusively */
     KeWaitForSingleObject(&(DeviceExtension->DeviceLock), Executive, KernelMode, FALSE, NULL);
@@ -1003,6 +1040,12 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         return STATUS_SUCCESS;
     }
 
+#ifdef SARCH_XBOX
+    /* No registry-backed mountpoint database on Xbox; always NOT_FOUND. */
+    Status = STATUS_NOT_FOUND;
+    SymLinks = NULL;
+    SymLinkCount = 0;
+#else
     /* Check if there are symlinks associated with our device in registry */
     Status = QuerySymbolicLinkNamesFromStorage(DeviceExtension,
                                                DeviceInformation,
@@ -1012,8 +1055,11 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
                                                &SymLinkCount,
                                                HasGuid,
                                                &StableGuid);
+#endif
 
-    /* If our device is a CD-ROM */
+#ifndef SARCH_XBOX
+    /* Xbox statically maps DVD/HDD via the kernel's symlink table -- no
+     * runtime CD-ROM drive-letter sweep. */
     if (RtlPrefixUnicodeString(&DeviceCdRom, &TargetDeviceName, TRUE))
     {
         LinkTarget.Length = 0;
@@ -1086,6 +1132,7 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
             }
         }
     }
+#endif
 
     /* Suggested name is no longer required */
     if (SuggestedLinkName.Buffer)
@@ -1100,12 +1147,19 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         SymLinkCount = 0;
     }
 
+#ifdef SARCH_XBOX
+    /* SavedLinksListHead is always empty on Xbox (no removal events). */
+    SavedLinkInformation = NULL;
+#else
     /* Now we queried them, remove the symlinks */
     SavedLinkInformation = RemoveSavedLinks(DeviceExtension, UniqueId);
+#endif
 
     IsDrvLetter = FALSE;
     IsOff = FALSE;
     IsVolumeName = FALSE;
+#ifndef SARCH_XBOX
+    /* No registry-backed mountpoint DB on Xbox -- SymLinkCount stays zero. */
     /* For all the symlinks */
     for (i = 0; i < SymLinkCount; i++)
     {
@@ -1179,6 +1233,7 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         InsertTailList(&(DeviceInformation->SymbolicLinksListHead),
                        &(SymlinkInformation->SymbolicLinksListEntry));
     }
+#endif
 
     /* Now, for all the recreated symlinks, notify their recreation */
     for (NextEntry = DeviceInformation->SymbolicLinksListHead.Flink;
@@ -1196,6 +1251,9 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         MountMgrFreeSavedLink(SavedLinkInformation);
     }
 
+#ifndef SARCH_XBOX
+    /* Volume{GUID} symlinks have no consumer on Xbox -- titles open by
+     * device path or drive letter directly. */
     /* If our device doesn't have a volume name */
     if (!IsVolumeName)
     {
@@ -1231,12 +1289,15 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
             }
         }
     }
+#endif
 
     /* If we found a drive letter, then, ignore the suggested one */
     if (IsDrvLetter)
     {
         DeviceInformation->SuggestedDriveLetter = 0;
     }
+#ifndef SARCH_XBOX
+    /* Xbox never enables AutomaticDriveLetter -- no autochk path. */
     /* Else, it's time to set up one */
     else if ((!DeviceExtension->NoAutoMount || DeviceInformation->Removable) &&
              DeviceExtension->AutomaticDriveLetter &&
@@ -1278,16 +1339,23 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
             }
         }
     }
+#endif
 
-    /* If that's a PnP device, register for notifications */
+#ifndef SARCH_XBOX
+    /* No PnP-driven device removal notifications on Xbox. */
     if (!ManuallyRegistered)
     {
         RegisterForTargetDeviceNotification(DeviceExtension, DeviceInformation);
     }
+#endif
 
     /* Finally, insert the device into our devices list */
     InsertTailList(&(DeviceExtension->DeviceListHead), &(DeviceInformation->DeviceListEntry));
 
+#ifdef SARCH_XBOX
+    /* PnP unique-id change notifications never fire on Xbox storage. */
+    NewUniqueId = NULL;
+#else
     /* Copy device unique ID */
     NewUniqueId = AllocatePool(UniqueId->UniqueIdLength + sizeof(MOUNTDEV_UNIQUE_ID));
     if (NewUniqueId)
@@ -1295,6 +1363,7 @@ MountMgrMountedDeviceArrival(IN PDEVICE_EXTENSION DeviceExtension,
         NewUniqueId->UniqueIdLength = UniqueId->UniqueIdLength;
         RtlCopyMemory(NewUniqueId->UniqueId, UniqueId->UniqueId, UniqueId->UniqueIdLength);
     }
+#endif
 
     /* Skip online notifications if the device is offline or a FT volume */
     if (IsOff || IsFT)
@@ -1362,6 +1431,12 @@ VOID
 MountMgrMountedDeviceRemoval(IN PDEVICE_EXTENSION DeviceExtension,
                              IN PUNICODE_STRING DeviceName)
 {
+#ifdef SARCH_XBOX
+    /* No PnP-driven storage removal on Xbox -- HDD/DVD are fixed. */
+    UNREFERENCED_PARAMETER(DeviceExtension);
+    UNREFERENCED_PARAMETER(DeviceName);
+    return;
+#else
     PLIST_ENTRY NextEntry, DeviceEntry;
     PUNIQUE_ID_REPLICATE UniqueIdReplicate;
     PSYMLINK_INFORMATION SymlinkInformation;
@@ -1516,6 +1591,7 @@ MountMgrMountedDeviceRemoval(IN PDEVICE_EXTENSION DeviceExtension,
 
     /* Release driver */
     KeReleaseSemaphore(&(DeviceExtension->DeviceLock), IO_NO_INCREMENT, 1, FALSE);
+#endif
 }
 
 /*
@@ -1526,6 +1602,12 @@ NTAPI
 MountMgrMountedDeviceNotification(IN PVOID NotificationStructure,
                                   IN PVOID Context)
 {
+#ifdef SARCH_XBOX
+    /* PnP interface change notifications never fire on Xbox storage. */
+    UNREFERENCED_PARAMETER(NotificationStructure);
+    UNREFERENCED_PARAMETER(Context);
+    return STATUS_SUCCESS;
+#else
     BOOLEAN OldState;
     PDEVICE_EXTENSION DeviceExtension;
     PDEVICE_INTERFACE_CHANGE_NOTIFICATION Notification;
@@ -1552,6 +1634,7 @@ MountMgrMountedDeviceNotification(IN PVOID NotificationStructure,
     PsSetThreadHardErrorsAreDisabled(PsGetCurrentThread(), OldState);
 
     return STATUS_SUCCESS;
+#endif
 }
 
 /*
@@ -1713,7 +1796,10 @@ DriverEntry(IN PDRIVER_OBJECT DriverObject,
     PDEVICE_OBJECT DeviceObject;
     PDEVICE_EXTENSION DeviceExtension;
 
+#ifndef SARCH_XBOX
+    /* No registry tree to create. */
     RtlCreateRegistryKey(RTL_REGISTRY_ABSOLUTE, DatabasePath);
+#endif
 
     Status = IoCreateDevice(DriverObject,
                             sizeof(DEVICE_EXTENSION),
@@ -1727,7 +1813,10 @@ DriverEntry(IN PDRIVER_OBJECT DriverObject,
         return Status;
     }
 
+#ifndef SARCH_XBOX
+    /* Folded into the kernel image -- never unloaded. */
     DriverObject->DriverUnload = MountMgrUnload;
+#endif
 
     DeviceExtension = DeviceObject->DeviceExtension;
     RtlZeroMemory(DeviceExtension, sizeof(DEVICE_EXTENSION));
@@ -1772,6 +1861,7 @@ DriverEntry(IN PDRIVER_OBJECT DriverObject,
     /* Register for device arrival & removal. Ask to be notified for already
      * present devices
      */
+#ifndef SARCH_XBOX
     Status = IoRegisterPlugPlayNotification(EventCategoryDeviceInterfaceChange,
                                             PNPNOTIFY_DEVICE_INTERFACE_INCLUDE_EXISTING_INTERFACES,
                                             &MountedDevicesGuid,
@@ -1785,20 +1875,33 @@ DriverEntry(IN PDRIVER_OBJECT DriverObject,
         IoDeleteDevice(DeviceObject);
         return Status;
     }
+#endif
 
+#ifndef SARCH_XBOX
+    /* No client ever opens the mount manager device here: drive letters
+     * and mount points are set up internally during boot.  Leave the
+     * slots at IopInvalidDeviceRequest. */
     DriverObject->MajorFunction[IRP_MJ_CREATE]         =
     DriverObject->MajorFunction[IRP_MJ_CLOSE]          = MountMgrCreateClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = MountMgrDeviceControl;
     DriverObject->MajorFunction[IRP_MJ_CLEANUP]        = MountMgrCleanup;
+#endif
+#ifndef SARCH_XBOX
+    /* NtShutdownSystem is not exported; shutdown goes through
+     * HalInitiateShutdown -> HalReturnToFirmware, which never walks the
+     * IO shutdown-notification list. */
     DriverObject->MajorFunction[IRP_MJ_SHUTDOWN]       = MountMgrShutdown;
+#endif
 
     gdeviceObject = DeviceObject;
 
+#ifndef SARCH_XBOX
     Status = IoRegisterShutdownNotification(DeviceObject);
     if (!NT_SUCCESS(Status))
     {
         IoDeleteDevice(DeviceObject);
     }
+#endif
 
     return Status;
 }

@@ -72,6 +72,15 @@ RtlCutoverTimeToSystemTime(IN PTIME_FIELDS CutoverTimeFields,
                            IN PLARGE_INTEGER CurrentTime,
                            IN BOOLEAN ThisYearsCutoverOnly)
 {
+#ifdef SARCH_XBOX
+    /* DST cutover only reachable from ExpGetTimeZoneId, which now returns
+     * early because RtlQueryTimeZoneInformation is stubbed.  Drop 420 B. */
+    UNREFERENCED_PARAMETER(CutoverTimeFields);
+    UNREFERENCED_PARAMETER(SystemTime);
+    UNREFERENCED_PARAMETER(CurrentTime);
+    UNREFERENCED_PARAMETER(ThisYearsCutoverOnly);
+    return FALSE;
+#else
     TIME_FIELDS AdjustedTimeFields;
     TIME_FIELDS CurrentTimeFields;
     TIME_FIELDS CutoverSystemTimeFields;
@@ -159,6 +168,7 @@ RtlCutoverTimeToSystemTime(IN PTIME_FIELDS CutoverTimeFields,
     SystemTime->QuadPart = CutoverSystemTime.QuadPart;
 
     return TRUE;
+#endif
 }
 
 

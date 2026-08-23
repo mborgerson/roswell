@@ -18,6 +18,8 @@
 TRAP_ENTRY HalpTrap0D, 0
 TRAP_ENTRY HalpApcInterrupt, KI_SOFTWARE_TRAP
 TRAP_ENTRY HalpClockInterrupt, KI_PUSH_FAKE_ERROR_CODE
+#ifndef SARCH_XBOX
 TRAP_ENTRY HalpProfileInterrupt, KI_PUSH_FAKE_ERROR_CODE
+#endif
 
 END

@@ -165,6 +165,7 @@ AtaDeviceSetMultipleMode(
     return Status;
 }
 
+#ifndef SARCH_XBOX
 static
 BOOLEAN
 AtaDeviceFilterAcpiTaskFile(
@@ -262,6 +263,7 @@ AtaDeviceExecuteAcpiTaskFile(
 
     return STATUS_SUCCESS;
 }
+#endif
 
 /*
  * See MSDN note:
@@ -364,9 +366,12 @@ AtaPortDeviceProcessConfig(
     if (Status == STATUS_ADAPTER_HARDWARE_ERROR)
         return Status;
 
+#ifndef SARCH_XBOX
+    /* No ACPI _GTF; GtfDataBuffer is always NULL */
     Status = AtaDeviceExecuteAcpiTaskFile(PortData, DevExt);
     if (Status == STATUS_ADAPTER_HARDWARE_ERROR)
         return Status;
+#endif
 
     Status = AtaDeviceLockSecurityModeFeatureCommands(PortData, DevExt);
     if (Status == STATUS_ADAPTER_HARDWARE_ERROR)

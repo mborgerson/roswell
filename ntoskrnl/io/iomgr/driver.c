@@ -97,12 +97,13 @@ IopDeleteDriver(IN PVOID ObjectBody)
         DriverExtension = NextDriverExtension;
     }
 
-    /* Check if the driver image is still loaded */
+#ifndef SARCH_XBOX
+    /* No MmLoadSystemImage on Xbox -- no driver section ever set. */
     if (DriverObject->DriverSection)
     {
-        /* Unload it */
         MmUnloadSystemImage(DriverObject->DriverSection);
     }
+#endif
 
     /* Check if it has a name */
     if (DriverObject->DriverName.Buffer)
@@ -125,6 +126,14 @@ IopGetDriverNames(
     _Out_ PUNICODE_STRING DriverName,
     _Out_opt_ PUNICODE_STRING ServiceName)
 {
+#ifdef SARCH_XBOX
+    /* No registry-driven driver names on Xbox; folded-in drivers are named
+     * directly in IopFoldedInDrivers and PnP load paths are unreachable. */
+    UNREFERENCED_PARAMETER(ServiceHandle);
+    UNREFERENCED_PARAMETER(DriverName);
+    UNREFERENCED_PARAMETER(ServiceName);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     UNICODE_STRING driverName = {.Buffer = NULL}, serviceName;
     PKEY_VALUE_FULL_INFORMATION kvInfo;
     NTSTATUS status;
@@ -276,6 +285,7 @@ Cleanup:
         ExFreePoolWithTag(driverName.Buffer, TAG_IO);
 
     return status;
+#endif
 }
 
 /**
@@ -1018,6 +1028,95 @@ Cleanup:
     return deviceAdded;
 }
 
+/* storage-stack drivers folded into the kernel image.
+ * Each is a static library linked into ntoskrnl with its DriverEntry renamed
+ * per-driver -- N drivers in one image would otherwise collide on the symbol.
+ * IopInitializeBootDrivers creates their driver objects with IoCreateDriver
+ * instead of loading .sys PEs; PnP then finds the objects by name (see
+ * PiAttachFilterDriversCallback) and skips the loadable-driver path. */
+extern DRIVER_INITIALIZE PciDriverEntry;
+extern DRIVER_INITIALIZE PciideDriverEntry;
+extern DRIVER_INITIALIZE AtapiDriverEntry;
+extern DRIVER_INITIALIZE DiskDriverEntry;
+extern DRIVER_INITIALIZE CdromDriverEntry;
+extern DRIVER_INITIALIZE PartmgrDriverEntry;
+extern DRIVER_INITIALIZE MountmgrDriverEntry;
+extern DRIVER_INITIALIZE XdvdfsDriverEntry;
+extern DRIVER_INITIALIZE VfatfsDriverEntry;
+
+/* Read once by IopInitializeBootDrivers (INIT); the DriverEntry pointers
+ * it holds are themselves INIT, so the table must be freed with them. */
+DATA_SEG("INITDATA")
+static const struct
+{
+    PCWSTR DriverName;
+    PDRIVER_INITIALIZE DriverInit;
+} IopFoldedInDrivers[] =
+{
+    { L"\\Driver\\Pci", PciDriverEntry },
+    { L"\\Driver\\pciide", PciideDriverEntry },
+    { L"\\Driver\\atapi", AtapiDriverEntry },
+    { L"\\Driver\\Disk", DiskDriverEntry },
+    { L"\\Driver\\Cdrom", CdromDriverEntry },
+    { L"\\Driver\\partmgr", PartmgrDriverEntry },
+    { L"\\Driver\\MountMgr", MountmgrDriverEntry },
+    /* xdvdfs is the only CD/DVD FSD; titles ship XDVDFS discs, no
+     * generic ISO9660 mount path. */
+    { L"\\FileSystem\\Xdvdfs", XdvdfsDriverEntry },
+    /* vfatfs also handles FATX -- name is misleading; vfatfs/fsctl.c
+     * recognises FATX16/FATX32 partitions and uses the same driver. */
+    { L"\\FileSystem\\Vfatfs", VfatfsDriverEntry },
+};
+
+/* Drivers whose IRP_MJ_PNP dispatch lives in INIT (the static device
+ * tree sends PnP only during boot enumeration; the dispatchers and the
+ * START/AddDevice chains under them are discarded with it). */
+DATA_SEG("INITDATA")
+static const PCWSTR IopSealedPnpDrivers[] =
+{
+    L"\\Driver\\Pci",
+    L"\\Driver\\pciide",
+    L"\\Driver\\atapi",
+    L"\\Driver\\Disk",
+    L"\\Driver\\Cdrom",
+    L"\\Driver\\partmgr",
+    L"\\Driver\\NxkBus",
+};
+
+/* Stamp the sealed drivers' PnP entry points before the INIT discard:
+ * a stray post-boot PnP IRP then fails with STATUS_INVALID_DEVICE_REQUEST
+ * instead of jumping through a dangling MajorFunction pointer into freed
+ * pages.  AddDevice pointers are INIT too -- NULL them. */
+VOID
+IopSealBootDriverPnp(VOID)
+{
+    ULONG i;
+
+    for (i = 0; i < RTL_NUMBER_OF(IopSealedPnpDrivers); i++)
+    {
+        UNICODE_STRING Name;
+        PDRIVER_OBJECT DriverObject;
+        NTSTATUS Status;
+
+        RtlInitUnicodeString(&Name, IopSealedPnpDrivers[i]);
+        Status = ObReferenceObjectByName(&Name,
+                                         OBJ_CASE_INSENSITIVE,
+                                         NULL,
+                                         0,
+                                         IoDriverObjectType,
+                                         KernelMode,
+                                         NULL,
+                                         (PVOID*)&DriverObject);
+        if (!NT_SUCCESS(Status))
+            continue;
+
+        DriverObject->MajorFunction[IRP_MJ_PNP] = IopInvalidDeviceRequest;
+        if (DriverObject->DriverExtension)
+            DriverObject->DriverExtension->AddDevice = NULL;
+        ObDereferenceObject(DriverObject);
+    }
+}
+
 /*
  * IopInitializeBootDrivers
  *
@@ -1044,7 +1143,8 @@ IopInitializeBootDrivers(VOID)
     PBOOT_DRIVER_LIST_ENTRY BootEntry;
     DPRINT("IopInitializeBootDrivers()\n");
 
-    /* Create the RAW FS built-in driver */
+    /* Create the RAW FS built-in driver -- needed for raw partition0 access
+     * (titles read the partition table that way). */
     RtlInitUnicodeString(&DriverName, L"\\FileSystem\\RAW");
 
     Status = IoCreateDriver(&DriverName, RawFsDriverEntry);
@@ -1053,6 +1153,38 @@ IopInitializeBootDrivers(VOID)
         /* Fail */
         return;
     }
+
+    /* create the storage-stack drivers folded into the kernel image -- done
+     * here, before device-tree enumeration, so PnP finds the driver objects
+     * by name and skips loading a .sys for them. */
+    for (i = 0; i < RTL_NUMBER_OF(IopFoldedInDrivers); i++)
+    {
+        RtlInitUnicodeString(&DriverName, IopFoldedInDrivers[i].DriverName);
+        Status = IoCreateDriver(&DriverName, IopFoldedInDrivers[i].DriverInit);
+        if (!NT_SUCCESS(Status))
+        {
+            DPRINT1("IoCreateDriver(%wZ) failed: 0x%08lx\n",
+                    &DriverName, Status);
+        }
+    }
+
+#ifdef SARCH_XBOX
+    /* No registry-driven driver list on Xbox.  Folded drivers above are
+     * the entire driver universe; NxkDriveDeviceTree drives their
+     * AddDevice entry points.  Skip the LoadOrderList traversal +
+     * IopInitializeBuiltinDriver loop entirely. */
+    UNREFERENCED_PARAMETER(KeyHandle);
+    UNREFERENCED_PARAMETER(BootEntry);
+    UNREFERENCED_PARAMETER(NextEntry2);
+    UNREFERENCED_PARAMETER(DriverInfo);
+    UNREFERENCED_PARAMETER(DriverInfoTag);
+    UNREFERENCED_PARAMETER(LdrEntry);
+    UNREFERENCED_PARAMETER(ListHead);
+    UNREFERENCED_PARAMETER(Index);
+    PnPBootDriversLoaded = TRUE;
+    DbgPrint("BOOT DRIVERS LOADED\n");
+    return;
+#else
 
     /* Get highest group order index */
     IopGroupIndex = PpInitGetGroupOrderIndex(NULL);
@@ -1214,6 +1346,7 @@ IopInitializeBootDrivers(VOID)
                         PiActionEnumDeviceTree,
                         NULL,
                         NULL);
+#endif /* !SARCH_XBOX */
 }
 
 CODE_SEG("INIT")
@@ -1221,6 +1354,11 @@ VOID
 FASTCALL
 IopInitializeSystemDrivers(VOID)
 {
+#ifdef SARCH_XBOX
+    /* Folded-in drivers were started by IopInitializeBootDrivers; nothing
+     * else to load on Xbox (no registry-driven driver list). */
+    return;
+#else
     PUNICODE_STRING *DriverList, *SavedList;
 
     PiPerformSyncDeviceAction(IopRootDeviceNode->PhysicalDeviceObject, PiActionEnumDeviceTree);
@@ -1228,9 +1366,12 @@ IopInitializeSystemDrivers(VOID)
     /* HACK: No system drivers on the BootCD */
     if (KeLoaderBlock->SetupLdrBlock) return;
 
-    /* Get the driver list */
+    /* Get the driver list.  CmGetSystemDriverList returns NULL when
+     * \Registry\Machine\System has no Services entries (our SARCH=xbox
+     * hive is intentionally empty -- every driver is linked into the
+     * kernel image, not loaded by name). */
     SavedList = DriverList = CmGetSystemDriverList();
-    ASSERT(DriverList);
+    if (!DriverList) return;
 
     /* Loop it */
     while (*DriverList)
@@ -1254,6 +1395,7 @@ IopInitializeSystemDrivers(VOID)
                         PiActionEnumDeviceTree,
                         NULL,
                         NULL);
+#endif
 }
 
 /*
@@ -1280,6 +1422,12 @@ IopInitializeSystemDrivers(VOID)
 NTSTATUS NTAPI
 IopUnloadDriver(PUNICODE_STRING DriverServiceName, BOOLEAN UnloadPnpDrivers)
 {
+#ifdef SARCH_XBOX
+    /* No usermode and no loadable drivers on Xbox; NtUnloadDriver is dead. */
+    UNREFERENCED_PARAMETER(DriverServiceName);
+    UNREFERENCED_PARAMETER(UnloadPnpDrivers);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     UNICODE_STRING Backslash = RTL_CONSTANT_STRING(L"\\");
     RTL_QUERY_REGISTRY_TABLE QueryTable[2];
     UNICODE_STRING ImagePath;
@@ -1501,6 +1649,7 @@ IopUnloadDriver(PUNICODE_STRING DriverServiceName, BOOLEAN UnloadPnpDrivers)
         /* Return unloading failure */
         return STATUS_INVALID_DEVICE_REQUEST;
     }
+#endif
 }
 
 VOID
@@ -1574,8 +1723,10 @@ IopReinitializeBootDrivers(VOID)
                                             &DriverBootReinitListLock);
     }
 
+#ifndef SARCH_XBOX
     /* Wait for all device actions being finished*/
     KeWaitForSingleObject(&PiEnumerationFinished, Executive, KernelMode, FALSE, NULL);
+#endif
 }
 
 /* PUBLIC FUNCTIONS ***********************************************************/
@@ -1597,6 +1748,7 @@ IoCreateDriver(
     ULONG ObjectSize;
     PDRIVER_OBJECT DriverObject;
     UNICODE_STRING ServiceKeyName;
+    UNICODE_STRING RegistryPath;
     HANDLE hDriver;
     ULONG i, RetryCount = 0;
 
@@ -1723,9 +1875,47 @@ try_again:
         return Status;
     }
 
+    /* built-in drivers are created here, not loaded as .sys PEs.
+     * Their DriverEntry routines expect the service registry path the PE
+     * loader would otherwise pass (...\Services\<name>) -- atapi, for one,
+     * copies it -- so build it from the driver name rather than passing NULL. */
+    RegistryPath.Length = 0;
+    RegistryPath.MaximumLength = 0;
+    RegistryPath.Buffer = NULL;
+    {
+        const WCHAR ServicesPath[] =
+            L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
+        UNICODE_STRING ServiceName = LocalDriverName;
+        ULONG k;
+
+        /* The service name is the driver name's last path component. */
+        for (k = 0; k < LocalDriverName.Length / sizeof(WCHAR); k++)
+        {
+            if (LocalDriverName.Buffer[k] == L'\\')
+            {
+                ServiceName.Buffer = &LocalDriverName.Buffer[k + 1];
+                ServiceName.Length = LocalDriverName.Length -
+                                     (USHORT)((k + 1) * sizeof(WCHAR));
+            }
+        }
+
+        RegistryPath.MaximumLength = sizeof(ServicesPath) + ServiceName.Length;
+        RegistryPath.Buffer = ExAllocatePoolWithTag(PagedPool,
+                                                    RegistryPath.MaximumLength,
+                                                    TAG_IO);
+        if (RegistryPath.Buffer)
+        {
+            RtlAppendUnicodeToString(&RegistryPath, ServicesPath);
+            RtlAppendUnicodeStringToString(&RegistryPath, &ServiceName);
+        }
+    }
+
     /* Finally, call its init function */
     DPRINT("Calling driver entrypoint at %p\n", InitializationFunction);
-    Status = InitializationFunction(DriverObject, NULL);
+    Status = InitializationFunction(DriverObject,
+                                    RegistryPath.Buffer ? &RegistryPath : NULL);
+    if (RegistryPath.Buffer)
+        ExFreePoolWithTag(RegistryPath.Buffer, TAG_IO);
     if (!NT_SUCCESS(Status))
     {
         /* If it didn't work, then kill the object */
@@ -1956,6 +2146,24 @@ IopLoadDriver(
     PLDR_DATA_TABLE_ENTRY ModuleObject;
     PVOID BaseAddress;
 
+#ifdef SARCH_XBOX
+    /* Our INRAM image ships no driver .sys files -- every driver the kernel
+     * uses is folded into ntoskrnl.exe (IopFoldedInDrivers above), and PnP
+     * resolves those via ObReferenceObjectByName in devaction.c BEFORE
+     * falling back to IopLoadDriver.  By the time control reaches here the
+     * service name does not match any folded-in driver and the .sys we'd
+     * try to load doesn't exist; short-circuit before paying ZwOpenFile +
+     * FSD walk to STATUS_OBJECT_NAME_NOT_FOUND for each phantom (vga /
+     * isapnp / vgapnp / usbohci / ...) the upstream hivesys.inf
+     * CriticalDeviceDatabase points at.  Saves ~150 ms out of Phase 1 boot
+     * driver init and silences ~15 lines of bogus failure spam in the log. */
+    UNREFERENCED_PARAMETER(ImagePath);
+    UNREFERENCED_PARAMETER(Status);
+    UNREFERENCED_PARAMETER(ModuleObject);
+    UNREFERENCED_PARAMETER(BaseAddress);
+    *DriverObject = NULL;
+    return STATUS_DRIVER_UNABLE_TO_LOAD;
+#else
     PKEY_VALUE_FULL_INFORMATION kvInfo;
     Status = IopGetRegistryValue(ServiceHandle, L"ImagePath", &kvInfo);
     if (NT_SUCCESS(Status))
@@ -2063,6 +2271,7 @@ IopLoadDriver(
     KeLeaveCriticalRegion();
 
     return Status;
+#endif
 }
 
 static
@@ -2164,6 +2373,13 @@ IopDoLoadUnloadDriver(
 NTSTATUS NTAPI
 NtLoadDriver(IN PUNICODE_STRING DriverServiceName)
 {
+#ifdef SARCH_XBOX
+    /* No usermode and no loadable drivers on Xbox; titles never call
+     * NtLoadDriver.  Stubbing here drops the IopDoLoadUnloadDriver
+     * + IopLoadUnloadDriverWorker work-item path entirely. */
+    UNREFERENCED_PARAMETER(DriverServiceName);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     UNICODE_STRING CapturedServiceName = { 0, 0, NULL };
     KPROCESSOR_MODE PreviousMode;
     PDRIVER_OBJECT DriverObject;
@@ -2204,6 +2420,7 @@ NtLoadDriver(IN PUNICODE_STRING DriverServiceName)
 
     ReleaseCapturedUnicodeString(&CapturedServiceName, PreviousMode);
     return Status;
+#endif
 }
 
 /*

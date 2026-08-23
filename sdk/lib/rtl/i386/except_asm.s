@@ -14,8 +14,18 @@
 
 EXTERN _RtlpCheckForActiveDebugger@0:PROC
 EXTERN _RtlDispatchException@8:PROC
+#ifdef SARCH_XBOX
+/* Zw == Nt on Xbox; the Zw symbols no longer exist. */
+EXTERN _NtContinue@8:PROC
+EXTERN _NtRaiseException@12:PROC
+#define ZW_CONTINUE _NtContinue@8
+#define ZW_RAISE_EXCEPTION _NtRaiseException@12
+#else
 EXTERN _ZwContinue@8:PROC
 EXTERN _ZwRaiseException@12:PROC
+#define ZW_CONTINUE _ZwContinue@8
+#define ZW_RAISE_EXCEPTION _ZwRaiseException@12
+#endif
 
 #define ExceptionContinueSearch     1
 #define ExceptionNestedException    2
@@ -296,7 +306,7 @@ _RtlRaiseException@4:
     mov ecx, esp
     push 0
     push ecx
-    call  _ZwContinue@8
+    call  ZW_CONTINUE
     jmp RaiseStatus1
 
 DebuggerActive1:
@@ -306,7 +316,7 @@ DebuggerActive1:
     push 1
     push ecx
     push [ebp+8]
-    call _ZwRaiseException@12
+    call ZW_RAISE_EXCEPTION
     jmp RaiseStatus1
 
 RaiseException:
@@ -316,7 +326,7 @@ RaiseException:
     push 0
     push ecx
     push [ebp+8]
-    call _ZwRaiseException@12
+    call ZW_RAISE_EXCEPTION
 
 RaiseStatus1:
 
@@ -378,7 +388,7 @@ _RtlRaiseStatus@4:
     push 0
     push edx
     push ecx
-    call _ZwRaiseException@12
+    call ZW_RAISE_EXCEPTION
     jmp RaiseStatus2
 
 DebuggerActive2:
@@ -388,7 +398,7 @@ DebuggerActive2:
     push 1
     push edx
     push ecx
-    call _ZwRaiseException@12
+    call ZW_RAISE_EXCEPTION
 
 RaiseStatus2:
 

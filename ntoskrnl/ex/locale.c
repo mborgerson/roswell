@@ -252,6 +252,12 @@ NTAPI
 ExpGetCurrentUserUILanguage(IN PCWSTR MuiName,
                             OUT LANGID* LanguageId)
 {
+#ifdef SARCH_XBOX
+    /* Locale is fixed to en-US; no registry. */
+    UNREFERENCED_PARAMETER(MuiName);
+    *LanguageId = 0x0409;
+    return STATUS_SUCCESS;
+#else
     UCHAR ValueBuffer[256];
     PKEY_VALUE_PARTIAL_INFORMATION ValueInfo;
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -318,6 +324,7 @@ ExpGetCurrentUserUILanguage(IN PCWSTR MuiName,
     /* Close the user key and return */
     ZwClose(UserKey);
     return Status;
+#endif
 }
 
 NTSTATUS

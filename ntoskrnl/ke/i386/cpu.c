@@ -22,6 +22,17 @@ UCHAR KiDoubleFaultTSS[KTSS_IO_MAPS];
 /* The TSS to use for NMI Fault Traps (INT 0x2) */
 UCHAR KiNMITSS[KTSS_IO_MAPS];
 
+#ifdef SARCH_XBOX
+/* The kernel-owned main TSS (minimal, no IOPM -- Xbox runs ring 0, like the
+ * retail kernel), so the loader's TSS page can be reclaimed. */
+UCHAR KiInitialTss[KTSS_IO_MAPS];
+
+/* The kernel-owned GDT (.data), relocated from the loader's at boot so the
+ * loader's GDT page can be reclaimed.  16 entries cover all KGDT_* slots. */
+KGDTENTRY KiGdt[16];
+KDESCRIPTOR KiGdtDescriptor = { 0, 0, (ULONG_PTR)KiGdt };
+#endif
+
 /* CPU Features and Flags */
 ULONG KeI386CpuType;
 ULONG KeI386CpuStep;
@@ -56,11 +67,13 @@ volatile LONG KiTbFlushTimeStamp;
 
 /* CPU Signatures */
 static const CHAR CmpIntelID[]       = "GenuineIntel";
+#ifndef SARCH_XBOX
 static const CHAR CmpAmdID[]         = "AuthenticAMD";
 static const CHAR CmpCyrixID[]       = "CyrixInstead";
 static const CHAR CmpTransmetaID[]   = "GenuineTMx86";
 static const CHAR CmpCentaurID[]     = "CentaurHauls";
 static const CHAR CmpRiseID[]        = "RiseRiseRise";
+#endif
 
 typedef union _CPU_SIGNATURE
 {
@@ -126,6 +139,7 @@ KiGetCpuVendor(VOID)
     {
         return CPU_INTEL;
     }
+#ifndef SARCH_XBOX
     else if (!strcmp(Prcb->VendorString, CmpAmdID))
     {
         return CPU_AMD;
@@ -153,6 +167,7 @@ KiGetCpuVendor(VOID)
 
     /* Unknown CPU */
     DPRINT1("%s CPU support not fully tested!\n", Prcb->VendorString);
+#endif
     return CPU_UNKNOWN;
 }
 
@@ -835,8 +850,20 @@ Ki386InitializeTss(IN PKTSS Tss,
     TssEntry->HighWord.Bits.Type = I386_TSS;
     TssEntry->HighWord.Bits.Pres = 1;
     TssEntry->HighWord.Bits.Dpl = 0;
+#ifdef SARCH_XBOX
+    /* Own a minimal main TSS: the loader no longer provides one, so set the
+     * descriptor base/limit to point at KiInitialTss and skip the (ring-3-only)
+     * I/O permission map -- matching the retail kernel's 104-byte TSS. */
+    TssEntry->BaseLow = (USHORT)((ULONG_PTR)Tss & 0xFFFF);
+    TssEntry->HighWord.Bytes.BaseMid = (UCHAR)((ULONG_PTR)Tss >> 16);
+    TssEntry->HighWord.Bytes.BaseHi = (UCHAR)((ULONG_PTR)Tss >> 24);
+    TssEntry->LimitLow = KTSS_IO_MAPS - 1;
+    TssEntry->HighWord.Bits.LimitHi = 0;
+    KiInitializeTSS(Tss);
+#else
     KiInitializeTSS2(Tss, TssEntry);
     KiInitializeTSS(Tss);
+#endif
 
     /* Load the task register */
     Ke386SetTr(KGDT_TSS);
@@ -1019,6 +1046,7 @@ KiInitializeMachineType(VOID)
     KeI386MachineType = KeLoaderBlock->u.I386.MachineType & 0x000FF;
 }
 
+#ifndef SARCH_XBOX
 CODE_SEG("INIT")
 ULONG_PTR
 NTAPI
@@ -1032,12 +1060,18 @@ KiLoadFastSyscallMachineSpecificRegisters(IN ULONG_PTR Context)
     __writemsr(0x176, (ULONG_PTR)KiFastCallEntry);
     return 0;
 }
+#endif
 
 CODE_SEG("INIT")
 VOID
 NTAPI
 KiRestoreFastSyscallReturnState(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No userland; SYSENTER, KiServiceExit and the syscall exit stubs
+     * are not built. */
+    KeFeatureBits &= ~KF_FAST_SYSCALL;
+#else
     /* Check if the CPU Supports fast system call */
     if (KeFeatureBits & KF_FAST_SYSCALL)
     {
@@ -1065,6 +1099,7 @@ KiRestoreFastSyscallReturnState(VOID)
         KiFastCallExitHandler = KiSystemCallTrapReturn;
         DPRINT1("No support for SYSENTER detected.\n");
     }
+#endif
 }
 
 CODE_SEG("INIT")

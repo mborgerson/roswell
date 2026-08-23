@@ -476,6 +476,13 @@ MxGetNextPage(IN PFN_NUMBER PageCount)
 {
     PFN_NUMBER Pfn;
 
+    /* nxkrnl TEMP: log every bring-up physical allocation + caller so we can
+     * find what to trim to fit the 64 MB budget (remove after tuning). */
+    if (PageCount >= 16)
+        DPRINT1("MxGetNextPage: %lu pages (%lu KB) caller=%p\n",
+                (ULONG)PageCount, (ULONG)((PageCount << PAGE_SHIFT) >> 10),
+                __builtin_return_address(0));
+
     /* Make sure we have enough pages */
     if (PageCount > MxFreeDescriptor->PageCount)
     {
@@ -959,7 +966,7 @@ MiBuildPfnDatabaseFromLoaderBlock(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
                     {
                         /* Add it to the free list */
                         Pfn1->u3.e1.CacheAttribute = MiNonCached;
-                        MiInsertPageInFreeList(PageFrameIndex);
+                        NxkPageSupplyReturn(PageFrameIndex);
                     }
 
                     /* Go to the next page */
@@ -1065,6 +1072,50 @@ VOID
 NTAPI
 MiInitializePfnDatabase(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 {
+#ifdef NXK_MM_PHYS
+    /* No PFN contents to build: hand every free-typed descriptor page
+     * to the nxmm supply.  Boot-consumed pages (page tables, the
+     * database frame) were carved out of MxFreeDescriptor before this
+     * runs, so the walk is exact. */
+    PLIST_ENTRY NextEntry;
+    KIRQL OldIrql;
+
+    for (NextEntry = LoaderBlock->MemoryDescriptorListHead.Flink;
+         NextEntry != &LoaderBlock->MemoryDescriptorListHead;
+         NextEntry = NextEntry->Flink)
+    {
+        PMEMORY_ALLOCATION_DESCRIPTOR MdBlock =
+            CONTAINING_RECORD(NextEntry, MEMORY_ALLOCATION_DESCRIPTOR,
+                              ListEntry);
+        PFN_NUMBER Page, Count;
+
+        switch (MdBlock->MemoryType)
+        {
+            case LoaderFree:
+            case LoaderLoadedProgram:
+            case LoaderFirmwareTemporary:
+            case LoaderOsloaderStack:
+                break;
+            default:
+                continue;
+        }
+
+        Page = MdBlock->BasePage;
+        Count = MdBlock->PageCount;
+        if (Page > MmHighestPhysicalPage) break;
+        if (Page + Count > MmHighestPhysicalPage + 1)
+            Count = MmHighestPhysicalPage + 1 - Page;
+
+        OldIrql = MiAcquirePfnLock();
+        while (Count--)
+        {
+            if (Page != 0) NxkPageSupplyReturn(Page);
+            Page++;
+        }
+        MiReleasePfnLock(OldIrql);
+    }
+
+#else
     /* Scan memory and start setting up PFN entries */
     MiBuildPfnDatabaseFromPages(LoaderBlock);
 
@@ -1076,6 +1127,7 @@ MiInitializePfnDatabase(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 
     /* Finally add the pages for the PFN database itself */
     MiBuildPfnDatabaseSelf();
+#endif
 }
 #endif /* !_M_AMD64 */
 
@@ -1091,6 +1143,45 @@ MmFreeLoaderBlock(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     PMMPFN Pfn1;
     KIRQL OldIrql;
     PPHYSICAL_MEMORY_RUN Buffer, Entry;
+
+#ifdef NXK_MM_PHYS
+    /* nxmm tracks free pages in NxkPageSupply, not the MMPFN refcount the
+     * generic path below pokes (which is unreliable graffiti on the shared
+     * frame).  Return only the transient-heap loader pages -- on Xbox that
+     * is the LoaderBlock + LoaderAux (LoaderOsloaderHeap), dead now that
+     * Phase 1 finished and KeLoaderBlock was nulled.  The live structures
+     * (PD/PT/GDT/IDT/TSS/PCR) are LoaderMemoryData and stay put.  Collect
+     * the runs before freeing any page, since the descriptor list itself
+     * lives in one of the pages we are about to hand back. */
+    {
+        extern VOID NTAPI NxkPageSupplyReturn(PFN_NUMBER Page);
+        struct { PFN_NUMBER Base, Count; } Runs[8];
+        ULONG RunCount = 0, r, p;
+        PLIST_ENTRY Next;
+        PMEMORY_ALLOCATION_DESCRIPTOR Md;
+        KIRQL PfnIrql;
+
+        for (Next = LoaderBlock->MemoryDescriptorListHead.Flink;
+             Next != &LoaderBlock->MemoryDescriptorListHead && RunCount < 8;
+             Next = Next->Flink)
+        {
+            Md = CONTAINING_RECORD(Next, MEMORY_ALLOCATION_DESCRIPTOR, ListEntry);
+            if (Md->MemoryType == LoaderOsloaderHeap)
+            {
+                Runs[RunCount].Base = Md->BasePage;
+                Runs[RunCount].Count = Md->PageCount;
+                RunCount++;
+            }
+        }
+
+        PfnIrql = MiAcquirePfnLock();
+        for (r = 0; r < RunCount; r++)
+            for (p = 0; p < Runs[r].Count; p++)
+                NxkPageSupplyReturn(Runs[r].Base + p);
+        MiReleasePfnLock(PfnIrql);
+    }
+    return;
+#endif
 
     /* Loop the descriptors in order to count them */
     i = 0;
@@ -1159,7 +1250,7 @@ MmFreeLoaderBlock(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
             {
                 /* Set the new PTE address and put this page into the free list */
                 Pfn1->PteAddress = (PMMPTE)(BasePage << PAGE_SHIFT);
-                MiInsertPageInFreeList(BasePage);
+                NxkPageSupplyReturn(BasePage);
                 LoaderPages++;
             }
             else if (BasePage)
@@ -1236,11 +1327,12 @@ NTAPI
 MiCreateMemoryEvent(IN PUNICODE_STRING Name,
                     OUT PKEVENT *Event)
 {
-    PACL Dacl;
     HANDLE EventHandle;
-    ULONG DaclLength;
     NTSTATUS Status;
     OBJECT_ATTRIBUTES ObjectAttributes;
+#ifndef SARCH_XBOX
+    PACL Dacl;
+    ULONG DaclLength;
     SECURITY_DESCRIPTOR SecurityDescriptor;
 
     /* Create the SD */
@@ -1297,6 +1389,14 @@ MiCreateMemoryEvent(IN PUNICODE_STRING Name,
                                OBJ_KERNEL_HANDLE | OBJ_PERMANENT,
                                NULL,
                                &SecurityDescriptor);
+#else
+    /* No DACL on Xbox; create the event without a security descriptor. */
+    InitializeObjectAttributes(&ObjectAttributes,
+                               Name,
+                               OBJ_KERNEL_HANDLE | OBJ_PERMANENT,
+                               NULL,
+                               NULL);
+#endif
 
     /* Create the event */
     Status = ZwCreateEvent(&EventHandle,
@@ -1304,9 +1404,11 @@ MiCreateMemoryEvent(IN PUNICODE_STRING Name,
                            &ObjectAttributes,
                            NotificationEvent,
                            FALSE);
+#ifndef SARCH_XBOX
 CleanUp:
     /* Free the DACL */
     ExFreePoolWithTag(Dacl, TAG_DACL);
+#endif
 
     /* Check if this is the success path */
     if (NT_SUCCESS(Status))
@@ -1330,12 +1432,14 @@ BOOLEAN
 NTAPI
 MiInitializeMemoryEvents(VOID)
 {
+#ifndef SARCH_XBOX
     UNICODE_STRING LowString = RTL_CONSTANT_STRING(L"\\KernelObjects\\LowMemoryCondition");
     UNICODE_STRING HighString = RTL_CONSTANT_STRING(L"\\KernelObjects\\HighMemoryCondition");
     UNICODE_STRING LowPagedPoolString = RTL_CONSTANT_STRING(L"\\KernelObjects\\LowPagedPoolCondition");
     UNICODE_STRING HighPagedPoolString = RTL_CONSTANT_STRING(L"\\KernelObjects\\HighPagedPoolCondition");
     UNICODE_STRING LowNonPagedPoolString = RTL_CONSTANT_STRING(L"\\KernelObjects\\LowNonPagedPoolCondition");
     UNICODE_STRING HighNonPagedPoolString = RTL_CONSTANT_STRING(L"\\KernelObjects\\HighNonPagedPoolCondition");
+#endif
     NTSTATUS Status;
 
     /* Check if we have a registry setting */
@@ -1382,7 +1486,23 @@ MiInitializeMemoryEvents(VOID)
     /* Make sure high threshold is actually higher than the low */
     MmHighMemoryThreshold = max(MmHighMemoryThreshold, MmLowMemoryThreshold);
 
-    /* Create the memory events for all the thresholds */
+    /* Create the memory events for all the thresholds.  Xbox has no usermode
+       and no titles consume the \KernelObjects event names, so create unnamed
+       events to keep the path strings out of .rdata. */
+#ifdef SARCH_XBOX
+    Status = MiCreateMemoryEvent(NULL, &MiLowMemoryEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+    Status = MiCreateMemoryEvent(NULL, &MiHighMemoryEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+    Status = MiCreateMemoryEvent(NULL, &MiLowPagedPoolEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+    Status = MiCreateMemoryEvent(NULL, &MiHighPagedPoolEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+    Status = MiCreateMemoryEvent(NULL, &MiLowNonPagedPoolEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+    Status = MiCreateMemoryEvent(NULL, &MiHighNonPagedPoolEvent);
+    if (!NT_SUCCESS(Status)) return FALSE;
+#else
     Status = MiCreateMemoryEvent(&LowString, &MiLowMemoryEvent);
     if (!NT_SUCCESS(Status)) return FALSE;
     Status = MiCreateMemoryEvent(&HighString, &MiHighMemoryEvent);
@@ -1395,9 +1515,12 @@ MiInitializeMemoryEvents(VOID)
     if (!NT_SUCCESS(Status)) return FALSE;
     Status = MiCreateMemoryEvent(&HighNonPagedPoolString, &MiHighNonPagedPoolEvent);
     if (!NT_SUCCESS(Status)) return FALSE;
+#endif
 
+#ifndef NXK_MM_PHYS
     /* Now setup the pool events */
     MiInitializePoolEvents();
+#endif
 
     /* Set the initial event state */
     MiNotifyMemoryEvents();
@@ -1749,6 +1872,7 @@ MiBuildPagedPool(VOID)
     KIRQL OldIrql;
     SIZE_T Size, NumberOfPages, NumberOfPdes;
     ULONG BitMapSize;
+    DPRINT1("MiBuildPagedPool ENTER (PagedPoolStart=%p)\n", MmPagedPoolStart);
 #if (_MI_PAGING_LEVELS >= 3)
     MMPPE TempPpe = ValidKernelPpe;
     PMMPPE PointerPpe;
@@ -1861,7 +1985,7 @@ MiBuildPagedPool(VOID)
         if (!PointerPpe->u.Hard.Valid)
         {
             /* It is not, so map a fresh zeroed page */
-            TempPpe.u.Hard.PageFrameNumber = MiRemoveZeroPage(0);
+            TempPpe.u.Hard.PageFrameNumber = NxkPageSupplyTakeZero(0);
             MI_WRITE_VALID_PPE(PointerPpe, TempPpe);
             MiInitializePfnForOtherProcess(TempPpe.u.Hard.PageFrameNumber,
                                            (PMMPTE)PointerPpe,
@@ -1887,7 +2011,7 @@ MiBuildPagedPool(VOID)
     /* Allocate a page and map the first paged pool PDE */
     MI_SET_USAGE(MI_USAGE_PAGED_POOL);
     MI_SET_PROCESS2("Kernel");
-    PageFrameIndex = MiRemoveZeroPage(0);
+    PageFrameIndex = NxkPageSupplyTakeZero(0);
     TempPde.u.Hard.PageFrameNumber = PageFrameIndex;
     MI_WRITE_VALID_PDE(PointerPde, TempPde);
 #if (_MI_PAGING_LEVELS >= 3)
@@ -2400,8 +2524,10 @@ MmArmInitSystem(IN ULONG Phase,
             }
         }
 
+#ifndef SARCH_XBOX
         /* Look for large page cache entries that need caching */
         MiSyncCachedRanges();
+#endif
 
         /* Loop for HAL Heap I/O device mappings that need coherency tracking */
         MiAddHalIoMappings();
@@ -2409,11 +2535,13 @@ MmArmInitSystem(IN ULONG Phase,
         /* Set the initial resident page count */
         MmResidentAvailablePages = MmAvailablePages - 32;
 
+#ifndef SARCH_XBOX
         /* Initialize large page structures on PAE/x64, and MmProcessList on x86 */
         MiInitializeLargePageSupport();
 
         /* Check if the registry says any drivers should be loaded with large pages */
         MiInitializeDriverLargePageList();
+#endif
 
         /* Relocate the boot drivers into system PTE space and fixup their PFNs */
         MiReloadBootLoadedDrivers(LoaderBlock);

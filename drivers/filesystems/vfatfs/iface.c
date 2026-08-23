@@ -60,7 +60,9 @@ DriverEntry(
      * has been detected:
     VfatGlobalData->Flags = VFAT_BREAK_ON_CORRUPTION; */
 
-    /* Delayed close support */
+#ifndef SARCH_XBOX
+    /* Delayed close support (dead code: the only FCB_DELAYED_CLOSE setter
+     * is disabled upstream) */
     ExInitializeFastMutex(&VfatGlobalData->CloseMutex);
     InitializeListHead(&VfatGlobalData->CloseListHead);
     VfatGlobalData->CloseCount = 0;
@@ -72,6 +74,7 @@ DriverEntry(
         IoDeleteDevice(DeviceObject);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
+#endif
 
     DeviceObject->Flags |= DO_DIRECT_IO;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = VfatBuildRequest;
@@ -84,7 +87,10 @@ DriverEntry(
     DriverObject->MajorFunction[IRP_MJ_DIRECTORY_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_QUERY_VOLUME_INFORMATION] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_SET_VOLUME_INFORMATION] = VfatBuildRequest;
+#ifndef SARCH_XBOX
+    /* Nothing sends IRP_MJ_SHUTDOWN on Xbox; reboot drives the SMC directly. */
     DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = VfatShutdown;
+#endif
     DriverObject->MajorFunction[IRP_MJ_LOCK_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_CLEANUP] = VfatBuildRequest;
@@ -110,8 +116,10 @@ DriverEntry(
                                     NULL, NULL, 0, sizeof(VFATCCB), TAG_CCB, 0);
     ExInitializeNPagedLookasideList(&VfatGlobalData->IrpContextLookasideList,
                                     NULL, NULL, 0, sizeof(VFAT_IRP_CONTEXT), TAG_IRP, 0);
+#ifndef SARCH_XBOX
     ExInitializePagedLookasideList(&VfatGlobalData->CloseContextLookasideList,
                                    NULL, NULL, 0, sizeof(VFAT_CLOSE_CONTEXT), TAG_CLOSE, 0);
+#endif
 
     ExInitializeResourceLite(&VfatGlobalData->VolumeListLock);
     InitializeListHead(&VfatGlobalData->VolumeListHead);

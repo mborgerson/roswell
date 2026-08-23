@@ -53,8 +53,12 @@ typedef enum _BBLT_HORZ_ALIGNMENT
 
 /*
  * Enable this define when Inbv will support rotating progress bar.
+ * Left off on Xbox: the static progress bar is enough and this drops
+ * the rotating-line bitmap and its animation thread.
  */
+#ifndef SARCH_XBOX
 #define INBV_ROTBAR_IMPLEMENTED
+#endif
 
 extern ULONG ProgressBarLeft, ProgressBarTop;
 extern BOOLEAN ShowProgressBar;
@@ -125,6 +129,7 @@ typedef struct tagBITMAPINFOHEADER
 } BITMAPINFOHEADER, *PBITMAPINFOHEADER;
 /*******************************/
 
+DATA_SEG("INITDATA_RW")
 static RGBQUAD MainPalette[16];
 
 #define PALETTE_FADE_STEPS  12
@@ -136,10 +141,12 @@ BootLogoFadeIn(VOID)
     UCHAR PaletteBitmapBuffer[sizeof(BITMAPINFOHEADER) + sizeof(MainPalette)];
     PBITMAPINFOHEADER PaletteBitmap = (PBITMAPINFOHEADER)PaletteBitmapBuffer;
     LPRGBQUAD Palette = (LPRGBQUAD)(PaletteBitmapBuffer + sizeof(BITMAPINFOHEADER));
-    ULONG Iteration, Index, ClrUsed;
-
+    ULONG Index, ClrUsed;
+#ifndef SARCH_XBOX
+    ULONG Iteration;
     LARGE_INTEGER Delay;
     Delay.QuadPart = -(PALETTE_FADE_TIME * 10);
+#endif
 
     /* Check if we are installed and we own the display */
     if (!InbvBootDriverInstalled ||
@@ -158,6 +165,7 @@ BootLogoFadeIn(VOID)
     PaletteBitmap->biBitCount = 4;
     PaletteBitmap->biClrUsed = ClrUsed;
 
+#ifndef SARCH_XBOX
     /*
      * Main animation loop.
      */
@@ -181,6 +189,22 @@ BootLogoFadeIn(VOID)
         /* Wait for a bit */
         KeDelayExecutionThread(KernelMode, FALSE, &Delay);
     }
+#else
+    /*
+     * Skip the animated fade on Xbox: apply the full logo palette in a
+     * single pass so the logo appears at once.  The fade is ~195 ms of
+     * blocking KeDelayExecutionThread on the Phase 1 init thread, paid
+     * before IoInitSystem -- pure boot latency with nothing else running.
+     * Still required (not just dropped): the logo was blitted with a
+     * zeroed palette, so this VidBitBlt is what loads its real colours.
+     */
+    for (Index = 0; Index < ClrUsed; Index++)
+        Palette[Index] = MainPalette[Index];
+
+    InbvAcquireLock();
+    VidBitBlt(PaletteBitmapBuffer, 0, 0);
+    InbvReleaseLock();
+#endif
 }
 
 static VOID
@@ -507,7 +531,10 @@ NTAPI
 DisplayBootBitmap(
     _In_ BOOLEAN TextMode)
 {
-    PVOID BootCopy = NULL, BootProgress = NULL, BootLogo = NULL, Header = NULL, Footer = NULL;
+    PVOID BootLogo = NULL, Header = NULL, Footer = NULL;
+#ifndef SARCH_XBOX
+    PVOID BootCopy = NULL, BootProgress = NULL;
+#endif
 
 #ifdef INBV_ROTBAR_IMPLEMENTED
     UCHAR Buffer[RTL_NUMBER_OF(RotBarBuffer)];
@@ -671,9 +698,13 @@ DisplayBootBitmap(
             TempRotBarSelection = ROT_BAR_DEFAULT_MODE;
 #endif
 
-            /* Set progress bar coordinates and display it */
+#ifndef SARCH_XBOX
+            /* Set progress bar coordinates and display it.  Left off on
+             * Xbox: with ShowProgressBar=FALSE the InbvUpdateProgressBar
+             * calls during Phase 1 no-op, so the splash is just the logo. */
             InbvSetProgressBarCoordinates(VID_PROGRESS_BAR_LEFT,
                                           VID_PROGRESS_BAR_TOP);
+#endif
 
 #ifdef REACTOS_SKUS
             /* Check for non-workstation products */
@@ -693,6 +724,7 @@ DisplayBootBitmap(
 #endif // REACTOS_SKUS
         }
 
+#ifndef SARCH_XBOX
         /* Load and draw progress bar bitmap */
         BootProgress = InbvGetResourceAddress(IDB_PROGRESS_BAR);
         BitBltAligned(BootProgress,
@@ -700,7 +732,9 @@ DisplayBootBitmap(
                       AL_HORIZONTAL_CENTER,
                       AL_VERTICAL_CENTER,
                       0, 118, 0, 0);
+#endif
 
+#ifndef SARCH_XBOX
         /* Load and draw copyright text bitmap */
         BootCopy = InbvGetResourceAddress(IDB_COPYRIGHT);
         BitBltAligned(BootCopy,
@@ -708,6 +742,7 @@ DisplayBootBitmap(
                       AL_HORIZONTAL_LEFT,
                       AL_VERTICAL_BOTTOM,
                       22, 0, 0, 20);
+#endif
 
 #ifdef REACTOS_SKUS
         /* Draw the SKU text if it exits */
@@ -755,6 +790,23 @@ DisplayBootBitmap(
 
         /* Display the boot logo and fade it in */
         BootLogoFadeIn();
+
+#ifdef SARCH_XBOX
+        /* Overlay the kernel build banner in the bottom-left corner.  White
+         * is index 15 -- the top of the logo's grayscale ramp -- so it reads
+         * correctly under MainPalette.  The banner + this draw are INIT, so
+         * they cost nothing resident.  Restore the display-string enable so
+         * later boot state is unchanged. */
+        {
+            extern const CHAR NxkVersionBanner[];
+            BOOLEAN OldEnable = InbvEnableDisplayString(TRUE);
+            InbvSetTextColor(BV_COLOR_WHITE);
+            InbvSetScrollRegion(8, SCREEN_HEIGHT - 16,
+                                SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
+            InbvDisplayString(NxkVersionBanner);
+            InbvEnableDisplayString(OldEnable);
+        }
+#endif
 
 #ifdef INBV_ROTBAR_IMPLEMENTED
         if (!RotBarThreadActive && TempRotBarSelection != RB_UNSPECIFIED)

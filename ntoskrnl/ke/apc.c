@@ -435,6 +435,10 @@ KiDeliverApc(IN KPROCESSOR_MODE DeliveryMode,
         }
     }
 
+    /* Xbox: no ring 3, so the user-return trap exits that pass UserMode here
+     * never execute; user APCs are delivered through the synthetic
+     * UserApcPending mechanism (see KiSetCurrentThreadUserApcPending). */
+#ifndef SARCH_XBOX
     /* Now we do the User APCs */
     if ((DeliveryMode == UserMode) &&
         !(IsListEmpty(&Thread->ApcState.ApcListHead[UserMode])) &&
@@ -494,6 +498,7 @@ KiDeliverApc(IN KPROCESSOR_MODE DeliveryMode,
                                 SystemArgument2);
         }
     }
+#endif /* !SARCH_XBOX */
 
 Quickie:
     /* Make sure we're still in the same process */
@@ -509,6 +514,22 @@ Quickie:
 
     /* Restore the trap frame */
     Thread->TrapFrame = OldTrapFrame;
+}
+
+/*
+ * Xbox: flag a user APC as pending on the current thread.  Titles run in ring 0,
+ * so async-IO completion routines are delivered as in-kernel (kernel-mode) APCs
+ * (see ntoskrnl/xbe NtUserIoApcDispatcher) rather than real user APCs -- the
+ * completion runs but UserApcPending is never set, so the title's alertable
+ * UserMode poll-waits never see STATUS_USER_APC and sleep out their full timeout.
+ * The dispatcher calls this from the title thread's own context to mark the wait
+ * abortable; KiCheckAlertability consumes it and returns STATUS_USER_APC.
+ */
+VOID
+NTAPI
+KiSetCurrentThreadUserApcPending(VOID)
+{
+    KeGetCurrentThread()->ApcState.UserApcPending = TRUE;
 }
 
 FORCEINLINE
@@ -533,6 +554,8 @@ RepairList(IN PLIST_ENTRY Original,
     }
 }
 
+#ifndef SARCH_XBOX
+/* Only the cross-process attach/detach paths move APC state. */
 VOID
 NTAPI
 KiMoveApcState(PKAPC_STATE OldState,
@@ -545,6 +568,7 @@ KiMoveApcState(PKAPC_STATE OldState,
     RepairList(OldState->ApcListHead, NewState->ApcListHead, KernelMode);
     RepairList(OldState->ApcListHead, NewState->ApcListHead, UserMode);
 }
+#endif
 
 /* PUBLIC FUNCTIONS **********************************************************/
 
@@ -568,12 +592,12 @@ KiMoveApcState(PKAPC_STATE OldState,
  *          APC_LEVEL.
  *
  *--*/
+#undef KeEnterCriticalRegion
 VOID
 NTAPI
-_KeEnterCriticalRegion(VOID)
+KeEnterCriticalRegion(VOID)
 {
-    /* Use inlined function */
-    KeEnterCriticalRegion();
+    KeEnterCriticalRegionThread(KeGetCurrentThread());
 }
 
 /*++
@@ -594,12 +618,12 @@ _KeEnterCriticalRegion(VOID)
  *          DISPATCH_LEVEL.
  *
  *--*/
+#undef KeLeaveCriticalRegion
 VOID
 NTAPI
-_KeLeaveCriticalRegion(VOID)
+KeLeaveCriticalRegion(VOID)
 {
-    /* Use inlined version */
-    KeLeaveCriticalRegion();
+    KeLeaveCriticalRegionThread(KeGetCurrentThread());
 }
 
 /*++

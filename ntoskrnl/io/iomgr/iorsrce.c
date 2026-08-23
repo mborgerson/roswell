@@ -43,6 +43,7 @@ typedef struct _IO_QUERY
     PVOID Context;
 } IO_QUERY, *PIO_QUERY;
 
+#ifndef SARCH_XBOX
 /* Strings corresponding to CONFIGURATION_TYPE */
 PCWSTR ArcTypes[MaximumType + 1] =
 {
@@ -97,9 +98,11 @@ PCWSTR IoDeviceInfoNames[IoQueryDeviceMaxData] =
     L"Configuration Data",
     L"Component Information"
 };
+#endif /* !SARCH_XBOX */
 
 /* PRIVATE FUNCTIONS **********************************************************/
 
+#ifndef SARCH_XBOX
 /**
  * @brief
  * Reads and returns Hardware information from the appropriate hardware
@@ -816,6 +819,7 @@ IopQueryBusDescription(
 
     return Status;
 }
+#endif /* !SARCH_XBOX */
 
 NTSTATUS
 IopFetchConfigurationInformation(
@@ -861,6 +865,12 @@ IopStoreSystemPartitionInformation(
     _In_ PUNICODE_STRING NtSystemPartitionDeviceName,
     _In_ PUNICODE_STRING OsLoaderPathName)
 {
+#ifdef SARCH_XBOX
+    /* No registry; nobody reads HKLM\\SYSTEM\\Setup\\SystemPartition. */
+    UNREFERENCED_PARAMETER(NtSystemPartitionDeviceName);
+    UNREFERENCED_PARAMETER(OsLoaderPathName);
+    return;
+#else
     NTSTATUS Status;
     UNICODE_STRING LinkTarget, KeyName;
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -980,6 +990,7 @@ IopStoreSystemPartitionInformation(
 
     /* We're finally done! */
     ObCloseHandle(KeyHandle, KernelMode);
+#endif /* SARCH_XBOX */
 }
 
 /* PUBLIC FUNCTIONS ***********************************************************/
@@ -1049,6 +1060,19 @@ IoReportResourceUsage(
     _In_ BOOLEAN OverrideConflict,
     _Out_ PBOOLEAN ConflictDetected)
 {
+#ifdef SARCH_XBOX
+    /* No PnP arbitration on Xbox; nothing claims resources at runtime. */
+    UNREFERENCED_PARAMETER(DriverClassName);
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(DriverList);
+    UNREFERENCED_PARAMETER(DriverListSize);
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(DeviceList);
+    UNREFERENCED_PARAMETER(DeviceListSize);
+    UNREFERENCED_PARAMETER(OverrideConflict);
+    if (ConflictDetected) *ConflictDetected = FALSE;
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     PCM_RESOURCE_LIST ResourceList;
 
@@ -1087,8 +1111,10 @@ IoReportResourceUsage(
     *ConflictDetected = FALSE;
 
     return STATUS_SUCCESS;
+#endif
 }
 
+#ifndef SARCH_XBOX
 static NTSTATUS
 IopLegacyResourceAllocation(
     _In_ ARBITER_REQUEST_SOURCE AllocationType,
@@ -1125,6 +1151,7 @@ IopLegacyResourceAllocation(
     /* TODO: Claim resources in registry */
     return STATUS_SUCCESS;
 }
+#endif
 
 /*
  * @implemented
@@ -1139,6 +1166,15 @@ IoAssignResources(
     _In_opt_ PIO_RESOURCE_REQUIREMENTS_LIST RequestedResources,
     _Inout_ PCM_RESOURCE_LIST* AllocatedResources)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(RegistryPath);
+    UNREFERENCED_PARAMETER(DriverClassName);
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(RequestedResources);
+    if (AllocatedResources) *AllocatedResources = NULL;
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PDEVICE_NODE DeviceNode;
 
     UNREFERENCED_PARAMETER(RegistryPath);
@@ -1181,6 +1217,7 @@ IoAssignResources(
                                        DeviceObject,
                                        RequestedResources,
                                        AllocatedResources);
+#endif
 }
 
 /**
@@ -1220,6 +1257,18 @@ IoQueryDeviceDescription(
     _In_ PIO_QUERY_DEVICE_ROUTINE CalloutRoutine,
     _In_opt_ PVOID Context)
 {
+#ifdef SARCH_XBOX
+    /* HAL does not populate the hardware-description tree on Xbox. */
+    UNREFERENCED_PARAMETER(BusType);
+    UNREFERENCED_PARAMETER(BusNumber);
+    UNREFERENCED_PARAMETER(ControllerType);
+    UNREFERENCED_PARAMETER(ControllerNumber);
+    UNREFERENCED_PARAMETER(PeripheralType);
+    UNREFERENCED_PARAMETER(PeripheralNumber);
+    UNREFERENCED_PARAMETER(CalloutRoutine);
+    UNREFERENCED_PARAMETER(Context);
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     NTSTATUS Status;
     ULONG BusLoopNumber = -1; /* Root Bus */
     OBJECT_ATTRIBUTES ObjectAttributes;
@@ -1292,6 +1341,7 @@ IoQueryDeviceDescription(
     ExFreePoolWithTag(RootRegKey.Buffer, TAG_IO_RESOURCE);
 
     return Status;
+#endif
 }
 
 /**
@@ -1324,6 +1374,14 @@ IoReportHalResourceUsage(
     _In_ PCM_RESOURCE_LIST TranslatedResourceList,
     _In_ ULONG ResourceListSize)
 {
+#ifdef SARCH_XBOX
+    /* No HARDWARE\RESOURCEMAP registry tree on Xbox. */
+    UNREFERENCED_PARAMETER(HalName);
+    UNREFERENCED_PARAMETER(RawResourceList);
+    UNREFERENCED_PARAMETER(TranslatedResourceList);
+    UNREFERENCED_PARAMETER(ResourceListSize);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     OBJECT_ATTRIBUTES ObjectAttributes;
     UNICODE_STRING Name;
@@ -1409,6 +1467,7 @@ IoReportHalResourceUsage(
     ZwClose(DescriptionKey);
 
     return Status;
+#endif
 }
 
 /* EOF */

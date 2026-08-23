@@ -615,6 +615,24 @@ NTAPI
 HalpDispatchPnp(IN PDEVICE_OBJECT DeviceObject,
                 IN PIRP Irp)
 {
+#ifdef SARCH_XBOX
+    /* The HAL PnP root device is created but never enumerated on Xbox --
+     * PiQueueDeviceAction(IopRootDeviceNode) is gated off and synthetic PDOs
+     * are dispatched by ntoskrnl/xb/devtree.c's PdoDispatchPnp instead.  No
+     * IRP_MJ_PNP ever lands here, so drop the whole switch and pass the
+     * IRP through.  Anchors HalpQuery{DeviceRelations,Interface,Id{Fdo,Pdo},
+     * Capabilities,Resources,ResourceRequirements}. */
+    PFDO_EXTENSION FdoExtension = DeviceObject->DeviceExtension;
+
+    if (FdoExtension->ExtensionType == FdoExtensionType)
+    {
+        IoSkipCurrentIrpStackLocation(Irp);
+        return IoCallDriver(FdoExtension->AttachedDeviceObject, Irp);
+    }
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+    return Irp->IoStatus.Status;
+#else
     PIO_STACK_LOCATION IoStackLocation;
     //PPDO_EXTENSION PdoExtension;
     PFDO_EXTENSION FdoExtension;
@@ -830,6 +848,7 @@ HalpDispatchPnp(IN PDEVICE_OBJECT DeviceObject,
         IoCompleteRequest(Irp, IO_NO_INCREMENT);
         return Status;
     }
+#endif /* !SARCH_XBOX */
 }
 
 NTSTATUS
@@ -883,8 +902,10 @@ HalpDriverEntry(IN PDRIVER_OBJECT DriverObject,
 
     /* Set up the callouts */
     DriverObject->MajorFunction[IRP_MJ_PNP] = HalpDispatchPnp;
+#ifndef SARCH_XBOX
     DriverObject->MajorFunction[IRP_MJ_POWER] = HalpDispatchPower;
     DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = HalpDispatchWmi;
+#endif
 
     /* Create the PDO and tell the PnP manager about us*/
     Status = IoReportDetectedDevice(DriverObject,

@@ -394,6 +394,11 @@ NTAPI
 NtResetEvent(IN HANDLE EventHandle,
              OUT PLONG PreviousState OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(EventHandle);
+    UNREFERENCED_PARAMETER(PreviousState);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PKEVENT Event;
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     NTSTATUS Status;
@@ -453,6 +458,7 @@ NtResetEvent(IN HANDLE EventHandle,
 
    /* Return Status */
    return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*

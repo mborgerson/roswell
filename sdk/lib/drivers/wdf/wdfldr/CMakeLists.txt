@@ -19,6 +19,6 @@ target_include_directories(wdfldr
 
 set_module_type(wdfldr kernelmodedriver ENTRYPOINT 0)
 target_link_libraries(wdfldr aux_klib libcntpr ${PSEH_LIB})
-add_importlibs(wdfldr ntoskrnl hal)
+add_importlibs(wdfldr ntoskrnl) # HAL exports live in the kernel image
 add_pch(wdfldr wdfloader.h SOURCE)
 add_cd_file(TARGET wdfldr DESTINATION reactos/system32/drivers NO_CAB FOR all)

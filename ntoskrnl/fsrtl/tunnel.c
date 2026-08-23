@@ -130,6 +130,7 @@ FsRtlPruneTunnelCache(
     }
 }
 
+#ifndef SARCH_XBOX
 CODE_SEG("INIT")
 VOID
 FsRtlGetTunnelParameterValue(
@@ -193,12 +194,14 @@ FsRtlGetTunnelParameterValue(
     /* close key */
     ZwClose(hKey);
 }
+#endif /* !SARCH_XBOX */
 
 CODE_SEG("INIT")
 VOID
 NTAPI
 FsRtlInitializeTunnels(VOID)
 {
+#ifndef SARCH_XBOX
     ULONG TunnelEntries;
     UNICODE_STRING MaximumTunnelEntryAgeInSeconds = RTL_CONSTANT_STRING(L"MaximumTunnelEntryAgeInSeconds");
     UNICODE_STRING MaximumTunnelEntries = RTL_CONSTANT_STRING( L"MaximumTunnelEntries");
@@ -248,6 +251,7 @@ FsRtlInitializeTunnels(VOID)
 
     /* initialize look aside list */
     ExInitializePagedLookasideList(&TunnelLookasideList, NULL, NULL, 0, DEFAULT_ENTRY_SIZE, 'TunL', TunnelEntries);
+#endif
 }
 
 LONG

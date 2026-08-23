@@ -76,6 +76,11 @@ BOOLEAN
 NTAPI
 MmUseSpecialPool(SIZE_T NumberOfBytes, ULONG Tag)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(NumberOfBytes);
+    UNREFERENCED_PARAMETER(Tag);
+    return FALSE;
+#else
     /* Special pool is not suitable for allocations bigger than 1 page */
     if (NumberOfBytes > (PAGE_SIZE - sizeof(POOL_HEADER)))
     {
@@ -88,20 +93,30 @@ MmUseSpecialPool(SIZE_T NumberOfBytes, ULONG Tag)
     }
 
     return Tag == MmSpecialPoolTag;
+#endif
 }
 
 BOOLEAN
 NTAPI
 MmIsSpecialPoolAddress(PVOID P)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(P);
+    return FALSE;
+#else
     return ((P >= MmSpecialPoolStart) &&
             (P <= MmSpecialPoolEnd));
+#endif
 }
 
 BOOLEAN
 NTAPI
 MmIsSpecialPoolAddressFree(PVOID P)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(P);
+    return TRUE;
+#else
     PMMPTE PointerPte;
 
     ASSERT(MmIsSpecialPoolAddress(P));
@@ -116,6 +131,7 @@ MmIsSpecialPoolAddressFree(PVOID P)
 
     /* Free PTE */
     return TRUE;
+#endif
 }
 
 VOID
@@ -244,6 +260,16 @@ PVOID
 NTAPI
 MmAllocateSpecialPool(SIZE_T NumberOfBytes, ULONG Tag, POOL_TYPE PoolType, ULONG SpecialType)
 {
+#ifdef SARCH_XBOX
+    /* Special pool is opt-in via MmSpecialPoolTag (set by a boot option
+     * that doesn't exist on Xbox).  ExpPoolFlags never sets
+     * POOL_FLAG_SPECIAL_POOL, so this is unreachable. */
+    UNREFERENCED_PARAMETER(NumberOfBytes);
+    UNREFERENCED_PARAMETER(Tag);
+    UNREFERENCED_PARAMETER(PoolType);
+    UNREFERENCED_PARAMETER(SpecialType);
+    return NULL;
+#else
     KIRQL Irql;
     MMPTE TempPte = ValidKernelPte;
     PMMPTE PointerPte;
@@ -337,7 +363,7 @@ MmAllocateSpecialPool(SIZE_T NumberOfBytes, ULONG Tag, POOL_TYPE PoolType, ULONG
         MI_SET_USAGE(MI_USAGE_NONPAGED_POOL);
     }
     MI_SET_PROCESS2("Kernel-Special");
-    PageFrameNumber = MiRemoveAnyPage(MI_GET_NEXT_COLOR());
+    PageFrameNumber = NxkPageSupplyTakeAny(MI_GET_NEXT_COLOR());
 
     /* Initialize PFN and make it valid */
     TempPte.u.Hard.PageFrameNumber = PageFrameNumber;
@@ -411,6 +437,7 @@ MmAllocateSpecialPool(SIZE_T NumberOfBytes, ULONG Tag, POOL_TYPE PoolType, ULONG
     Header->BlockSize = (UCHAR)TickCount.LowPart;
     DPRINT("%p\n", Entry);
     return Entry;
+#endif /* SARCH_XBOX */
 }
 
 VOID
@@ -456,6 +483,11 @@ VOID
 NTAPI
 MmFreeSpecialPool(PVOID P)
 {
+#ifdef SARCH_XBOX
+    /* Special pool is never enabled on Xbox; unreachable. */
+    UNREFERENCED_PARAMETER(P);
+    return;
+#else
     PMMPTE PointerPte;
     PPOOL_HEADER Header;
     BOOLEAN Overruns = FALSE;
@@ -645,6 +677,7 @@ MmFreeSpecialPool(PVOID P)
 
     /* Update page counter */
     InterlockedDecrementUL(&MmSpecialPagesInUse);
+#endif /* SARCH_XBOX */
 }
 
 VOID

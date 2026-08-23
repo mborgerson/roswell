@@ -7,13 +7,11 @@ list(APPEND SOURCE
 list(APPEND PCH_SKIP_SOURCE
     guid.c)
 
-add_library(partmgr MODULE
-	${SOURCE}
-	${PCH_SKIP_SOURCE}
-	partmgr.rc)
+# the partition manager is linked into the kernel image as a static
+# library; ntoskrnl runs PartmgrDriverEntry via IoCreateDriver.
+add_library(partmgr ${SOURCE} ${PCH_SKIP_SOURCE})
 
 add_pch(partmgr partmgr.h "${PCH_SKIP_SOURCE}")
-set_module_type(partmgr kernelmodedriver)
-add_importlibs(partmgr ntoskrnl hal)
+target_compile_definitions(partmgr PRIVATE DriverEntry=PartmgrDriverEntry)
+add_dependencies(partmgr psdk xdk bugcodes)
 add_registry_inf(partmgr_reg.inf)
-add_cd_file(TARGET partmgr DESTINATION reactos/system32/drivers NO_CAB FOR all)

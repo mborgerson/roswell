@@ -228,6 +228,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
     /* Get the access type */
     AccessType = IO_METHOD_FROM_CTL_CODE(IoControlCode);
 
+#ifndef SARCH_XBOX
     /* Check if we came from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -277,6 +278,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
         }
         _SEH2_END;
     }
+#endif /* SARCH_XBOX */
 
     /* Don't check for access rights right now, KernelMode can do anything */
     Status = ObReferenceObjectByHandle(DeviceHandle,
@@ -295,6 +297,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
         return STATUS_INVALID_PARAMETER;
     }
 
+#ifndef SARCH_XBOX
     /* Check if we came from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -310,6 +313,9 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
             return STATUS_ACCESS_DENIED;
         }
     }
+#else
+    (void)DesiredAccess;
+#endif /* SARCH_XBOX */
 
     /* Check for an event */
     if (Event)
@@ -370,6 +376,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
         {
             IO_STATUS_BLOCK KernelIosb;
 
+#ifndef SARCH_XBOX
             /* If we have an output buffer coming from usermode */
             if (PreviousMode != KernelMode && OutputBuffer != NULL)
             {
@@ -395,6 +402,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
                 }
                 _SEH2_END;
             }
+#endif /* SARCH_XBOX */
 
             /* If we are dismounting a volume, increase the dismount count */
             if (IoControlCode == FSCTL_DISMOUNT_VOLUME)
@@ -413,6 +421,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
                                                     &KernelIosb,
                                                     DeviceObject))
             {
+#ifndef SARCH_XBOX
                 IO_COMPLETION_CONTEXT CompletionInfo = { NULL, NULL };
 
                 /* Write the IOSB back */
@@ -432,6 +441,10 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
                 {
                     CompletionInfo = *(FileObject->CompletionContext);
                 }
+#else
+                /* Kernel-mode caller, no completion port; write directly */
+                *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
                 /* If we had an event, signal it */
                 if (Event)
@@ -446,6 +459,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
                     IopUnlockFileObject(FileObject);
                 }
 
+#ifndef SARCH_XBOX
                 /* Set completion if required */
                 if (CompletionInfo.Port != NULL && UserApcContext != NULL)
                 {
@@ -459,6 +473,7 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
                         KernelIosb.Status = STATUS_INSUFFICIENT_RESOURCES;
                     }
                 }
+#endif /* SARCH_XBOX */
 
                 /* We're done with FastIO! */
                 ObDereferenceObject(FileObject);
@@ -631,11 +646,13 @@ IopDeviceFsIoControl(IN HANDLE DeviceHandle,
         Irp->Flags |= IRP_DEFER_IO_COMPLETION;
     }
 
+#ifndef SARCH_XBOX
     /* If we are dismounting a volume, increaase the dismount count */
     if (IoControlCode == FSCTL_DISMOUNT_VOLUME)
     {
         InterlockedIncrement((PLONG)&SharedUserData->DismountCount);
     }
+#endif /* SARCH_XBOX */
 
     /* Perform the call */
     return IopPerformSynchronousRequest(DeviceObject,
@@ -1500,6 +1517,7 @@ NtFlushBuffersFile(IN HANDLE FileHandle,
     PAGED_CODE();
     IOTRACE(IO_API_DEBUG, "FileHandle: %p\n", FileHandle);
 
+#ifndef SARCH_XBOX
     if (PreviousMode != KernelMode)
     {
         /* Protect probes */
@@ -1515,6 +1533,7 @@ NtFlushBuffersFile(IN HANDLE FileHandle,
         }
         _SEH2_END;
     }
+#endif /* SARCH_XBOX */
 
     /* Get the File Object */
     Status = ObReferenceObjectByHandle(FileHandle,
@@ -1629,6 +1648,18 @@ NtNotifyChangeDirectoryFile(IN HANDLE FileHandle,
                             IN ULONG CompletionFilter,
                             IN BOOLEAN WatchTree)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(EventHandle);
+    UNREFERENCED_PARAMETER(ApcRoutine);
+    UNREFERENCED_PARAMETER(ApcContext);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(BufferSize);
+    UNREFERENCED_PARAMETER(CompletionFilter);
+    UNREFERENCED_PARAMETER(WatchTree);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PIRP Irp;
     PKEVENT Event = NULL;
     PDEVICE_OBJECT DeviceObject;
@@ -1754,6 +1785,7 @@ NtNotifyChangeDirectoryFile(IN HANDLE FileHandle,
                                         PreviousMode,
                                         LockedForSync,
                                         IopOtherTransfer);
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -1772,6 +1804,19 @@ NtLockFile(IN HANDLE FileHandle,
            IN BOOLEAN FailImmediately,
            IN BOOLEAN ExclusiveLock)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(EventHandle);
+    UNREFERENCED_PARAMETER(ApcRoutine);
+    UNREFERENCED_PARAMETER(ApcContext);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(ByteOffset);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(Key);
+    UNREFERENCED_PARAMETER(FailImmediately);
+    UNREFERENCED_PARAMETER(ExclusiveLock);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFILE_OBJECT FileObject;
     PLARGE_INTEGER LocalLength = NULL;
     PIRP Irp;
@@ -1984,6 +2029,7 @@ NtLockFile(IN HANDLE FileHandle,
                                         PreviousMode,
                                         LockedForSync,
                                         IopOtherTransfer);
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -2018,6 +2064,7 @@ NtQueryDirectoryFile(IN HANDLE FileHandle,
     PAGED_CODE();
     IOTRACE(IO_API_DEBUG, "FileHandle: %p\n", FileHandle);
 
+#ifndef SARCH_XBOX
     /* Check if we came from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -2069,6 +2116,33 @@ NtQueryDirectoryFile(IN HANDLE FileHandle,
         }
         _SEH2_END;
     }
+#else
+    (void)CapturedFileName;
+    (void)SearchPattern;
+    /* Xbox titles always call in kernel mode, so the user-mode probe +
+     * capture above is gated out -- but the search-pattern capture into
+     * AuxBuffer lived inside it, and without it FileName is dropped and
+     * every enumeration degrades to match-all.  Capture directly (no
+     * probing: the caller is ring 0). */
+    if (FileName != NULL && FileName->Length != 0)
+    {
+        AuxBuffer = ExAllocatePoolWithTag(NonPagedPool,
+                                          FileName->Length +
+                                          sizeof(UNICODE_STRING),
+                                          TAG_IOBUF);
+        if (AuxBuffer == NULL)
+            return STATUS_INSUFFICIENT_RESOURCES;
+
+        RtlCopyMemory((PVOID)((ULONG_PTR)AuxBuffer + sizeof(UNICODE_STRING)),
+                      FileName->Buffer, FileName->Length);
+
+        SearchPattern = (PUNICODE_STRING)AuxBuffer;
+        SearchPattern->Buffer = (PWCHAR)((ULONG_PTR)AuxBuffer +
+                                         sizeof(UNICODE_STRING));
+        SearchPattern->Length = FileName->Length;
+        SearchPattern->MaximumLength = FileName->Length;
+    }
+#endif /* SARCH_XBOX */
 
     /* Check input parameters */
 
@@ -2304,6 +2378,7 @@ NtQueryInformationFile(IN HANDLE FileHandle,
     PAGED_CODE();
     IOTRACE(IO_API_DEBUG, "FileHandle: %p\n", FileHandle);
 
+#ifndef SARCH_XBOX
     /* Check if we're called from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -2359,6 +2434,7 @@ NtQueryInformationFile(IN HANDLE FileHandle,
         }
     }
 #endif
+#endif /* SARCH_XBOX */
 
     /* Reference the Handle */
     Status = ObReferenceObjectByHandle(FileHandle,
@@ -2396,6 +2472,7 @@ NtQueryInformationFile(IN HANDLE FileHandle,
         /* Check if the caller just wants the position */
         if (FileInformationClass == FilePositionInformation)
         {
+#ifndef SARCH_XBOX
             /* Protect write in SEH */
             _SEH2_TRY
             {
@@ -2413,6 +2490,13 @@ NtQueryInformationFile(IN HANDLE FileHandle,
                 Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#else
+            /* Kernel-mode caller; no fault possible */
+            ((PFILE_POSITION_INFORMATION)FileInformation)->CurrentByteOffset =
+                FileObject->CurrentByteOffset;
+            IoStatusBlock->Information = sizeof(FILE_POSITION_INFORMATION);
+            Status = IoStatusBlock->Status = STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 
             /* Release the file lock, dereference the file and return */
             IopUnlockFileObject(FileObject);
@@ -2459,6 +2543,7 @@ NtQueryInformationFile(IN HANDLE FileHandle,
         /* If call succeed */
         if (Success)
         {
+#ifndef SARCH_XBOX
             /* Write the IOSB back */
             _SEH2_TRY
             {
@@ -2469,6 +2554,10 @@ NtQueryInformationFile(IN HANDLE FileHandle,
                 KernelIosb.Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#else
+            /* Kernel-mode caller; no fault possible */
+            *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
             /* Free the event if we had one */
             if (LocalEvent)
@@ -2608,6 +2697,7 @@ NtQueryInformationFile(IN HANDLE FileHandle,
             /* Set the final status */
             Status = KernelIosb.Status;
 
+#ifndef SARCH_XBOX
             /* Enter SEH to write the IOSB back */
             _SEH2_TRY
             {
@@ -2620,6 +2710,10 @@ NtQueryInformationFile(IN HANDLE FileHandle,
                 Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#else
+            /* Kernel-mode caller; no fault possible */
+            *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
             /* Free the event */
             ExFreePoolWithTag(Event, TAG_IO);
@@ -2743,6 +2837,7 @@ NtReadFile(IN HANDLE FileHandle,
     /* Get the device object */
     DeviceObject = IoGetRelatedDeviceObject(FileObject);
 
+#ifndef SARCH_XBOX
     /* Validate User-Mode Buffers */
     if (PreviousMode != KernelMode)
     {
@@ -2820,6 +2915,7 @@ NtReadFile(IN HANDLE FileHandle,
         _SEH2_END;
     }
     else
+#endif /* SARCH_XBOX */
     {
         /* Kernel mode: capture directly */
         if (ByteOffset) CapturedByteOffset = *ByteOffset;
@@ -2903,6 +2999,7 @@ NtReadFile(IN HANDLE FileHandle,
                 IopUpdateTransferCount(IopReadTransfer,
                                        (ULONG)KernelIosb.Information);
 
+#ifndef SARCH_XBOX
                 /* Enter SEH to write the IOSB back */
                 _SEH2_TRY
                 {
@@ -2918,6 +3015,10 @@ NtReadFile(IN HANDLE FileHandle,
                     _SEH2_YIELD(return _SEH2_GetExceptionCode());
                 }
                 _SEH2_END;
+#else
+                /* Kernel-mode caller; no fault possible */
+                *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
                 /* Signal the completion event */
                 if (EventObject)
@@ -3119,6 +3220,7 @@ NtSetInformationFile(IN HANDLE FileHandle,
     PAGED_CODE();
     IOTRACE(IO_API_DEBUG, "FileHandle: %p\n", FileHandle);
 
+#ifndef SARCH_XBOX
     /* Check if we're called from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -3158,6 +3260,7 @@ NtSetInformationFile(IN HANDLE FileHandle,
         _SEH2_END;
     }
     else
+#endif /* SARCH_XBOX */
     {
         /* Validate the information class */
         if ((FileInformationClass < 0) ||
@@ -3215,6 +3318,7 @@ NtSetInformationFile(IN HANDLE FileHandle,
         /* Check if the caller just wants the position */
         if (FileInformationClass == FilePositionInformation)
         {
+#ifndef SARCH_XBOX
             /* Protect write in SEH */
             _SEH2_TRY
             {
@@ -3233,6 +3337,13 @@ NtSetInformationFile(IN HANDLE FileHandle,
                 Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#else
+            /* Kernel-mode caller; no fault possible */
+            FileObject->CurrentByteOffset =
+                ((PFILE_POSITION_INFORMATION)FileInformation)->CurrentByteOffset;
+            IoStatusBlock->Information = 0;
+            Status = IoStatusBlock->Status = STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 
             /* Update transfer count */
             IopUpdateTransferCount(IopOtherTransfer, Length);
@@ -3454,6 +3565,7 @@ NtSetInformationFile(IN HANDLE FileHandle,
             /* Set the final status */
             Status = KernelIosb.Status;
 
+#ifndef SARCH_XBOX
             /* Enter SEH to write the IOSB back */
             _SEH2_TRY
             {
@@ -3466,6 +3578,10 @@ NtSetInformationFile(IN HANDLE FileHandle,
                 Status = _SEH2_GetExceptionCode();
             }
             _SEH2_END;
+#else
+            /* Kernel-mode caller; no fault possible */
+            *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
             /* Free the event */
             ExFreePoolWithTag(Event, TAG_IO);
@@ -3554,6 +3670,14 @@ NtUnlockFile(IN HANDLE FileHandle,
              IN PLARGE_INTEGER Length,
              IN ULONG Key OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(ByteOffset);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(Key);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFILE_OBJECT FileObject;
     PLARGE_INTEGER LocalLength = NULL;
     PIRP Irp;
@@ -3753,6 +3877,7 @@ NtUnlockFile(IN HANDLE FileHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*
@@ -3800,6 +3925,7 @@ NtWriteFile(IN HANDLE FileHandle,
     /* Get the device object */
     DeviceObject = IoGetRelatedDeviceObject(FileObject);
 
+#ifndef SARCH_XBOX
     /* Validate User-Mode Buffers */
     if (PreviousMode != KernelMode)
     {
@@ -3883,6 +4009,7 @@ NtWriteFile(IN HANDLE FileHandle,
         _SEH2_END;
     }
     else
+#endif /* SARCH_XBOX */
     {
         /* Kernel mode: capture directly */
         if (ByteOffset) CapturedByteOffset = *ByteOffset;
@@ -3974,6 +4101,7 @@ NtWriteFile(IN HANDLE FileHandle,
                 IopUpdateTransferCount(IopWriteTransfer,
                                        (ULONG)KernelIosb.Information);
 
+#ifndef SARCH_XBOX
                 /* Enter SEH to write the IOSB back */
                 _SEH2_TRY
                 {
@@ -3989,6 +4117,10 @@ NtWriteFile(IN HANDLE FileHandle,
                     _SEH2_YIELD(return _SEH2_GetExceptionCode());
                 }
                 _SEH2_END;
+#else
+                /* Kernel-mode caller; no fault possible */
+                *IoStatusBlock = KernelIosb;
+#endif /* SARCH_XBOX */
 
                 /* Signal the completion event */
                 if (EventObject)
@@ -4166,6 +4298,7 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
     PAGED_CODE();
     IOTRACE(IO_API_DEBUG, "FileHandle: %p\n", FileHandle);
 
+#ifndef SARCH_XBOX
     /* Check if we're called from user mode */
     if (PreviousMode != KernelMode)
     {
@@ -4201,6 +4334,7 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
         }
         _SEH2_END;
     }
+#endif /* SARCH_XBOX */
 
     /* Get File Object */
     Status = ObReferenceObjectByHandle(FileHandle,
@@ -4242,6 +4376,7 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
         PFILE_FS_DEVICE_INFORMATION FsDeviceInfo = FsInformation;
         DeviceObject = FileObject->DeviceObject;
 
+#ifndef SARCH_XBOX
         _SEH2_TRY
         {
             FsDeviceInfo->DeviceType = DeviceObject->DeviceType;
@@ -4271,6 +4406,17 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
             _SEH2_YIELD(return _SEH2_GetExceptionCode());
         }
         _SEH2_END;
+#else
+        /* Kernel-mode caller; no fault possible */
+        FsDeviceInfo->DeviceType = DeviceObject->DeviceType;
+        FsDeviceInfo->Characteristics = DeviceObject->Characteristics;
+        if (IopGetMountFlag(DeviceObject))
+        {
+            SetFlag(FsDeviceInfo->Characteristics, FILE_DEVICE_IS_MOUNTED);
+        }
+        IoStatusBlock->Information = sizeof(FILE_FS_DEVICE_INFORMATION);
+        IoStatusBlock->Status = STATUS_SUCCESS;
+#endif /* SARCH_XBOX */
 
         /* Check if we had a file lock */
         if (BooleanFlagOn(FileObject->Flags, FO_SYNCHRONOUS_IO))
@@ -4284,6 +4430,7 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
 
         return STATUS_SUCCESS;
     }
+#ifndef SARCH_XBOX
     /* This is to be handled by the kernel, not by FSD */
     else if (FsInformationClass == FileFsDriverPathInformation)
     {
@@ -4339,6 +4486,7 @@ NtQueryVolumeInformationFile(IN HANDLE FileHandle,
 
         return Status;
     }
+#endif /* SARCH_XBOX */
 
     if (!BooleanFlagOn(FileObject->Flags, FO_SYNCHRONOUS_IO))
     {
@@ -4441,6 +4589,14 @@ NtSetVolumeInformationFile(IN HANDLE FileHandle,
                            IN ULONG Length,
                            IN FS_INFORMATION_CLASS FsInformationClass)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FileHandle);
+    UNREFERENCED_PARAMETER(IoStatusBlock);
+    UNREFERENCED_PARAMETER(FsInformation);
+    UNREFERENCED_PARAMETER(Length);
+    UNREFERENCED_PARAMETER(FsInformationClass);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFILE_OBJECT FileObject;
     PIRP Irp;
     PIO_STACK_LOCATION StackPtr;
@@ -4621,6 +4777,7 @@ NtSetVolumeInformationFile(IN HANDLE FileHandle,
 
     /* Return status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*

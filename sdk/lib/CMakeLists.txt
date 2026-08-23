@@ -1,4 +1,22 @@
 
+# SARCH=xbox only links the small set of sdk/lib subdirs listed
+# below into the kernel image.  Gating the rest keeps `ninja` (default
+# `flash` target) from building dead static libs.
+if(SARCH STREQUAL "xbox")
+    add_subdirectory(cportlib)
+    add_subdirectory(crt)
+    add_subdirectory(drivers)
+    add_subdirectory(ioevent)
+    add_subdirectory(pseh)
+    add_subdirectory(rtl)
+    if(STACK_PROTECTOR)
+        add_subdirectory(gcc_ssp)
+    endif()
+    add_subdirectory(vcruntime)
+    add_subdirectory(wdmguid)
+    return()
+endif()
+
 add_subdirectory(atl)
 add_subdirectory(cmlib)
 add_subdirectory(inflib)

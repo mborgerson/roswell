@@ -3253,6 +3253,18 @@ RtlCheckBit(
 
 #if DBG
 
+#ifdef SARCH_XBOX
+/* Compact asserts: file + line identify the assertion; the stringized
+ * expressions are ~39 KB of .rdata the 256 KB flash target cannot
+ * carry. */
+#define RTL_VERIFY(exp) \
+  ((!(exp)) ? \
+    RtlAssert( (PVOID)"", (PVOID)__FILE__, __LINE__, NULL ), FALSE : TRUE)
+
+#define RTL_VERIFYMSG(msg, exp) \
+  ((!(exp)) ? \
+    RtlAssert( (PVOID)"", (PVOID)__FILE__, __LINE__, (PCHAR)msg ), FALSE : TRUE)
+#else
 #define RTL_VERIFY(exp) \
   ((!(exp)) ? \
     RtlAssert( (PVOID)#exp, (PVOID)__FILE__, __LINE__, NULL ), FALSE : TRUE)
@@ -3260,6 +3272,7 @@ RtlCheckBit(
 #define RTL_VERIFYMSG(msg, exp) \
   ((!(exp)) ? \
     RtlAssert( (PVOID)#exp, (PVOID)__FILE__, __LINE__, (PCHAR)msg ), FALSE : TRUE)
+#endif
 
 #define RTL_SOFT_VERIFY(exp) \
   ((!(exp)) ? \

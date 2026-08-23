@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // host_includes
 #include <typedefs.h>
@@ -126,6 +127,140 @@ static int add_loadconfig(unsigned char *buffer, PIMAGE_NT_HEADERS nt_header)
 
     error("Export '_load_config_used' not found\n");
     return 1;
+}
+
+/* BFD-ld over-allocates space in .edata when all exports are NONAME -- it
+ * reserves room for the name-pointer table, ordinal table, and name strings
+ * that never get emitted, leaving the trailing area as zero padding (often
+ * several KB).  Compact .edata to its actual content end and shift all
+ * subsequent sections forward in the file. */
+static int compact_edata(unsigned char *buffer, size_t *plen,
+                         PIMAGE_NT_HEADERS nt_header)
+{
+    PIMAGE_DATA_DIRECTORY export_dir;
+    PIMAGE_EXPORT_DIRECTORY export_directory;
+    PIMAGE_SECTION_HEADER section_table, edata_section = NULL;
+    DWORD file_alignment, highest_rva, new_virtual_size, new_raw_size;
+    DWORD shift, edata_end_offset;
+    unsigned int i;
+
+    export_dir = &nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (export_dir->Size == 0)
+        return 0;
+
+    section_table = IMAGE_FIRST_SECTION(nt_header);
+    for (i = 0; i < nt_header->FileHeader.NumberOfSections; i++)
+    {
+        if (strncmp((char*)section_table[i].Name, ".edata", 6) == 0)
+        {
+            edata_section = &section_table[i];
+            break;
+        }
+    }
+    if (!edata_section)
+        return 0;
+
+    export_directory = rva_to_ptr(buffer, nt_header, export_dir->VirtualAddress);
+    if (!export_directory)
+        return 0;
+
+    /* Find the highest RVA actually referenced by the export table. */
+    highest_rva = export_dir->VirtualAddress + sizeof(IMAGE_EXPORT_DIRECTORY);
+    if (export_directory->AddressOfFunctions)
+    {
+        DWORD end = export_directory->AddressOfFunctions
+                  + export_directory->NumberOfFunctions * sizeof(DWORD);
+        if (end > highest_rva) highest_rva = end;
+    }
+    if (export_directory->NumberOfNames && export_directory->AddressOfNames)
+    {
+        DWORD end = export_directory->AddressOfNames
+                  + export_directory->NumberOfNames * sizeof(DWORD);
+        if (end > highest_rva) highest_rva = end;
+    }
+    if (export_directory->NumberOfNames && export_directory->AddressOfNameOrdinals)
+    {
+        DWORD end = export_directory->AddressOfNameOrdinals
+                  + export_directory->NumberOfNames * sizeof(WORD);
+        if (end > highest_rva) highest_rva = end;
+    }
+    if (export_directory->Name)
+    {
+        const char *dll_name = rva_to_ptr(buffer, nt_header, export_directory->Name);
+        if (dll_name)
+        {
+            DWORD end = export_directory->Name + (DWORD)strlen(dll_name) + 1;
+            if (end > highest_rva) highest_rva = end;
+        }
+    }
+    if (export_directory->NumberOfNames && export_directory->AddressOfNames)
+    {
+        PDWORD name_ptrs = rva_to_ptr(buffer, nt_header, export_directory->AddressOfNames);
+        if (name_ptrs)
+        {
+            DWORD j;
+            for (j = 0; j < export_directory->NumberOfNames; j++)
+            {
+                const char *name = rva_to_ptr(buffer, nt_header, name_ptrs[j]);
+                if (name)
+                {
+                    DWORD end = name_ptrs[j] + (DWORD)strlen(name) + 1;
+                    if (end > highest_rva) highest_rva = end;
+                }
+            }
+        }
+    }
+
+    file_alignment = nt_header->OptionalHeader.FileAlignment;
+    if (file_alignment < 0x40) file_alignment = 0x200;
+
+    new_virtual_size = highest_rva - edata_section->VirtualAddress;
+    new_raw_size = (new_virtual_size + file_alignment - 1) & ~(file_alignment - 1);
+
+    if (new_raw_size >= edata_section->SizeOfRawData)
+        return 0;  /* already tight */
+
+    /* Keep the in-memory layout intact: the kernel PE loader requires
+     * contiguous section pages, so shrinking VirtualSize would punch a gap
+     * between .edata and the next section.  Only the on-disk SizeOfRawData
+     * is reduced -- the PE loader zero-fills the (SizeOfRawData..VirtualSize)
+     * range automatically, which matches the content we're dropping. */
+    shift = edata_section->SizeOfRawData - new_raw_size;
+    edata_end_offset = edata_section->PointerToRawData + edata_section->SizeOfRawData;
+    if (edata_end_offset > *plen)
+        return 0;  /* sanity */
+
+    /* Shift all file data after .edata's raw region forward. */
+    memmove(buffer + edata_end_offset - shift,
+            buffer + edata_end_offset,
+            *plen - edata_end_offset);
+
+    /* Update PointerToRawData for every section that lived past .edata. */
+    for (i = 0; i < nt_header->FileHeader.NumberOfSections; i++)
+    {
+        if (section_table[i].PointerToRawData >= edata_end_offset)
+            section_table[i].PointerToRawData -= shift;
+        if (section_table[i].PointerToLinenumbers >= edata_end_offset)
+            section_table[i].PointerToLinenumbers -= shift;
+        if (section_table[i].PointerToRelocations >= edata_end_offset)
+            section_table[i].PointerToRelocations -= shift;
+    }
+
+    /* Symbol table (and its trailing string table) also shifts if it lives
+     * past .edata.  The COFF file header tracks its file offset directly. */
+    if (nt_header->FileHeader.PointerToSymbolTable >= edata_end_offset)
+        nt_header->FileHeader.PointerToSymbolTable -= shift;
+
+    /* Only shrink the on-disk extent.  VirtualSize stays where it was so
+     * the loader keeps mapping the full range and the page-contiguity check
+     * in MiCacheImageSymbols / sysldr passes.  DataDirectory[EXPORT].Size
+     * also stays unchanged: callers walk the export table via the
+     * NumberOf{Functions,Names} fields, not the Size, so the residual zero
+     * tail is harmless. */
+    edata_section->SizeOfRawData = new_raw_size;
+
+    *plen -= shift;
+    return 0;
 }
 
 static int driver_fixup(enum fixup_mode mode, unsigned char *buffer, PIMAGE_NT_HEADERS nt_header)
@@ -507,6 +642,10 @@ int main(int argc, char **argv)
             result = driver_fixup(mode, buffer, nt_header);
     }
 
+    /* For kernel images, compact .edata if BFD-ld over-allocated it. */
+    if (!result && mode == MODE_KERNEL)
+        result = compact_edata(buffer, &len, nt_header);
+
     /* Apply any section attributes override */
     for (i = 1; (i < argc) && (result == 0); ++i)
     {
@@ -537,6 +676,9 @@ int main(int argc, char **argv)
         /* We could optimize by only writing the changed parts, but keep it simple for now */
         fseek(file, 0, SEEK_SET);
         fwrite(buffer, 1, len, file);
+        fflush(file);
+        /* compact_edata may have shrunk the file -- truncate any trailing junk. */
+        ftruncate(fileno(file), (off_t)len);
     }
 
 Quit:

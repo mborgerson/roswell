@@ -279,6 +279,12 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     EndPde = MiAddressToPde(KSEG0_BASE);
     RtlZeroMemory(StartPde, (EndPde - StartPde) * sizeof(MMPTE));
 
+    /* Cap MmNonPagedPoolEnd below the Xbox MMIO window before any pool VAs
+     * are calculated, so pool VA can't land in the 0xF0000000+ region the
+     * MMIO identity windows claim. */
+    extern VOID NTAPI NxkMmReserveXboxWindows(VOID);
+    NxkMmReserveXboxWindows();
+
     /* Compute non paged pool limits and size */
     MiComputeNonPagedPoolVa(MiNumberOfFreePages);
 
@@ -332,6 +338,19 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     MmNumberOfSystemPtes = (ULONG)(MaxSystemPtePages - 1);
     ASSERT(MmNumberOfSystemPtes > 1000);
 
+#ifdef NXK_MM_PHYS
+    /* Sizing the PTE space to the whole loader-to-PFN-database VA gap
+     * costs a committed page-table page per 4 MB of it at boot -- ~177
+     * pages on the 64 MB retail map, by far the kernel's largest single
+     * RAM consumer.  The actual users (thread stacks, MDL mappings, IO
+     * maps) need 8K PTEs: bootvid's 16 MB NV2A control mapping alone
+     * holds 4096 (MmMapIoSpace draws from this space), plus the 4 MB
+     * framebuffer map and thread stacks.  4K starved bootvid's first
+     * map and the boot splash silently disappeared. */
+    if (MmNumberOfSystemPtes > 8192)
+        MmNumberOfSystemPtes = 8192;
+#endif
+
     /*
      * Keep MmNonPagedSystemStart initialized for debugger (KD/Windbg) use.
      * On x86 ARM3, the System PTE space is placed in the loader-gap region.
@@ -348,8 +367,16 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     // Now we actually need to get these many physical pages. Nonpaged pool
     // is actually also physically contiguous (but not the expansion)
     //
+#ifdef NXK_MM_PHYS
+    /* One shared frame backs every PFN-database VA: the residual MMPFN
+     * writes land in graffiti nothing reads, and the pages the database
+     * and the ARM3 initial pool would have consumed stay free for the
+     * supply (nxpool brings its own window). */
+    PageFrameIndex = MxGetNextPage(1);
+#else
     PageFrameIndex = MxGetNextPage(MxPfnAllocation +
                                    (MmSizeOfNonPagedPoolInBytes >> PAGE_SHIFT));
+#endif
     ASSERT(PageFrameIndex != 0);
     DPRINT("PFN DB PA PFN begins at: %lx\n", PageFrameIndex);
     DPRINT("NP PA PFN begins at: %lx\n", PageFrameIndex + MxPfnAllocation);
@@ -375,10 +402,16 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         StartPde++;
     }
 
+
     //
     // Now allocate the page tables for the nonpaged pool expansion VA region
     // (top-of-kernel VA). This keeps existing nonpaged pool expansion behavior.
     //
+#ifdef NXK_MM_PHYS
+    /* No pool expansion exists; skip its page tables. */
+    StartPde = MiAddressToPde(NonPagedPoolExpansionVa) + 1;
+    EndPde = StartPde - 1;
+#else
     StartPde = MiAddressToPde(NonPagedPoolExpansionVa);
     EndPde = MiAddressToPde((PVOID)((ULONG_PTR)MmNonPagedPoolEnd - 1));
     while (StartPde <= EndPde)
@@ -400,13 +433,20 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         //
         StartPde++;
     }
+#endif
 
     //
     // Now we need pages for the page tables which will map initial NP
     //
     StartPde = MiAddressToPde(MmPfnDatabase);
+#ifdef NXK_MM_PHYS
+    /* Only the PFN-database VA range needs page tables. */
+    EndPde = MiAddressToPde((PVOID)((ULONG_PTR)MmPfnDatabase +
+                                    (MxPfnAllocation << PAGE_SHIFT) - 1));
+#else
     EndPde = MiAddressToPde((PVOID)((ULONG_PTR)MmNonPagedPoolStart +
                                     MmSizeOfNonPagedPoolInBytes - 1));
+#endif
     while (StartPde <= EndPde)
     {
         //
@@ -427,6 +467,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         StartPde++;
     }
 
+
     MmSubsectionBase = (ULONG_PTR)MmNonPagedPoolStart;
 
     //
@@ -434,6 +475,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     //
     MmNonPagedPoolExpansionStart = NonPagedPoolExpansionVa;
 
+#ifndef NXK_MM_PHYS
     //
     // Last step is to actually map the nonpaged pool
     //
@@ -448,6 +490,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         TempPte.u.Hard.PageFrameNumber = PageFrameIndex++;
         MI_WRITE_VALID_PTE(PointerPte++, TempPte);
     }
+#endif
 
     //
     // Sanity check: make sure we have properly defined the system PTE space
@@ -456,6 +499,54 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
             ((MmNumberOfSystemPtes + 1) * PAGE_SIZE)) <=
            (ULONG_PTR)MmPfnDatabase);
 
+#ifdef NXK_MM_PHYS
+    /* The per-page supply array and the pool-window metadata live in
+     * boot pages (KSEG0-aliased), sized for the actual RAM and window
+     * -- not in the kernel image. */
+    {
+        /* The descriptor scan excludes hardware-reserved types from
+         * MmHighestPhysicalPage, but the NV2A split later reclaims the
+         * framebuffer reservation's lower part into the supply -- the
+         * array must cover the full 64 MB title world or those returns
+         * write past it (and the title silently loses the FB region). */
+        PFN_NUMBER SupplyHigh = MmHighestPhysicalPage;
+        SIZE_T ArrayBytes;        /* one ULONG per page (links/owner unified) */
+        SIZE_T MetaBytes = NxPoolPagesMetadataSize();
+        PFN_NUMBER CarvePages, CarvePfn;
+        PUCHAR Carve, Links;
+
+        if (SupplyHigh < 0x3FFF) SupplyHigh = 0x3FFF;   /* 64 MB of pages */
+        ArrayBytes = (SupplyHigh + 1) * sizeof(ULONG);
+
+        /* (The NV2A padding at PA 0x3FF0000 -- retail's PFN-database
+         * home -- is NOT usable for this in xemu: PRAMIN aliases the
+         * top of VRAM there.  Both arrays live in the boot carve.) */
+        CarvePages = BYTES_TO_PAGES(ArrayBytes) + BYTES_TO_PAGES(MetaBytes);
+        CarvePfn = MxGetNextPage(CarvePages);
+
+        ASSERT(CarvePfn != 0);
+        Carve = (PUCHAR)(KSEG0_BASE + (CarvePfn << PAGE_SHIFT));
+        Links = Carve;
+        Carve += BYTES_TO_PAGES(ArrayBytes) << PAGE_SHIFT;
+        NxkPageSupplyInitialize(SupplyHigh, Links);
+        RtlZeroMemory(Carve, MetaBytes);
+        NxPoolPagesInitialize(Carve);
+    }
+
+    /* Map every PFN-database VA to the single shared frame; nothing
+     * reads the contents.  No ARM3 pool, no color tables. */
+    PointerPte = MiAddressToPte(MmPfnDatabase);
+    LastPte = MiAddressToPte((PVOID)((ULONG_PTR)MmPfnDatabase +
+                                     (MxPfnAllocation << PAGE_SHIFT) - 1));
+    TempPte = ValidKernelPte;
+    TempPte.u.Hard.PageFrameNumber = PageFrameIndex;
+    while (PointerPte <= LastPte)
+    {
+        MI_WRITE_VALID_PTE(PointerPte, TempPte);
+        PointerPte++;
+    }
+    RtlZeroMemory(MmPfnDatabase, PAGE_SIZE);
+#else
     /* Now go ahead and initialize the nonpaged pool */
     MiInitializeNonPagedPool();
     MiInitializeNonPagedPoolThresholds();
@@ -465,10 +556,29 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
 
     /* Initialize the color tables */
     MiInitializeColorTables();
+#endif
 
     /* Build the PFN Database */
     MiInitializePfnDatabase(LoaderBlock);
     MmInitializeBalancer(MmAvailablePages, 0);
+    DPRINT1("FREEPAGES after PFN init: MmAvailablePages=%lu (%lu KB) "
+            "MmNumberOfPhysicalPages=%lu\n",
+            (ULONG)MmAvailablePages, (ULONG)MmAvailablePages * 4,
+            (ULONG)MmNumberOfPhysicalPages);
+    {
+        extern PVOID MmSystemCacheStart, MmSystemCacheEnd;
+        DPRINT1("VAMAP SysPte=%p..%p(+%lu) PfnDb=%p NpPool=%p..%p exp=%p "
+                "SysCache=%p..%p PagedPool=%p..%p NpSize=%lx NpMax=%lx\n",
+                MmSystemPteSpaceStart,
+                (PVOID)((ULONG_PTR)MmSystemPteSpaceStart +
+                        ((MmNumberOfSystemPtes + 1) * PAGE_SIZE)),
+                MmNumberOfSystemPtes, MmPfnDatabase,
+                MmNonPagedPoolStart, MmNonPagedPoolEnd, NonPagedPoolExpansionVa,
+                MmSystemCacheStart, MmSystemCacheEnd,
+                MmPagedPoolStart, MmPagedPoolEnd,
+                (ULONG)MmSizeOfNonPagedPoolInBytes,
+                (ULONG)MmMaximumNonPagedPoolInBytes);
+    }
 
     //
     // Reset the descriptor back so we can create the correct memory blocks
@@ -501,7 +611,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Allocate a page for hyperspace and create it */
     MI_SET_USAGE(MI_USAGE_PAGE_TABLE);
     MI_SET_PROCESS2("Kernel");
-    PageFrameIndex = MiRemoveAnyPage(0);
+    PageFrameIndex = NxkPageSupplyTakeAny(0);
     TempPde = ValidKernelPdeLocal;
     TempPde.u.Hard.PageFrameNumber = PageFrameIndex;
     MI_WRITE_VALID_PTE(StartPde, TempPde);
@@ -552,7 +662,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Get a page for the working set list */
     MI_SET_USAGE(MI_USAGE_PAGE_TABLE);
     MI_SET_PROCESS2("Kernel WS List");
-    PageFrameIndex = MiRemoveAnyPage(0);
+    PageFrameIndex = NxkPageSupplyTakeAny(0);
     TempPte = ValidKernelPteLocal;
     TempPte.u.Hard.PageFrameNumber = PageFrameIndex;
 
@@ -577,10 +687,13 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Release the lock */
     MiReleasePfnLock(OldIrql);
 
+
     /* Initialize the bogus address space */
     Flags = 0;
     MmInitializeProcessAddressSpace(PsGetCurrentProcess(), NULL, NULL, &Flags, NULL);
 
+
+#ifndef NXK_MM_PHYS
     /* Make sure the color lists are valid */
     ASSERT(MmFreePagesByColor[0] < (PMMCOLOR_TABLES)PTE_BASE);
     StartPde = MiAddressToPde(MmFreePagesByColor[0]);
@@ -609,6 +722,15 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         /* Keep going */
         PointerPte++;
     }
+#endif /* !NXK_MM_PHYS */
+
+    /* The Xbox KSEG0 / WC / UC MMIO windows are painted later (from
+     * Phase1Initialization in ex/init.c).  An eager paint at the tail of
+     * MiInitMachineDependent triple-faults: Mm init is still writing PDEs
+     * and reading PTEs through the self-map for VAs we'd be overlaying.
+     * The pool cap from NxkMmReserveXboxWindows above keeps the pool out
+     * of the MMIO range in the meantime. */
+
 
     /* All done */
     return STATUS_SUCCESS;

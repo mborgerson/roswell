@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Needed for `gh release create` to publish the release and upload assets.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Fail fast before the (expensive) build if the tag and VERSION disagree.
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches VERSION
+        run: |
+          want="v$(cat VERSION)"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($want)"
+            exit 1
+          fi
+
+  # Reuse the whole CI (build + api-regression across all variants) as the
+  # release gate -- no duplicated build/test code.
+  build:
+    needs: check
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release build
+        uses: actions/download-artifact@v4
+        with:
+          name: nxkrnl-release
+          path: dist-in
+
+      - name: Stage release asset
+        run: |
+          mkdir -p dist
+          flash=$(find dist-in -name flash.bin | head -1)
+          test -n "$flash" || { echo "::error::release artifact missing flash.bin"; exit 1; }
+          # Strip the tag's leading "v" so the file is nxkrnl-0.1.0-flash.bin.
+          ver="${GITHUB_REF_NAME#v}"
+          cp "$flash" "dist/nxkrnl-${ver}-flash.bin"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/*

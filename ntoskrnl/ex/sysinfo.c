@@ -245,6 +245,22 @@ ExLockUserBuffer(
     return STATUS_SUCCESS;
 }
 
+#ifdef SARCH_XBOX
+/* Xbox has no SMBIOS and no WMI providers; short-circuit before any
+ * IoWMI* helper reference forces them into the link graph. */
+NTSTATUS
+NTAPI
+ExpGetRawSMBiosTable(
+    _Out_opt_ PVOID Buffer,
+    _Out_ ULONG * OutSize,
+    _In_ ULONG BufferSize)
+{
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(BufferSize);
+    if (OutSize) *OutSize = 0;
+    return STATUS_NOT_SUPPORTED;
+}
+#else
 NTSTATUS
 NTAPI
 ExpGetRawSMBiosTable(
@@ -313,6 +329,7 @@ ExpGetRawSMBiosTable(
     ExFreePoolWithTag(AllData, 'itfS');
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 /* FUNCTIONS *****************************************************************/
 
@@ -1615,6 +1632,12 @@ QSI_DEF(SystemFullMemoryInformation)
 /* Class 26 - Load Image */
 SSI_DEF(SystemLoadGdiDriverInformation)
 {
+#ifdef SARCH_XBOX
+    /* No GDI on Xbox; no usermode caller. */
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(Size);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PSYSTEM_GDI_DRIVER_INFORMATION DriverInfo = (PVOID)Buffer;
     UNICODE_STRING ImageName;
     PVOID ImageBase;
@@ -1664,11 +1687,17 @@ SSI_DEF(SystemLoadGdiDriverInformation)
 
     /* All is good */
     return STATUS_SUCCESS;
+#endif
 }
 
 /* Class 27 - Unload Image */
 SSI_DEF(SystemUnloadGdiDriverInformation)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(Size);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PVOID *SectionPointer = Buffer;
 
     /* Validate size */
@@ -1684,6 +1713,7 @@ SSI_DEF(SystemUnloadGdiDriverInformation)
     /* Unload the image */
     MmUnloadSystemImage(*SectionPointer);
     return STATUS_SUCCESS;
+#endif
 }
 
 /* Class 28 - Time Adjustment Information */
@@ -1919,6 +1949,15 @@ SSI_DEF(SystemRegistryQuotaInformation)
 /* Class 38 - Load And Call Image */
 SSI_DEF(SystemExtendServiceTableInformation)
 {
+#ifdef SARCH_XBOX
+    /* No win32k.sys on Xbox -- the only legal caller use case is loading
+     * it. Removing the body lets the linker drop the ZwSetSystemInformation
+     * recursive-call anchor, which lets the whole Nt/Zw SetSystemInformation
+     * + 16 SSI handlers chain GC out. */
+    UNREFERENCED_PARAMETER(Buffer);
+    UNREFERENCED_PARAMETER(Size);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     UNICODE_STRING ImageName;
     KPROCESSOR_MODE PreviousMode = KeGetPreviousMode();
     PLDR_DATA_TABLE_ENTRY ModuleObject;
@@ -2008,6 +2047,7 @@ SSI_DEF(SystemExtendServiceTableInformation)
     /* Unload if we failed */
     if (!NT_SUCCESS(Status)) MmUnloadSystemImage(ModuleObject);
     return Status;
+#endif
 }
 
 /* Class 39 - Priority Separation */
@@ -2096,7 +2136,14 @@ SSI_DEF(SystemCurrentTimeZoneInformation)
         return STATUS_INFO_LENGTH_MISMATCH;
     }
 
+#ifdef SARCH_XBOX
+    /* No set-system-information surface; this table slot is the last
+     * reference keeping the time-zone setter (and the INIT-tagged
+     * KeSetSystemTime behind it) linked. */
+    return STATUS_NOT_IMPLEMENTED;
+#else
     return ExpSetTimeZoneInformation((PRTL_TIME_ZONE_INFORMATION)Buffer);
+#endif
 }
 
 static

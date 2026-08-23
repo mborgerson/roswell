@@ -40,6 +40,18 @@ LIST_ENTRY AllFdosList = {&AllFdosList, &AllFdosList};
 #define FDO_HACK_GESN_IGNORE_OPCHANGE           (0x00000010)
 */
 
+#ifdef SARCH_XBOX
+/* The original 2.2 KB list of PC CD/DVD firmware-quirk workarounds
+ * (Mitsumi / HP / Hitachi-LG / Compaq / Pioneer / ASUS / Sony / etc.)
+ * targets drives that don't exist on Xbox -- the only DVD models shipped
+ * in retail boxes are Philips, Samsung, and Thomson units, none of which
+ * are on the list and none of which need these hacks.  Single terminator
+ * entry: ClassScanForSpecial walks until {NULL,NULL,...} and applies
+ * nothing. */
+CLASSPNP_SCAN_FOR_SPECIAL_INFO ClassBadItems[] = {
+    { NULL      , NULL                             , NULL  ,   0x00 },
+};
+#else
 CLASSPNP_SCAN_FOR_SPECIAL_INFO ClassBadItems[] = {                     // Type (HH, slim) + WHQL Date, if known
     { ""        , "MITSUMI CD-ROM FX240"           , NULL  ,   0x02 },
     { ""        , "MITSUMI CD-ROM FX320"           , NULL  ,   0x02 },
@@ -210,6 +222,7 @@ CLASSPNP_SCAN_FOR_SPECIAL_INFO ClassBadItems[] = {                     // Type (
 
     { NULL      , NULL                             , NULL  ,   0x00 },
 };
+#endif /* SARCH_XBOX */
 
 
 GUID ClassGuidQueryRegInfoEx = GUID_CLASSPNP_QUERY_REGINFOEX;

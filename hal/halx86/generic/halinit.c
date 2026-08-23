@@ -138,10 +138,24 @@ HalInitSystem(
         /* Initialize CMOS */
         HalpInitializeCmos();
 
+#if defined(SARCH_XBOX)
+        {
+            /* Cromwell did all chipset/RTC/ACPI/SMC bring-up before handing
+             * off to the kernel; matching that ordering matters because
+             * HalpCalibrateStallExecution below times its busy-loop against
+             * RTC IRQ 8, and clock-init programs the PIT.  Both want the
+             * chipset already in retail configuration. */
+            extern VOID NxConfigurePciDevices(VOID);
+            NxConfigurePciDevices();
+        }
+#endif
+
         /* Fill out the dispatch tables */
         HalQuerySystemInformation = HaliQuerySystemInformation;
         HalSetSystemInformation = HaliSetSystemInformation;
+#ifndef SARCH_XBOX
         HalInitPnpDriver = HaliInitPnpDriver;
+#endif
         HalGetDmaAdapter = HalpGetDmaAdapter;
 
         HalGetInterruptTranslator = NULL;  // FIXME: TODO
@@ -158,11 +172,13 @@ HalInitSystem(
         /* Initialize the clock */
         HalpInitializeClock();
 
+#ifndef SARCH_XBOX
         /*
          * We could be rebooting with a pending profile interrupt,
          * so clear it here before interrupts are enabled
          */
         HalStopProfileInterrupt(ProfileTime);
+#endif
 
         /* Do some HAL-specific initialization */
         HalpInitPhase0(LoaderBlock);

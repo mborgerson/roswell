@@ -1,0 +1,5 @@
+# Third-party code -- keep upstream formatting, don't clang-format it.
+# Patterns are relative to this directory (boot/nxldr).
+xz/*
+nanoprintf.c
+nanoprintf.h

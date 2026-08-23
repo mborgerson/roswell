@@ -79,8 +79,13 @@ NtWaitForMultipleObjects(IN ULONG ObjectCount,
         return STATUS_INVALID_PARAMETER_3;
     }
 
-    /* Enter SEH */
     PreviousMode = ExGetPreviousMode();
+#ifdef SARCH_XBOX
+    /* No usermode; PreviousMode is always KernelMode and HandleArray is a
+     * trusted in-kernel pointer.  Skip the probe + SEH guard. */
+    RtlCopyMemory(Handles, HandleArray, ObjectCount * sizeof(HANDLE));
+#else
+    /* Enter SEH */
     _SEH2_TRY
     {
         /* Probe for user mode */
@@ -122,6 +127,7 @@ NtWaitForMultipleObjects(IN ULONG ObjectCount,
         _SEH2_YIELD(return _SEH2_GetExceptionCode());
     }
     _SEH2_END;
+#endif
 
     /* Check if we can use the internal Wait Array */
     if (ObjectCount > THREAD_WAIT_OBJECTS)
@@ -445,6 +451,116 @@ NtWaitForSingleObject(IN HANDLE ObjectHandle,
     return Status;
 }
 
+/*
+ * Xbox: wait on a handle honoring an EXPLICIT WaitMode.  The Xbox
+ * NtWaitForSingleObjectEx takes a WaitMode the caller can set to UserMode so
+ * the wait is alertable to its own async-IO completion APCs; ReactOS's
+ * NtWaitForSingleObject instead derives WaitMode from PreviousMode, which is
+ * KernelMode for a ring-0 title -- making the wait non-alertable and stranding
+ * those APCs.  The handle is referenced in KernelMode; only the wait mode comes
+ * from the caller.  Mirrors NtWaitForSingleObject above.
+ */
+NTSTATUS
+NTAPI
+NxkWaitForSingleObjectMode(IN HANDLE Handle,
+                           IN KPROCESSOR_MODE WaitMode,
+                           IN BOOLEAN Alertable,
+                           IN PLARGE_INTEGER Timeout OPTIONAL)
+{
+    PVOID Object, WaitableObject;
+    NTSTATUS Status;
+
+    Status = ObReferenceObjectByHandle(Handle,
+                                       SYNCHRONIZE,
+                                       NULL,
+                                       KernelMode,
+                                       &Object,
+                                       NULL);
+    if (!NT_SUCCESS(Status)) return Status;
+
+    WaitableObject = OBJECT_TO_OBJECT_HEADER(Object)->Type->DefaultObject;
+    if (IsPointerOffset(WaitableObject))
+    {
+        WaitableObject = (PVOID)((ULONG_PTR)Object + (ULONG_PTR)WaitableObject);
+    }
+
+    Status = KeWaitForSingleObject(WaitableObject,
+                                   UserRequest,
+                                   WaitMode,
+                                   Alertable,
+                                   Timeout);
+
+    ObDereferenceObject(Object);
+    return Status;
+}
+
+/*
+ * Xbox: multi-object wait honoring an EXPLICIT WaitMode.  Same motivation as
+ * NxkWaitForSingleObjectMode -- a caller passing WaitMode=UserMode wants the
+ * wait alertable so its async-IO completion APCs can break it, but ReactOS's
+ * NtWaitForMultipleObjects derives WaitMode from PreviousMode (KernelMode for
+ * the ring-0 title), making the wait non-alertable and stranding APCs.  USBD
+ * device threads do thousands of these per second.
+ *
+ * Resolution + dispatch mirrors KeWaitForMultipleObjects, allocating thread
+ * wait blocks on the stack since count <= MAXIMUM_WAIT_OBJECTS (64).
+ */
+NTSTATUS
+NTAPI
+NxkWaitForMultipleObjectsMode(IN ULONG Count,
+                              IN PHANDLE Handles,
+                              IN WAIT_TYPE WaitType,
+                              IN KPROCESSOR_MODE WaitMode,
+                              IN BOOLEAN Alertable,
+                              IN PLARGE_INTEGER Timeout OPTIONAL)
+{
+    PVOID Objects[MAXIMUM_WAIT_OBJECTS];
+    PVOID Waitables[MAXIMUM_WAIT_OBJECTS];
+    NTSTATUS Status;
+    ULONG i;
+
+    if (Count == 0 || Count > MAXIMUM_WAIT_OBJECTS)
+        return STATUS_INVALID_PARAMETER;
+    if (WaitType != WaitAll && WaitType != WaitAny)
+        return STATUS_INVALID_PARAMETER;
+
+    /* Resolve every handle (kernel-mode access -- title is ring-0). */
+    for (i = 0; i < Count; i++)
+    {
+        Status = ObReferenceObjectByHandle(Handles[i],
+                                           SYNCHRONIZE,
+                                           NULL,
+                                           KernelMode,
+                                           &Objects[i],
+                                           NULL);
+        if (!NT_SUCCESS(Status))
+        {
+            /* unwind on failure */
+            while (i-- > 0) ObDereferenceObject(Objects[i]);
+            return Status;
+        }
+        Waitables[i] = OBJECT_TO_OBJECT_HEADER(Objects[i])->Type->DefaultObject;
+        if (IsPointerOffset(Waitables[i]))
+        {
+            Waitables[i] = (PVOID)((ULONG_PTR)Objects[i]
+                                   + (ULONG_PTR)Waitables[i]);
+        }
+    }
+
+    Status = KeWaitForMultipleObjects(Count,
+                                      Waitables,
+                                      WaitType,
+                                      UserRequest,
+                                      WaitMode,
+                                      Alertable,
+                                      Timeout,
+                                      NULL);
+
+    for (i = 0; i < Count; i++)
+        ObDereferenceObject(Objects[i]);
+    return Status;
+}
+
 /*++
 * @name NtSignalAndWaitForSingleObject
 * @implemented NT4
@@ -475,6 +591,13 @@ NtSignalAndWaitForSingleObject(IN HANDLE ObjectHandleToSignal,
                                IN BOOLEAN Alertable,
                                IN PLARGE_INTEGER TimeOut OPTIONAL)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(ObjectHandleToSignal);
+    UNREFERENCED_PARAMETER(WaitableObjectHandle);
+    UNREFERENCED_PARAMETER(Alertable);
+    UNREFERENCED_PARAMETER(TimeOut);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     KPROCESSOR_MODE PreviousMode;
     POBJECT_TYPE Type;
     PVOID SignalObj, WaitObj, WaitableObject;
@@ -629,6 +752,7 @@ Quickie:
     ObDereferenceObject(SignalObj);
     ObDereferenceObject(WaitObj);
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /* EOF */

@@ -1624,6 +1624,13 @@ MiDereferencePfnAndDropLockCount(IN PMMPFN Pfn1)
     USHORT RefCount, OldRefCount;
     PFN_NUMBER PageFrameIndex;
 
+#ifdef NXK_MM_PHYS
+    /* Nothing pages or trims: MDL pinning is a no-op, and the MMPFN
+     * entry of an nxmm-owned page carries no live counts. */
+    UNREFERENCED_PARAMETER(Pfn1);
+    return;
+#endif
+
     /* Loop while we decrement the page successfully */
     do
     {
@@ -1694,6 +1701,11 @@ VOID
 MiReferenceProbedPageAndBumpLockCount(IN PMMPFN Pfn1)
 {
     USHORT RefCount, OldRefCount;
+
+#ifdef NXK_MM_PHYS
+    UNREFERENCED_PARAMETER(Pfn1);
+    return;
+#endif
 
     /* Sanity check */
     ASSERT(Pfn1->u3.e2.ReferenceCount != 0);
@@ -2122,6 +2134,102 @@ VOID
 NTAPI
 MiInsertPageInFreeList(
     IN PFN_NUMBER PageFrameIndex
+);
+
+//
+// NxkPageSupply (xb/mm/pagesupply.c) -- the single-page take/return
+// seam in front of the page lists.  All single-page allocation outside
+// the backend (pfnlist.c, zeropage.c) goes through these, not the
+// MiRemove*/MiInsert* routines above.  Same contract: PFN lock held,
+// Take* returns 0 when empty.
+//
+PFN_NUMBER
+NTAPI
+NxkPageSupplyTakeAny(
+    IN ULONG Color
+);
+
+PFN_NUMBER
+NTAPI
+NxkPageSupplyTakeZero(
+    IN ULONG Color
+);
+
+PFN_NUMBER
+NTAPI
+NxkPageSupplyTakeZeroIfReady(
+    IN ULONG Color
+);
+
+VOID
+NTAPI
+NxkPageSupplyReturn(
+    IN PFN_NUMBER PageFrameIndex
+);
+
+PFN_NUMBER
+NTAPI
+NxkPageSupplyAvailable(VOID);
+
+BOOLEAN
+NxkPageSupplyIsFree(
+    IN PFN_NUMBER PageFrameIndex
+);
+
+PFN_NUMBER
+NxkPageSupplyTakeRun(
+    IN PFN_NUMBER RunPages,
+    IN PFN_NUMBER LowPfn,
+    IN PFN_NUMBER HighPfn,
+    IN PFN_NUMBER AlignPages);
+
+VOID
+NxkPageSupplySetOwner(
+    IN PFN_NUMBER Page,
+    IN ULONG_PTR PteVa);
+
+ULONG_PTR
+NxkPageSupplyGetOwner(
+    IN PFN_NUMBER Page);
+
+PFN_NUMBER
+NxkPageSupplyTakeRunRelocate(
+    IN PFN_NUMBER RunPages,
+    IN PFN_NUMBER LowPfn,
+    IN PFN_NUMBER HighPfn,
+    IN PFN_NUMBER AlignPages);
+
+PFN_NUMBER
+NxkPageSupplyTakeAnyOutside(
+    IN PFN_NUMBER LowPfn,
+    IN PFN_NUMBER HighPfn);
+
+BOOLEAN
+NxkPageSupplyTakeSpecific(
+    IN PFN_NUMBER PageFrameIndex
+);
+
+BOOLEAN
+NxPoolPagesOwns(
+    IN PVOID BaseAddress
+);
+
+/* Kernel-stack page count behind MmQueryStatistics (defined in
+ * xb/mm/api.c); thread-stack create/delete keep it current. */
+extern volatile LONG NxkMmStackPages;
+
+VOID
+NxkPageSupplyInitialize(
+    IN PFN_NUMBER HighestPfn,
+    IN PVOID LinksArray
+);
+
+SIZE_T
+NxPoolPagesMetadataSize(VOID);
+
+VOID
+NxPoolPagesInitialize(
+    IN PVOID Metadata
 );
 
 PFN_COUNT

@@ -48,7 +48,10 @@ KDP_DEBUG_MODE KdpDebugMode;
 LIST_ENTRY KdProviders = {&KdProviders, &KdProviders};
 KD_DISPATCH_TABLE DispatchTable[KdMax] = {0};
 
-PKDP_INIT_ROUTINE InitRoutines[KdMax] =
+/* Only read by the INIT-tagged Phase-0 provider loop in kdmain.c;
+ * Phase-1 re-init goes through DispatchTable. */
+DATA_SEG("INITDATA")
+PKDP_INIT_ROUTINE const InitRoutines[KdMax] =
 {
     KdpScreenInit,
     KdpSerialInit,
@@ -242,7 +245,9 @@ KdpDebugLogInit(
         OBJECT_ATTRIBUTES ObjectAttributes;
         IO_STATUS_BLOCK Iosb;
         HANDLE ThreadHandle;
+#ifndef SARCH_XBOX
         KPRIORITY Priority;
+#endif
 
         /* If we have already successfully opened the log file, bail out */
         if (KdpLogFileHandle != NULL)
@@ -339,11 +344,15 @@ KdpDebugLogInit(
             goto Failure;
         }
 
+#ifndef SARCH_XBOX
+        /* NtSetInformationThread is unlinked; the logger thread keeps
+           its default priority. */
         Priority = HIGH_PRIORITY;
         ZwSetInformationThread(ThreadHandle,
                                ThreadPriority,
                                &Priority,
                                sizeof(Priority));
+#endif
 
         ZwClose(ThreadHandle);
         return Status;

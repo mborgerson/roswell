@@ -184,6 +184,11 @@ Return Value:
 --*/
 
 {
+#ifdef SARCH_XBOX
+    // No firmware-provided detect info on Xbox; geometry comes from the port driver.
+    UNREFERENCED_PARAMETER(DriverObject);
+    return STATUS_SUCCESS;
+#else
     OBJECT_ATTRIBUTES objectAttributes = {0};
     HANDLE hardwareKey;
 
@@ -269,6 +274,7 @@ Return Value:
     ZwClose(hardwareKey);
 
     return STATUS_SUCCESS;
+#endif
 }
 
 
@@ -305,6 +311,11 @@ DiskSaveGeometryDetectInfo(
     IN HANDLE HardwareKey
     )
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(HardwareKey);
+    return STATUS_SUCCESS;
+#else
     UNICODE_STRING unicodeString;
     PKEY_VALUE_FULL_INFORMATION keyData;
     ULONG length;
@@ -426,6 +437,7 @@ DiskSaveGeometryDetectInfo(
 
     FREE_POOL(keyData);
     return STATUS_SUCCESS;
+#endif
 }
 
 
@@ -453,6 +465,11 @@ Return Value:
 
 --*/
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(BusKey);
+    return;
+#else
     ULONG busNumber;
 
     NTSTATUS status;
@@ -598,6 +615,7 @@ Return Value:
     }
 
     return;
+#endif
 }
 
 
@@ -630,6 +648,12 @@ Return Value:
 
 --*/
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(TargetKey);
+    UNREFERENCED_PARAMETER(DiskNumber);
+    return STATUS_SUCCESS;
+#else
     PDISK_DETECT_INFO diskInfo;
 
     UNICODE_STRING unicodeString;
@@ -765,6 +789,7 @@ Return Value:
     FREE_POOL(keyData);
 
     return STATUS_SUCCESS;
+#endif
 }
 
 

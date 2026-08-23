@@ -295,6 +295,9 @@ FdoQueryBusRelations(
 
             PdoDeviceExtension->PciDevice = Device;
 
+#ifndef SARCH_XBOX
+            /* PnP ID/description strings: nothing queries them on the
+             * static device tree (QUERY_ID is answered by the tree PDOs). */
             /* Add Device ID string */
             Status = PciCreateDeviceIDString(&PdoDeviceExtension->DeviceID, Device);
             if (!NT_SUCCESS(Status))
@@ -350,6 +353,7 @@ FdoQueryBusRelations(
                 ErrorOccurred = TRUE;
                 break;
             }
+#endif
         }
 
         /* Reference the physical device object. The PnP manager
@@ -367,6 +371,7 @@ FdoQueryBusRelations(
     {
         /* FIXME: Cleanup all new PDOs created in this call. Please give me SEH!!! ;-) */
         /* FIXME: Should IoAttachDeviceToDeviceStack() be undone? */
+#ifndef SARCH_XBOX
         if (PdoDeviceExtension)
         {
             RtlFreeUnicodeString(&PdoDeviceExtension->DeviceID);
@@ -376,6 +381,7 @@ FdoQueryBusRelations(
             RtlFreeUnicodeString(&PdoDeviceExtension->DeviceDescription);
             RtlFreeUnicodeString(&PdoDeviceExtension->DeviceLocation);
         }
+#endif
 
         ExFreePoolWithTag(Relations, TAG_PCI);
         return ErrorStatus;

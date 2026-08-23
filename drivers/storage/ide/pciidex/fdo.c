@@ -197,8 +197,10 @@ AtaCtrlDowngradeInterfaceSpeed(
 
     PAGED_CODE();
 
+#ifndef SARCH_XBOX
     if (Controller->Flags & CTRL_FLAG_IS_AHCI)
         return AtaAhciDowngradeInterfaceSpeed(ChannelContext);
+#endif
 
     /* Optionally, implement a SATA framework at some point in the future */
     return FALSE;
@@ -501,8 +503,10 @@ PciIdeXFdoStartDevice(
              Controller->Pci.SubClass,
              Controller->Pci.ProgIf);
 
+#ifndef SARCH_XBOX
         Status = AhciGetControllerProperties(Controller);
         if (Status == STATUS_NO_MATCH)
+#endif
             Status = PciIdeGetControllerProperties(Controller);
     }
     if (!NT_SUCCESS(Status))
@@ -553,11 +557,13 @@ PciIdeXFdoFreeResources(
         Controller->ChanDataBlock = NULL;
     }
 
+#ifndef SARCH_XBOX
     if (Controller->HwSyncObject)
     {
         IoDeleteController(Controller->HwSyncObject);
         Controller->HwSyncObject = NULL;
     }
+#endif
 
     if (Controller->HwExt)
     {
@@ -581,6 +587,18 @@ PciIdeXFdoStopDevice(
     return STATUS_SUCCESS;
 }
 
+#ifdef SARCH_XBOX
+/* IRP_MN_REMOVE_DEVICE and the legacy-detect controller-context paths are
+ * both gated off on Xbox; this FDO never tears down. */
+CODE_SEG("PAGE")
+VOID
+PciIdeXFdoRemoveDevice(
+    _In_ PVOID ControllerContext)
+{
+    UNREFERENCED_PARAMETER(ControllerContext);
+    PAGED_CODE();
+}
+#else
 CODE_SEG("PAGE")
 VOID
 PciIdeXFdoRemoveDevice(
@@ -609,6 +627,7 @@ PciIdeXFdoRemoveDevice(
 
     PciIdeXFdoFreeResources(FdoExt);
 }
+#endif
 
 static
 CODE_SEG("PAGE")
@@ -797,6 +816,22 @@ PciIdeXFdoQueryBusRelations(
     return STATUS_SUCCESS;
 }
 
+#ifdef SARCH_XBOX
+/* CTRL_FLAG_NATIVE_PCI is set on Xbox so the legacy interrupt translator
+ * lookup always fails; nothing else is supported. */
+static
+CODE_SEG("PAGE")
+NTSTATUS
+PciIdeXFdoQueryInterface(
+    _In_ PFDO_DEVICE_EXTENSION FdoExtension,
+    _In_ PIO_STACK_LOCATION IoStack)
+{
+    UNREFERENCED_PARAMETER(FdoExtension);
+    UNREFERENCED_PARAMETER(IoStack);
+    PAGED_CODE();
+    return STATUS_NOT_SUPPORTED;
+}
+#else
 static
 CODE_SEG("PAGE")
 NTSTATUS
@@ -838,6 +873,7 @@ PciIdeXFdoQueryInterface(
 
     return STATUS_NOT_SUPPORTED;
 }
+#endif
 
 static
 CODE_SEG("PAGE")
@@ -945,6 +981,7 @@ PciIdeXFdoDispatchPnp(
             goto CompleteIrp;
         }
 
+#ifndef SARCH_XBOX
         case IRP_MN_STOP_DEVICE:
         {
             Status = PciIdeXFdoStopDevice(FdoExtension);
@@ -965,6 +1002,7 @@ PciIdeXFdoDispatchPnp(
             IoDeleteDevice(FdoExtension->Common.Self);
             return Status;
         }
+#endif
 
         case IRP_MN_QUERY_PNP_DEVICE_STATE:
         {
@@ -985,11 +1023,13 @@ PciIdeXFdoDispatchPnp(
             break;
         }
 
+#ifndef SARCH_XBOX
         case IRP_MN_DEVICE_USAGE_NOTIFICATION:
         {
             Status = PciIdeXPnpQueryDeviceUsageNotification(&FdoExtension->Common, Irp);
             break;
         }
+#endif
 
         case IRP_MN_QUERY_INTERFACE:
         {
@@ -1001,6 +1041,7 @@ PciIdeXFdoDispatchPnp(
             break;
         }
 
+#ifndef SARCH_XBOX
         case IRP_MN_QUERY_STOP_DEVICE:
         case IRP_MN_QUERY_REMOVE_DEVICE:
         case IRP_MN_SURPRISE_REMOVAL:
@@ -1008,6 +1049,7 @@ PciIdeXFdoDispatchPnp(
         case IRP_MN_CANCEL_REMOVE_DEVICE:
             Irp->IoStatus.Status = STATUS_SUCCESS;
             break;
+#endif
 
         case IRP_MN_QUERY_ID:
             return PciIdeXFdoQueryId(FdoExtension, Irp, IoStack);

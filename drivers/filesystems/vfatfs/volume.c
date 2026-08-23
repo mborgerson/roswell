@@ -510,6 +510,17 @@ NTSTATUS
 VfatSetVolumeInformation(
     PVFAT_IRP_CONTEXT IrpContext)
 {
+#ifdef SARCH_XBOX
+    /* The only FS_INFORMATION_CLASS we ever handled was FileFsLabelInformation
+     * (renaming the runtime volume label).  The Xbox kernel ABI doesn't
+     * export NtSetVolumeInformationFile -- only NtQueryVolumeInformationFile
+     * -- so no title can reach this IRP path.
+     * Returning STATUS_NOT_SUPPORTED unconditionally lets --gc-sections drop
+     * the FAT/FATX dir-entry write helpers (FsdSetFsLabelInformation, 1.5 KB). */
+    ASSERT(IrpContext);
+    IrpContext->Irp->IoStatus.Information = 0;
+    return STATUS_NOT_SUPPORTED;
+#else
     FS_INFORMATION_CLASS FsInformationClass;
     NTSTATUS Status = STATUS_SUCCESS;
     PVOID SystemBuffer;
@@ -550,6 +561,7 @@ VfatSetVolumeInformation(
     IrpContext->Irp->IoStatus.Information = 0;
 
     return Status;
+#endif
 }
 
 /* EOF */

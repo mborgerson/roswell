@@ -53,7 +53,12 @@ PCI_CONFIG_HANDLER PCIConfigHandlerType1 =
     }
 };
 
-/* Type 2 PCI Bus */
+#ifndef SARCH_XBOX
+/* Type 2 PCI Bus -- CardBus/old PC Card.  Xbox NV2A/MCPX is Type 1 only
+ * (0xCF8/0xCFC config window); the registry never reports HardwareMechanism=2
+ * so HalpInitializePciBus's Type 2 branch is dead, and dropping this anchor
+ * dead-strips HalpPCI{Synchronize,ReleaseSynchronization,Read{Uchar,Ushort,
+ * Ulong},Write{Uchar,Ushort,Ulong}}Type2. */
 PCI_CONFIG_HANDLER PCIConfigHandlerType2 =
 {
     /* Synchronization */
@@ -74,7 +79,9 @@ PCI_CONFIG_HANDLER PCIConfigHandlerType2 =
         (FncConfigIO)HalpPCIWriteUshortType2
     }
 };
+#endif
 
+DATA_SEG("INITDATA_RW")
 PCIPBUSDATA HalpFakePciBusData =
 {
     {
@@ -91,6 +98,7 @@ PCIPBUSDATA HalpFakePciBusData =
     32,
 };
 
+DATA_SEG("INITDATA_RW")
 BUS_HANDLER HalpFakePciBusHandler =
 {
     1,
@@ -106,7 +114,15 @@ BUS_HANDLER HalpFakePciBusHandler =
     (PGETSETBUSDATA)HalpGetPCIData,
     (PGETSETBUSDATA)HalpSetPCIData,
     NULL,
+#ifdef SARCH_XBOX
+    /* The fake PCI bus handler is only used as a scratch buffer for
+     * HaliPciInterfaceReadConfig (mid-boot config-space reads); its
+     * AssignSlotResources slot is never invoked.  Drop the address-taken
+     * reference so HalpAssignPCISlotResources can be dead-stripped. */
+    NULL,
+#else
     HalpAssignPCISlotResources,
+#endif
     NULL,
     NULL
 };
@@ -956,7 +972,13 @@ PPCI_REGISTRY_INFO_INTERNAL
 NTAPI
 HalpQueryPciRegistryInfo(VOID)
 {
-#ifndef _MINIHAL_
+#ifdef SARCH_XBOX
+    /* No \\Registry\\Machine\\Hardware\\Description\\System\\MultiFunctionAdapter
+     * key on Xbox -- ZwOpenKey would fail immediately and the function would
+     * return NULL.  Short-circuit to drop the ZwOpenKey/ZwQueryValueKey/
+     * ZwEnumerateValueKey chain (and the on-stack 100-byte buffer). */
+    return NULL;
+#elif !defined(_MINIHAL_)
     WCHAR NameBuffer[8];
     OBJECT_ATTRIBUTES  ObjectAttributes;
     UNICODE_STRING KeyName, ConfigName, IdentName;
@@ -1238,7 +1260,8 @@ HalpInitializePciStubs(VOID)
             BusData->Config.Type1.Data = PCI_TYPE1_DATA_PORT;
             break;
 
-        /* Type 2 PCI Bus */
+#ifndef SARCH_XBOX
+        /* Type 2 PCI Bus -- CardBus, not on Xbox (MCPX is Type 1 only) */
         case 2:
 
             /* Copy the Type 2 handler data */
@@ -1254,6 +1277,7 @@ HalpInitializePciStubs(VOID)
             /* Only 16 devices supported, not 32 */
             BusData->MaxDevice = 16;
             break;
+#endif
 
         default:
 

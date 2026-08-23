@@ -1774,6 +1774,40 @@ typedef struct _KTHREAD
 #if defined(__REACTOS__) && defined(_M_AMD64) // HACK!
     XSAVE_FORMAT* StateSaveArea;
 #endif
+    /*
+     * nxkrnl Xbox per-thread state, appended at the end so all upstream
+     * offsets are preserved.
+     *
+     * XeXboxShadow:  Xbox-shaped KTHREAD the title sees through
+     *   KeGetCurrentThread() (ordinal 104).  Only offset 0x28 (TlsData) is
+     *   read by today's titles; we keep the rest zero so any unexpected
+     *   field read returns NULL rather than ReactOS internals.  Sized to
+     *   match the largest Xbox KTHREAD field offset we expect a title to
+     *   touch (Priority/KernelTime/etc., all below 0x80).
+     *
+     * XeXboxFs4:  the per-thread fs:[0x04] (NtTib.StackBase) value the
+     *   title's compiled __thread access expects.  KiSwapContextExit hooks
+     *   into XeRestoreTlsFsBase, which reads this field on the new
+     *   thread and writes it to the PCR.  Zero (the default) means "leave
+     *   fs:[0x04] alone" -- correct for kernel threads that aren't running
+     *   title code.
+     */
+    UCHAR XeXboxShadow[0x80];     /* 128 bytes; offset 0x28 = TlsData */
+    ULONG_PTR XeXboxFs4;          /* per-thread fs:[0x04] target value */
+    SIZE_T XeStackSize;           /* kernel-stack size (0 = KERNEL_STACK_SIZE).
+                                     * Set by KeInitThread; read by KeUninitThread
+                                     * so MmDeleteKernelStackEx releases all the
+                                     * pages that were actually committed for
+                                     * custom-sized stacks (XBE PeStackCommit /
+                                     * PsCreateSystemThreadEx KernelStackSize). */
+    PVOID XeBaseSeh;              /* fs:[0] at title-thread registration --
+                                     * the SEH chain head before title code
+                                     * pushed any frame (the system-thread
+                                     * catch-all wrapper).  Title int3
+                                     * dispatch compares against it: equal
+                                     * means no title handler exists and
+                                     * dispatching would let the wrapper
+                                     * kill the thread, so skip instead. */
 } KTHREAD;
 
 #else // not (NTDDI_VERSION < NTDDI_WIN8)

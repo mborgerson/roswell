@@ -3,6 +3,8 @@ include_directories(
     ${REACTOS_SOURCE_DIR}
     ${REACTOS_SOURCE_DIR}/sdk/lib/drivers/arbiter
     ${REACTOS_SOURCE_DIR}/sdk/lib/cmlib
+    # xbe.c pulls sha1.h/rc4.h for the Xbox Xc* crypto ordinals.
+    ${REACTOS_SOURCE_DIR}/sdk/lib/cryptlib
     include
     ${CMAKE_CURRENT_BINARY_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include/internal
@@ -45,48 +47,18 @@ endif()
 list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/cache/section/io.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/cache/section/sptab.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmalloc.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmapi.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmboot.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmconfig.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmcontrl.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmdata.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmdelay.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmhook.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmhvlist.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cminit.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmkcbncb.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmlazy.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmmapvw.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmnotify.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmparse.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmquota.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmse.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmsecach.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmsysini.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmvalche.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmwraprs.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/config/ntapi.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/dbgk/dbgkobj.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/dbgk/dbgkutil.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/atom.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/callback.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/dbgctrl.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/efi.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/event.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/evtpair.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/exintrin.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/fmutex.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/handle.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/harderr.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/hdlsterm.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/init.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/interlocked.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/keyedevt.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/locale.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/lookas.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/mutant.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/profile.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/pushlock.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/resource.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/rundown.c
@@ -96,17 +68,13 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/time.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/timer.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/uuid.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/win32k.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/work.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/xipdisp.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/zone.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/dbcsname.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/fastio.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/faulttol.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/filelock.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/filter.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/filtrctx.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/fsfilter.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/fsrtlpc.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/largemcb.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/mcb.c
@@ -126,10 +94,7 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/inbv/inbvport.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/adapter.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/arcname.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/bootlog.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/controller.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/device.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/deviface.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/driver.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/error.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/file.c
@@ -143,38 +108,12 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/iowork.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/irp.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/irq.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/ramdisk.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/rawfs.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/remlock.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/symlink.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/util.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/volume.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbbus.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbdma.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbirq.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbmem.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbport.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/devaction.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/devnode.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/plugplay.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpdma.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpinit.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpirp.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpmap.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpmgr.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpnotify.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpreport.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpres.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnproot.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnputil.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/io/debug.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdapi.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdbreak.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kddata.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdinit.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdlock.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdprint.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdtrap.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/apc.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/balmgr.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/bug.c
@@ -192,7 +131,6 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/mutex.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/processor.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/procobj.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/profobj.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/queue.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/semphobj.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/spinlock.c
@@ -201,22 +139,12 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/time.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/timerobj.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/wait.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/close.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/complete.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/connect.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/create.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/listen.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/port.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/reply.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/send.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/contmem.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/drvmgmt.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/dynamic.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/expool.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/hypermap.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/iosup.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/kdbg.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/largepag.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/mdlsup.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/mmdbg.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/mminit.c
@@ -258,51 +186,190 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ob/obwait.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/po/events.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/po/poshtdwn.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/po/povolume.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/po/power.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/apphelp.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/debug.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/job.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/kill.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/process.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/psmgr.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/psnotify.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/query.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/quota.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/security.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/state.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/thread.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/win32.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/rtl/libsupp.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/rtl/misc.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/access.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/accesschk.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/acl.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/audit.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/client.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/objtype.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/priv.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sd.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/semgr.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sid.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sqos.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/srm.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/subject.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/token.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokenadj.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokencls.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokenlif.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/vf/driver.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/guidobj.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/smbios.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/wmi.c
-    ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/wmidrv.c)
+    ${REACTOS_SOURCE_DIR}/ntoskrnl/vf/driver.c)
+
+if(NOT SARCH STREQUAL "xbox")
+    # Config Manager + most of PnP are unlinked on SARCH=xbox.  Hardware
+    # is fixed (see xb/devtree.c) and titles never consume Zw*Key, so the
+    # registry/PnP stack is replaced by stubs in xb/pnpstubs.c.  Files stay
+    # on disk; only the build pulls them in for other arches.
+    #
+    # Same idea for dbgk/, lpc/, se/, vdm/, wmi/, and ke/i386/v86vdm.c: titles
+    # run ring 0 with no user-mode debugger, no LPC ports, no ACL surface, no
+    # V8086 BIOS calls, and no WMI/ETW provider surface.  Also unlinked are
+    # ps/query.c and ps/security.c -- Nt-syscall dispatchers titles never
+    # reach.  Kept callers in ke/, ps/, ob/, fsrtl/, ex/, io/ are
+    # SARCH_XBOX-guarded or shimmed by macros next to the declarations
+    # (internal/se.h, internal/hdl.h, ndk/rtlfuncs.h).
+    list(APPEND SOURCE
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/dbgk/dbgkobj.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/dbgk/dbgkutil.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/close.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/complete.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/connect.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/create.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/listen.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/port.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/reply.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/lpc/send.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/access.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/accesschk.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/acl.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/audit.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/client.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/objtype.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/priv.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sd.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/semgr.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sid.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/sqos.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/srm.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/subject.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/token.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokenadj.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokencls.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/se/tokenlif.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/guidobj.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/smbios.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/wmi.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/wmi/wmidrv.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/atom.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/efi.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/evtpair.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/hdlsterm.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/keyedevt.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/profile.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/win32k.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/xipdisp.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/faulttol.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/fsfilter.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/bootlog.c
+        # Controller objects serialize simplex IDE controllers (CMD-640
+        # class); the MCPX IDE is dual-channel non-simplex, and no other
+        # user exists.  Callers in atapi/pciidex are SARCH_XBOX-guarded.
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/controller.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/deviface.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/ramdisk.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/profobj.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/dynamic.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/largepag.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/po/povolume.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/job.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/query.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/security.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/win32.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmalloc.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmapi.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmboot.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmconfig.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmcontrl.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmdata.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmdelay.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmhook.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmhvlist.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cminit.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmkcbncb.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmlazy.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmmapvw.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmnotify.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmparse.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmquota.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmse.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmsecach.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmsysini.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmvalche.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/cmwraprs.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/ntapi.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbbus.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbdma.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbirq.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbmem.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/arb/arbport.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/devaction.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/devnode.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpinit.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/plugplay.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpdma.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpirp.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpmap.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpmgr.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpnotify.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpreport.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnpres.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnproot.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/pnpmgr/pnputil.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/apphelp.c)
+else()
+    list(APPEND SOURCE
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/devtree.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/kistacks.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/nls-stubs.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/pci.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/pnpstubs.c)
+    # Non-LTO so the page-aligned stacks keep their own .bss input section;
+    # see xb/kistacks.c.
+    set_source_files_properties(${REACTOS_SOURCE_DIR}/ntoskrnl/xb/kistacks.c
+        PROPERTIES COMPILE_FLAGS "-fno-lto")
+endif()
 
 if(DBG)
     list(APPEND SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/se/debug.c)
 endif()
 
-list(APPEND ASM_SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/zw.S)
+if(SARCH STREQUAL "xbox")
+    # Titles run ring 0; the int 0x2E syscall trap is unused (no SSDT, no
+    # KiSystemServiceHandler, no ex/zw.S).  Zw names bind directly to the
+    # Nt implementations at the source level -- see the SARCH_XBOX block
+    # in sdk/include/xdk/zwfuncs.h (and sdk/lib/rtl/rtl.h); unreferenced
+    # Nt* implementations are GC'd as usual.
+
+    # Unlinkable objs (no symbol -- text or data -- live in either release
+    # or DBG build).  Drop from compile to save build time; the binary is
+    # unchanged because --gc-sections already strips them.
+    # NOTE: ps/debug.c stays -- DBG build calls PspDumpThreads from kd64.
+    list(REMOVE_ITEM SOURCE
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/oplock.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/dbcsname.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/unc.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/fsrtl/mcb.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/dbgctrl.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/zone.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/shutdown.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/debug.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/io/iomgr/ioevent.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdps2kbd.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdprompt.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdserial.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/balmgr.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/config.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/inbv/inbvport.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/ncache.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/kdbg.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/shutdown.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/cc/mdl.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/vf/driver.c
+        # po/ entirely gone: no S-state transitions, no idle detection,
+        # no power IRPs on Xbox.  Remaining call sites (PoInitSystem,
+        # PoInitializePrcb, PoNotifySystemTimeSet, ...) gated under
+        # SARCH_XBOX; PoRegisterDeviceForIdleDetection / PoStartNextPowerIrp
+        # short-circuited via xb-stubs.
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/po/events.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/po/poshtdwn.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/po/power.c)
+else()
+    list(APPEND ASM_SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/zw.S)
+endif()
 
 if(ARCH STREQUAL "i386")
     list(APPEND ASM_SOURCE
@@ -310,13 +377,9 @@ if(ARCH STREQUAL "i386")
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ex/i386/ioport.S
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/ctxswitch.S
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/trap.s
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/usercall_asm.S
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/zeropage.S
         ${REACTOS_SOURCE_DIR}/ntoskrnl/rtl/i386/prefetch.S)
     list(APPEND SOURCE
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/config/i386/cmhardwr.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/i386/kdx86.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/abios.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/cpu.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/context.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/exp.c
@@ -328,15 +391,28 @@ if(ARCH STREQUAL "i386")
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/patpge.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/thrdini.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/traphdlr.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/usercall.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/v86vdm.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/i386/page.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/i386/procsup.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/i386/init.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/i386/psctx.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/i386/psldt.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/vdm/vdmmain.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/vdm/vdmexec.c)
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/i386/psldt.c)
+    if(NOT SARCH STREQUAL "xbox")
+        list(APPEND ASM_SOURCE
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/usercall_asm.S)
+        list(APPEND SOURCE
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/config/i386/cmhardwr.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/abios.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/usercall.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/i386/v86vdm.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/vdm/vdmmain.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/vdm/vdmexec.c)
+    else()
+        # ps/i386/psctx.c (user-thread context) + psldt.c (LDT selectors)
+        # have no live symbols on Xbox.
+        list(REMOVE_ITEM SOURCE
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/i386/psctx.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/i386/psldt.c)
+    endif()
 elseif(ARCH STREQUAL "amd64")
     list(APPEND ASM_SOURCE
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/amd64/boot.S
@@ -347,7 +423,6 @@ elseif(ARCH STREQUAL "amd64")
     list(APPEND SOURCE
         ${REACTOS_SOURCE_DIR}/ntoskrnl/config/i386/cmhardwr.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/i386/page.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/amd64/kdx64.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/amd64/context.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/amd64/cpu.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/amd64/except.c
@@ -375,7 +450,6 @@ elseif(ARCH STREQUAL "arm")
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/arm/trap.s)
     list(APPEND SOURCE
         ${REACTOS_SOURCE_DIR}/ntoskrnl/config/arm/cmhardwr.c
-        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/arm/kdarm.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/arm/cpu.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/arm/exp.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/arm/interrupt.c
@@ -387,6 +461,33 @@ elseif(ARCH STREQUAL "arm")
         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/arm/init.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/ps/arm/psctx.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/rtl/arm/rtlexcpt.c)
+endif()
+
+# kd64/ -- WinDbg-style remote debugger protocol.  On SARCH=xbox release
+# (DBG=0) the whole subsystem (~12 KB code + 12 KB persistent buffers)
+# is dead weight -- titles can't attach windbg.  Replaced by the
+# minimal-surface xb/kd-release-stubs.c, which provides just enough of
+# the public Kd*/Kdp* API to keep ke/, mm/, ps/, io/ linking.  Real
+# kd64/ stays for DBG builds (WinDbg over UART works there).
+if(SARCH STREQUAL "xbox" AND NOT DBG)
+    list(APPEND SOURCE
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/xb/kd-release-stubs.c)
+else()
+    list(APPEND SOURCE
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdapi.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdbreak.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kddata.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdinit.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdlock.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdprint.c
+        ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdtrap.c)
+    if(ARCH STREQUAL "i386")
+        list(APPEND SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/i386/kdx86.c)
+    elseif(ARCH STREQUAL "amd64")
+        list(APPEND SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/amd64/kdx64.c)
+    elseif(ARCH STREQUAL "arm")
+        list(APPEND SOURCE ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/arm/kdarm.c)
+    endif()
 endif()
 
 if(NOT _WINKD_)
@@ -428,6 +529,18 @@ if(NOT _WINKD_)
         ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdps2kbd.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdserial.c
         ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdterminal.c)
+
+    # Release-Xbox: kd providers (serial/screen/file log writers) are
+    # dead because xb/kd-release-stubs.c short-circuits DbgPrint output
+    # and ex/init.c's KdDebuggerInitialize1 call is gated under
+    # SARCH_XBOX.  Drop the providers + helpers from the build.
+    if(SARCH STREQUAL "xbox" AND NOT DBG)
+        list(REMOVE_ITEM SOURCE
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdio.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdmain.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/kdterminal.c
+            ${REACTOS_SOURCE_DIR}/ntoskrnl/kd/i386/kdserial.c)
+    endif()
 
 else()
     add_definitions(-D_WINKD_)

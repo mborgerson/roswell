@@ -39,13 +39,19 @@ Revision History:
 
 #ifdef ALLOC_PRAGMA
     #pragma alloc_text(PAGE, ClassGetDeviceParameter)
-    #pragma alloc_text(PAGE, ClassScanForSpecial)
     #pragma alloc_text(PAGE, ClassSetDeviceParameter)
-    #pragma alloc_text(PAGE, ClasspMyStringMatches)
     #pragma alloc_text(PAGE, ClasspDeviceCopyOffloadProperty)
     #pragma alloc_text(PAGE, ClasspValidateOffloadSupported)
     #pragma alloc_text(PAGE, ClasspValidateOffloadInputParameters)
+#ifndef SARCH_XBOX
+    #pragma alloc_text(PAGE, ClassScanForSpecial)
+    #pragma alloc_text(PAGE, ClasspMyStringMatches)
 #endif
+#endif
+
+#ifndef SARCH_XBOX
+/* The quirk tables this scan walks are emptied on Xbox and the last
+ * caller is gated out; the matcher goes with them. */
 
 // custom string match -- careful!
 BOOLEAN ClasspMyStringMatches(_In_opt_z_ PCHAR StringToMatch, _In_z_ PCHAR TargetString)
@@ -66,6 +72,7 @@ BOOLEAN ClasspMyStringMatches(_In_opt_z_ PCHAR StringToMatch, _In_z_ PCHAR Targe
     // strncmp returns zero if the strings match
     return (strncmp(StringToMatch, TargetString, length) == 0);
 }
+#endif /* SARCH_XBOX */
 
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -78,6 +85,15 @@ ClassGetDeviceParameter(
     _Inout_ PULONG ParameterValue  // also default value
     )
 {
+#ifdef SARCH_XBOX
+    /* No configuration manager; leave *ParameterValue at caller default. */
+    UNREFERENCED_PARAMETER(FdoExtension);
+    UNREFERENCED_PARAMETER(SubkeyName);
+    UNREFERENCED_PARAMETER(ParameterName);
+    UNREFERENCED_PARAMETER(ParameterValue);
+    PAGED_CODE();
+    return;
+#else
     NTSTATUS                 status;
     RTL_QUERY_REGISTRY_TABLE queryTable[2] = {0};
     HANDLE                   deviceParameterHandle = NULL;
@@ -223,6 +239,7 @@ ClassGetDeviceParameter(
     }
 
     return;
+#endif /* SARCH_XBOX */
 
 } // end ClassGetDeviceParameter()
 
@@ -235,6 +252,15 @@ ClassSetDeviceParameter(
     _In_ PWSTR ParameterName,
     _In_ ULONG ParameterValue)
 {
+#ifdef SARCH_XBOX
+    /* No persistent config store on Xbox; succeed silently. */
+    UNREFERENCED_PARAMETER(FdoExtension);
+    UNREFERENCED_PARAMETER(SubkeyName);
+    UNREFERENCED_PARAMETER(ParameterName);
+    UNREFERENCED_PARAMETER(ParameterValue);
+    PAGED_CODE();
+    return STATUS_SUCCESS;
+#else
     NTSTATUS                 status;
     HANDLE                   deviceParameterHandle = NULL;
     HANDLE                   deviceSubkeyHandle = NULL;
@@ -296,10 +322,12 @@ ClassSetDeviceParameter(
     }
 
     return status;
+#endif /* SARCH_XBOX */
 
 } // end ClassSetDeviceParameter()
 
 
+#ifndef SARCH_XBOX
 /*
  *  ClassScanForSpecial
  *
@@ -402,6 +430,7 @@ ClassScanForSpecial(
     return;
 
 } // end ClasspScanForSpecialByInquiry()
+#endif /* SARCH_XBOX */
 
 
 //
@@ -6775,11 +6804,17 @@ Return Value:
     //
     // Try to get the maximum listIdentifier.
     //
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(RegistryPath);
+    UNREFERENCED_PARAMETER(queryTable);
+    status = STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     status = RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE,
                                     RegistryPath,
                                     queryTable,
                                     NULL,
                                     NULL);
+#endif
 
     if (NT_SUCCESS(status)) {
         *MaximumListIdentifier = value;
@@ -6863,11 +6898,17 @@ ClasspGetCopyOffloadMaxDuration(
     //
     // Try to get the max target duration.
     //
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(RegistryPath);
+    UNREFERENCED_PARAMETER(queryTable);
+    status = STATUS_OBJECT_NAME_NOT_FOUND;
+#else
     status = RtlQueryRegistryValues(RTL_REGISTRY_ABSOLUTE,
                                     RegistryPath,
                                     queryTable,
                                     NULL,
                                     NULL);
+#endif
 
     //
     // Don't allow the user to set the value to lower than the default (4s) so

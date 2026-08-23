@@ -381,7 +381,7 @@ ExfWaitForRundownProtectionRelease(IN PEX_RUNDOWN_REF RunRef)
  */
 BOOLEAN
 FASTCALL
-ExfAcquireRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
+ExAcquireRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
 {
     PEX_RUNDOWN_REF RunRef;
 
@@ -394,7 +394,7 @@ ExfAcquireRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCache
  */
 BOOLEAN
 FASTCALL
-ExfAcquireRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware,
+ExAcquireRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware,
                                         IN ULONG Count)
 {
     PEX_RUNDOWN_REF RunRef;
@@ -408,7 +408,7 @@ ExfAcquireRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCac
  */
 VOID
 FASTCALL
-ExfReleaseRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
+ExReleaseRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
 {
     PEX_RUNDOWN_REF RunRef;
 
@@ -421,7 +421,7 @@ ExfReleaseRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCache
  */
 VOID
 FASTCALL
-ExfReleaseRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware,
+ExReleaseRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware,
                                         IN ULONG Count)
 {
     PEX_RUNDOWN_REF RunRef;
@@ -435,7 +435,7 @@ ExfReleaseRundownProtectionCacheAwareEx(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCac
  */
 VOID
 FASTCALL
-ExfWaitForRundownProtectionReleaseCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
+ExWaitForRundownProtectionReleaseCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
 {
     PEX_RUNDOWN_REF RunRef;
     EX_RUNDOWN_WAIT_BLOCK WaitBlock;
@@ -503,7 +503,7 @@ ExfWaitForRundownProtectionReleaseCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunR
  */
 VOID
 FASTCALL
-ExfRundownCompletedCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
+ExRundownCompletedCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
 {
     PEX_RUNDOWN_REF RunRef;
     ULONG ProcCount, Current;
@@ -531,7 +531,7 @@ ExfRundownCompletedCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
  */
 VOID
 FASTCALL
-ExfReInitializeRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
+ExReInitializeRundownProtectionCacheAware(IN PEX_RUNDOWN_REF_CACHE_AWARE RunRefCacheAware)
 {
     PEX_RUNDOWN_REF RunRef;
     ULONG ProcCount, Current;

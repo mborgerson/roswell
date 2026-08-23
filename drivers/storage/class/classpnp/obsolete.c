@@ -25,18 +25,23 @@ Revision History:
 
 #include "classp.h"
 #include "debug.h"
+#include <ndk/section_attribs.h>
 
 #ifdef DEBUG_USE_WPP
 #include "obsolete.tmh"
 #endif
 
+#ifndef SARCH_XBOX
 PIRP ClassRemoveCScanList(IN PCSCAN_LIST List);
 VOID ClasspInitializeCScanList(IN PCSCAN_LIST List);
+#endif
 
 #ifdef ALLOC_PRAGMA
     #pragma alloc_text(PAGE, ClassDeleteSrbLookasideList)
     #pragma alloc_text(PAGE, ClassInitializeSrbLookasideList)
+#ifndef SARCH_XBOX
     #pragma alloc_text(PAGE, ClasspInitializeCScanList)
+#endif
 #endif
 
 typedef struct _CSCAN_LIST_ENTRY {
@@ -60,6 +65,7 @@ VOID
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
 ClassSplitRequest(_In_ PDEVICE_OBJECT Fdo, _In_ PIRP Irp, _In_ ULONG MaximumBytes)
 {
+#ifndef SARCH_XBOX
     PFUNCTIONAL_DEVICE_EXTENSION fdoExt = Fdo->DeviceExtension;
     PCLASS_PRIVATE_FDO_DATA fdoData = fdoExt->PrivateFdoData;
 
@@ -75,6 +81,11 @@ ClassSplitRequest(_In_ PDEVICE_OBJECT Fdo, _In_ PIRP Irp, _In_ ULONG MaximumByte
     }
 
     ServiceTransferRequest(Fdo, Irp, FALSE);
+#else
+    UNREFERENCED_PARAMETER(Fdo);
+    UNREFERENCED_PARAMETER(Irp);
+    UNREFERENCED_PARAMETER(MaximumBytes);
+#endif
 }
 
 
@@ -114,6 +125,12 @@ ClassIoCompleteAssociated(
     IN PVOID Context
     )
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(Fdo);
+    UNREFERENCED_PARAMETER(Irp);
+    UNREFERENCED_PARAMETER(Context);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFUNCTIONAL_DEVICE_EXTENSION fdoExtension = Fdo->DeviceExtension;
 
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(Irp);
@@ -324,7 +341,7 @@ ClassIoCompleteAssociated(
 
     IoFreeIrp(Irp);
     return STATUS_MORE_PROCESSING_REQUIRED;
-
+#endif
 } // end ClassIoCompleteAssociated()
 
 
@@ -507,6 +524,11 @@ ClassBuildRequest(
     _In_ PIRP Irp
     )
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(Fdo);
+    UNREFERENCED_PARAMETER(Irp);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PFUNCTIONAL_DEVICE_EXTENSION fdoExtension = Fdo->DeviceExtension;
 
     PSCSI_REQUEST_BLOCK srb;
@@ -526,7 +548,7 @@ ClassBuildRequest(
 
     ClasspBuildRequestEx(fdoExtension, Irp, srb);
     return STATUS_SUCCESS;
-
+#endif
 } // end ClassBuildRequest()
 
 
@@ -573,6 +595,12 @@ Return Value:
 
 --*/
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(FdoExtension);
+    UNREFERENCED_PARAMETER(Irp);
+    UNREFERENCED_PARAMETER(Srb);
+    return;
+#else
     PIO_STACK_LOCATION  currentIrpStack = IoGetCurrentIrpStackLocation(Irp);
     PIO_STACK_LOCATION  nextIrpStack = IoGetNextIrpStackLocation(Irp);
 
@@ -776,10 +804,11 @@ Return Value:
     //
 
     IoSetCompletionRoutine(Irp, ClassIoComplete, Srb, TRUE, TRUE, TRUE);
-
+#endif
 }
 
 
+#ifndef SARCH_XBOX
 VOID ClasspInsertCScanList(IN PLIST_ENTRY ListHead, IN PCSCAN_LIST_ENTRY Entry)
 {
     PCSCAN_LIST_ENTRY t;
@@ -876,6 +905,7 @@ Return Value:
     }
     return;
 }
+#endif /* !SARCH_XBOX */
 
 
 
@@ -953,6 +983,9 @@ Return Value:
     None
 
 --*/
+#ifndef SARCH_XBOX
+/* Only reachable from the (gated) STOP/REMOVE teardown paths; keeping the
+ * body compiled anchors the ExDeleteNPagedLookasideList import. */
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID
 NTAPI /* ReactOS Change: GCC Does not support STDCALL by default */
@@ -971,6 +1004,7 @@ ClassDeleteSrbLookasideList(_Inout_ PCOMMON_DEVICE_EXTENSION CommonExtension)
         TracePrint((TRACE_LEVEL_WARNING, TRACE_FLAG_GENERAL, "ClassDeleteSrbLookasideList: attempt to delete uninitialized or freed srblookasidelist"));
     }
 }
+#endif /* SARCH_XBOX */
 
 
 /*++////////////////////////////////////////////////////////////////////////////
@@ -1022,6 +1056,8 @@ ClassInitializeSrbLookasideList(   _Inout_ PCOMMON_DEVICE_EXTENSION CommonExtens
             //
             // Check FDO extension on the SRB type supported
             //
+#ifndef SARCH_XBOX
+            /* Port driver only advertises legacy SRB type; STORAGE_REQUEST_BLOCK never taken. */
             if (fdo->AdapterDescriptor->SrbType == SRB_TYPE_STORAGE_REQUEST_BLOCK) {
 
                 //
@@ -1030,7 +1066,9 @@ ClassInitializeSrbLookasideList(   _Inout_ PCOMMON_DEVICE_EXTENSION CommonExtens
                 //
                 sizeNeeded = CLASS_SRBEX_SCSI_CDB16_BUFFER_SIZE;
 
-            } else {
+            } else
+#endif
+            {
                 sizeNeeded = sizeof(SCSI_REQUEST_BLOCK);
             }
 
@@ -1059,6 +1097,7 @@ ClassInitializeSrbLookasideList(   _Inout_ PCOMMON_DEVICE_EXTENSION CommonExtens
 
 
 
+#ifndef SARCH_XBOX
 VOID ClasspInitializeCScanList(IN PCSCAN_LIST List)
 {
     PAGED_CODE();
@@ -1137,3 +1176,4 @@ PIRP ClassRemoveCScanList(IN PCSCAN_LIST List)
 
     return CONTAINING_RECORD(entry, IRP, Tail.Overlay.DriverContext);
 }
+#endif /* !SARCH_XBOX */

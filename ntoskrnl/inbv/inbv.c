@@ -100,7 +100,11 @@ FindBitmapResource(
     _In_ PLOADER_PARAMETER_BLOCK LoaderBlock,
     _In_ ULONG ResourceId)
 {
+#ifdef SARCH_XBOX
+    UNICODE_STRING UpString = RTL_CONSTANT_STRING(L"xboxkrnl.exe");
+#else
     UNICODE_STRING UpString = RTL_CONSTANT_STRING(L"ntoskrnl.exe");
+#endif
     UNICODE_STRING MpString = RTL_CONSTANT_STRING(L"ntkrnlmp.exe");
     PLIST_ENTRY NextEntry, ListHead;
     PLDR_DATA_TABLE_ENTRY LdrEntry;
@@ -149,10 +153,19 @@ FindBitmapResource(
                                        ResourceDataEntry,
                                        &Data,
                                        &Size);
+#ifndef SARCH_XBOX
+            /* The boot-bitmap CRC is folded into KiBugCheckData[4], but
+             * KeBugCheckEx unconditionally overwrites [4] with its 4th
+             * parameter before the screen is ever displayed -- so the value
+             * is dead.  Skip it on Xbox (also lets RtlComputeCrc32 + its
+             * 1 KB table drop out entirely). */
             if ((Data) && (ResourceId < 3))
             {
                 KiBugCheckData[4] ^= RtlComputeCrc32(0, Data, Size);
             }
+#else
+            UNREFERENCED_PARAMETER(Size);
+#endif
             if (!NT_SUCCESS(Status)) Data = NULL;
         }
     }

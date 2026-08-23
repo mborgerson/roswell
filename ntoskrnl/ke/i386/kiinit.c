@@ -12,14 +12,24 @@
 #define NDEBUG
 #include <debug.h>
 #include "internal/i386/trap_x.h"
+#ifdef SARCH_XBOX
+#include "../../xb/nxldr-entry.h"
+#endif
 
 /* GLOBALS *******************************************************************/
 
 /* Boot and double-fault/NMI/DPC stack */
+#ifdef SARCH_XBOX
+/* Defined in xb/kistacks.c: isolated for .bss packing, smaller DF stack. */
+extern UCHAR P0BootStackData[];
+extern UCHAR KiDoubleFaultStackData[];
+extern ULONG_PTR P0BootStack;
+#else
 UCHAR DECLSPEC_ALIGN(PAGE_SIZE) P0BootStackData[KERNEL_STACK_SIZE] = {0};
 UCHAR DECLSPEC_ALIGN(PAGE_SIZE) KiDoubleFaultStackData[KERNEL_STACK_SIZE] = {0};
 ULONG_PTR P0BootStack = (ULONG_PTR)&P0BootStackData[KERNEL_STACK_SIZE];
 ULONG_PTR KiDoubleFaultStack = (ULONG_PTR)&KiDoubleFaultStackData[KERNEL_STACK_SIZE];
+#endif
 
 /* Spinlocks used only on X86 */
 KSPIN_LOCK KiFreezeExecutionLock;
@@ -441,8 +451,10 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
     PVOID DpcStack;
     KIRQL DummyIrql;
 
+#ifndef SARCH_XBOX
     /* Initialize the Power Management Support for this PRCB */
     PoInitializePrcb(Prcb);
+#endif
 
     /* Set boot-level flags */
     if (Number == 0)
@@ -610,6 +622,7 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
         if (!DpcStack) KeBugCheckEx(NO_PAGES_AVAILABLE, 1, 0, 0, 0);
         Prcb->DpcStack = DpcStack;
 
+#ifndef SARCH_XBOX
         /* Allocate the IOPM save area */
         Ki386IopmSaveArea = ExAllocatePoolWithTag(PagedPool,
                                                   IOPM_SIZE,
@@ -619,6 +632,7 @@ KiInitializeKernel(IN PKPROCESS InitProcess,
             /* Bugcheck. We need this for V86/VDM support. */
             KeBugCheckEx(NO_PAGES_AVAILABLE, 2, IOPM_SIZE, 0, 0);
         }
+#endif
     }
 
     /* Raise to Dispatch */
@@ -747,6 +761,16 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     PKIPCR Pcr;
     KIRQL DummyIrql;
 
+#ifdef SARCH_XBOX
+    /* boot/nxldr jumps here passing nothing.  Install the NT-shaped GDT/IDT/
+     * TSS/PCR it left for us and synthesize the LOADER_PARAMETER_BLOCK before
+     * anything below reads the descriptors, FS, or the block itself
+     * (ntoskrnl/xb/nxldr-entry.c). */
+    NxldrInitDescriptors();
+    NxldrLoadDescriptors();
+    LoaderBlock = NxldrBuildLoaderBlock();
+#endif
+
     /* Boot cycles timestamp */
     BootCycles = __rdtsc();
 
@@ -780,6 +804,16 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Get GDT, IDT, PCR and TSS pointers */
     KiGetMachineBootPointers(&Gdt, &Idt, &Pcr, &Tss);
 
+#ifdef SARCH_XBOX
+    /* boot/nxldr's prologue (ntoskrnl/xb/nxldr-entry.c) already built and
+     * lgdt'd the kernel's resident KiGdt, so KiGetMachineBootPointers above
+     * already returned Gdt == KiGdt -- no copy step.  Take over the IDT and
+     * TSS with the kernel's resident tables (the loader builds neither);
+     * Ki386InitializeTss / KiInitializePcr below operate on them directly. */
+    Idt = (PKIDTENTRY)KiIdtDescriptor.Base;
+    Tss = (PKTSS)KiInitialTss;
+#endif
+
     /* Setup the TSS descriptors and entries */
     Ki386InitializeTss(Tss, Idt, Gdt);
 
@@ -801,6 +835,14 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     __writefsdword(KPCR_DR6, 0);
     __writefsdword(KPCR_DR7, 0);
 
+#ifdef SARCH_XBOX
+    /* Ki386InitializeTss installed the #DF/NMI task gates into KiIdt[8]/[2];
+     * save them before KeInitExceptions flips every selector (which would
+     * corrupt the task-gate format), then restore below. */
+    RtlCopyMemory(&DoubleFaultEntry, &Idt[8], sizeof(KIDTENTRY));
+    RtlCopyMemory(&NmiEntry, &Idt[2], sizeof(KIDTENTRY));
+#endif
+
     /* Setup the IDT */
     KeInitExceptions();
 
@@ -808,6 +850,14 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     Ke386SetDs(KGDT_R3_DATA | RPL_MASK);
     Ke386SetEs(KGDT_R3_DATA | RPL_MASK);
 
+#ifdef SARCH_XBOX
+    /* KiIdt now holds the (selector-flipped) trap handlers; restore the
+     * #DF/NMI task gates KeInitExceptions clobbered and make KiIdt the live
+     * IDT.  No copy into the loader's table -- its page is reclaimed. */
+    RtlCopyMemory(&Idt[8], &DoubleFaultEntry, sizeof(KIDTENTRY));
+    RtlCopyMemory(&Idt[2], &NmiEntry, sizeof(KIDTENTRY));
+    __lidt(&KiIdtDescriptor.Limit);
+#else
     /* Save NMI and double fault traps */
     RtlCopyMemory(&NmiEntry, &Idt[2], sizeof(KIDTENTRY));
     RtlCopyMemory(&DoubleFaultEntry, &Idt[8], sizeof(KIDTENTRY));
@@ -820,6 +870,7 @@ KiSystemStartup(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
     /* Restore NMI and double fault */
     RtlCopyMemory(&Idt[2], &NmiEntry, sizeof(KIDTENTRY));
     RtlCopyMemory(&Idt[8], &DoubleFaultEntry, sizeof(KIDTENTRY));
+#endif
 
 AppCpuInit:
     //TODO: We don't setup IPIs yet so freeze other processors here.
@@ -865,9 +916,14 @@ AppCpuInit:
         /* Check for break-in */
         if (KdPollBreakIn()) DbgBreakPointWithStatus(DBG_STATUS_CONTROL_C);
 
-        /* Make the lowest page of the boot and double fault stack read-only */
+        /* Make the lowest page of the boot stack read-only */
         KiMarkPageAsReadOnly(P0BootStackData);
+#ifndef SARCH_XBOX
         KiMarkPageAsReadOnly(KiDoubleFaultStackData);
+#else
+        /* The Xbox double-fault stack is a single page (xb/kistacks.c);
+         * marking it read-only would clobber the only usable page. */
+#endif
     }
 
     /* Raise to HIGH_LEVEL */

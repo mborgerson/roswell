@@ -16,6 +16,10 @@
 #define NDEBUG
 #include <debug.h>
 
+/* debug.h makes DbgPrint an eliding macro on release builds; this TU owns
+ * the real exported implementation, so drop the macro here. */
+#undef DbgPrint
+
 /* PRIVATE FUNCTIONS ********************************************************/
 
 ULONG
@@ -206,6 +210,7 @@ __cdecl
 DbgPrint(PCCH Format,
          ...)
 {
+#if DBG
     ULONG Status;
     va_list ap;
 
@@ -219,6 +224,15 @@ DbgPrint(PCCH Format,
                                            TRUE);
     va_end(ap);
     return Status;
+#else
+    /* Retail has no kd transport and never programs the debug UART, so the
+     * exported DbgPrint drops its output -- exactly like the retail kernel.
+     * Skip the format entirely (the in-kernel callers are already elided by
+     * the debug.h macro) so LTO can drop vDbgPrintExWithPrefixInternal and
+     * the in-dbgprint-state glue behind this lone exported entry point. */
+    UNREFERENCED_PARAMETER(Format);
+    return STATUS_SUCCESS;
+#endif
 }
 
 /*

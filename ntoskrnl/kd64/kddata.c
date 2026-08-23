@@ -539,7 +539,12 @@ KDDEBUGGER_DATA64 KdDebuggerDataBlock =
     FIELD_OFFSET(KCALLOUT_FRAME, CBSTACK_FRAME_POINTER),
 #endif
     FALSE,
+#ifdef SARCH_XBOX
+    /* No user-mode callouts; KiCallUserMode is not built. */
+    0,
+#else
     PtrToUL64(KiCallUserMode),
+#endif
     0,
     PtrToUL64(&PsLoadedModuleList),
     PtrToUL64(&PsActiveProcessHead),

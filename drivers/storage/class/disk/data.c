@@ -40,6 +40,7 @@ Revision History:
 DATA_SEG("PAGEDATA")
 #endif
 CLASSPNP_SCAN_FOR_SPECIAL_INFO DiskBadControllers[] = {
+#ifndef SARCH_XBOX
     { "COMPAQ"  , "PD-1"                           , NULL,   0x02 },
     { "CONNER"  , "CP3500"                         , NULL,   0x02 },
     { "FUJITSU" , "M2652S-512"                     , NULL,   0x01 },
@@ -61,6 +62,7 @@ CLASSPNP_SCAN_FOR_SPECIAL_INFO DiskBadControllers[] = {
     { "SEAGATE" , "ST15230N"                       , NULL,   0x08 },
     { "SyQuest" , "SQ5110"                         , "CHC",  0x03 },
     { "TOSHIBA" , "MK538FB"                        , "60",   0x01 },
+#endif
     { NULL      , NULL                             , NULL,   0x0  }
 };
 
@@ -72,7 +74,9 @@ CLASSPNP_SCAN_FOR_SPECIAL_INFO DiskBadControllers[] = {
 DATA_SEG("PAGECONS")
 #endif
 DISK_MEDIA_TYPES_LIST const DiskMediaTypesExclude[] = {
+#ifndef SARCH_XBOX
     { "HP"      , "RDX"          , NULL,  0, 0, {0                 , 0      , 0      , 0 }},
+#endif
     { NULL      , NULL           , NULL,  0, 0, {0                 , 0      , 0      , 0 }}
 };
 
@@ -80,6 +84,7 @@ DISK_MEDIA_TYPES_LIST const DiskMediaTypesExclude[] = {
 DATA_SEG("PAGECONS")
 #endif
 DISK_MEDIA_TYPES_LIST const DiskMediaTypes[] = {
+#ifndef SARCH_XBOX
     { "COMPAQ"  , "PD-1 LF-1094" , NULL,  1, 1, {PC_5_RW           , 0      , 0      , 0 }},
     { "HP"      , NULL           , NULL,  2, 2, {MO_5_WO           , MO_5_RW, 0      , 0 }},
     { "iomega"  , "jaz"          , NULL,  1, 1, {IOMEGA_JAZ        , 0      , 0      , 0 }},
@@ -90,6 +95,7 @@ DISK_MEDIA_TYPES_LIST const DiskMediaTypes[] = {
     { "SONY"    , "SMO-F561"     , NULL,  2, 2, {MO_5_WO           , MO_5_RW, 0      , 0 }},
     { "Maxoptix", "T5-2600"      , NULL,  2, 2, {MO_5_WO           , MO_5_RW, 0      , 0 }},
     { "Maxoptix", "T6-5200"      , NULL,  2, 2, {MO_5_WO           , MO_5_RW, 0      , 0 }},
+#endif
     { NULL      , NULL           , NULL,  0, 0, {0                 , 0      , 0      , 0 }}
 };
 

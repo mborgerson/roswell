@@ -188,6 +188,9 @@ PciIdeXPdoStopDevice(
     return STATUS_SUCCESS;
 }
 
+#ifndef SARCH_XBOX
+/* Only reachable from the (gated) REMOVE/SURPRISE dispatch arms; keeping
+ * the body compiled anchors the IoReleaseRemoveLockAndWaitEx import. */
 CODE_SEG("PAGE")
 NTSTATUS
 PciIdeXPdoRemoveDevice(
@@ -230,6 +233,7 @@ PciIdeXPdoRemoveDevice(
         IoReleaseRemoveLock(&PdoExtension->Common.RemoveLock, Irp);
     return Status;
 }
+#endif /* SARCH_XBOX */
 
 static
 CODE_SEG("PAGE")
@@ -633,6 +637,8 @@ PciIdeXPdoQueryId(
             break;
         }
 
+#ifndef SARCH_XBOX
+        /* The synthetic devtree only issues BusQueryDeviceID. */
         case BusQueryHardwareIDs:
         {
             PFDO_DEVICE_EXTENSION FdoExtension;
@@ -780,6 +786,7 @@ PciIdeXPdoQueryId(
             INFO("Instance ID: '%S'\n", Buffer);
             break;
         }
+#endif
 
         default:
             return Irp->IoStatus.Status;
@@ -902,6 +909,7 @@ PciIdeXQueryPciIdeInterface(
     ChannelInterface->ChannelObject = PdoExt->Common.Self;
     ChannelInterface->AbortChannel = AtaCtrlAbortChannel;
 
+#ifndef SARCH_XBOX
     if (Controller->Flags & CTRL_FLAG_IS_AHCI)
     {
         ChannelInterface->AllocateSlot = AtaAhciAllocateSlot;
@@ -911,6 +919,7 @@ PciIdeXQueryPciIdeInterface(
         ChannelInterface->MaxTargetId = AtaAhciChannelGetMaximumDeviceCount(ChanData);
     }
     else
+#endif
     {
         ChannelInterface->AllocateSlot = PataAllocateSlot;
         ChannelInterface->ResetChannel = PataResetChannel;
@@ -943,8 +952,10 @@ PciIdeXQueryPciIdeInterface(
     if (ChanData->ChanInfo & CHANNEL_FLAG_PIO_FOR_LBA48_XFER)
         ChannelInterface->Flags |= ATA_CHANNEL_FLAG_PIO_FOR_LBA48_XFER;
 
+#ifndef SARCH_XBOX
     if (Controller->Flags & CTRL_FLAG_IS_SIMPLEX)
         ChannelInterface->HwSyncObject = Controller->HwSyncObject;
+#endif
 
     return STATUS_SUCCESS;
 }
@@ -1005,6 +1016,7 @@ PciIdeXPdoDispatchPnp(
                                            IoStack->Parameters.StartDevice.AllocatedResourcesTranslated);
             break;
 
+#ifndef SARCH_XBOX
         case IRP_MN_STOP_DEVICE:
             Status = PciIdeXPdoStopDevice(PdoExtension);
             break;
@@ -1024,6 +1036,7 @@ PciIdeXPdoDispatchPnp(
             return PciIdeXPdoRemoveDevice(PdoExtension,
                                           Irp,
                                           IoStack->MinorFunction == IRP_MN_REMOVE_DEVICE);
+#endif
 
         case IRP_MN_QUERY_DEVICE_RELATIONS:
             if (IoStack->Parameters.QueryDeviceRelations.Type == TargetDeviceRelation)
@@ -1052,13 +1065,18 @@ PciIdeXPdoDispatchPnp(
             Status = PciIdeXPdoQueryId(PdoExtension, Irp);
             break;
 
+#ifndef SARCH_XBOX
+        /* No PnP requester on Xbox issues QUERY_DEVICE_TEXT. */
         case IRP_MN_QUERY_DEVICE_TEXT:
             Status = PciIdeXPdoQueryDeviceText(PdoExtension, Irp);
             break;
+#endif
 
+#ifndef SARCH_XBOX
         case IRP_MN_DEVICE_USAGE_NOTIFICATION:
             Status = PciIdeXPnpQueryDeviceUsageNotification(&PdoExtension->Common, Irp);
             break;
+#endif
 
         case IRP_MN_QUERY_INTERFACE:
             Status = PciIdeXPdoQueryInterface(PdoExtension, Irp);
@@ -1077,7 +1095,6 @@ PciIdeXPdoDispatchPnp(
     return Status;
 }
 
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 PciIdeXDispatchPnp(

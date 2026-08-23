@@ -149,7 +149,10 @@ vfatNewFCB(
     rcFCB->ShortHash.self = rcFCB;
     ExInitializeResourceLite(&rcFCB->PagingIoResource);
     ExInitializeResourceLite(&rcFCB->MainResource);
+#ifndef SARCH_XBOX
+    /* FileLock is unused on Xbox: no lock entry points exist. */
     FsRtlInitializeFileLock(&rcFCB->FileLock, NULL, NULL);
+#endif
     ExInitializeFastMutex(&rcFCB->LastMutex);
     rcFCB->RFCB.PagingIoResource = &rcFCB->PagingIoResource;
     rcFCB->RFCB.Resource = &rcFCB->MainResource;
@@ -275,7 +278,9 @@ vfatDestroyFCB(
     }
 #endif
 
+#ifndef SARCH_XBOX
     FsRtlUninitializeFileLock(&pFCB->FileLock);
+#endif
 
     if (!vfatFCBIsRoot(pFCB) &&
         !BooleanFlagOn(pFCB->Flags, FCB_IS_FAT) && !BooleanFlagOn(pFCB->Flags, FCB_IS_VOLUME))
@@ -477,12 +482,16 @@ vfatInitFCBFromDirEntry(
     Fcb->dirIndex = DirContext->DirIndex;
     Fcb->startIndex = DirContext->StartIndex;
     Fcb->parentFcb = ParentFcb;
+#ifndef SARCH_XBOX
+    /* Undo FATXGetNextDirEntry's synthesized-dot index bias; on Xbox
+     * the dots are not emitted and indices are already raw on-disk. */
     if (vfatVolumeIsFatX(Vcb) && !vfatFCBIsRoot(ParentFcb))
     {
         ASSERT(DirContext->DirIndex >= 2 && DirContext->StartIndex >= 2);
         Fcb->dirIndex = DirContext->DirIndex-2;
         Fcb->startIndex = DirContext->StartIndex-2;
     }
+#endif
     Fcb->RFCB.FileSize.QuadPart = Size;
     Fcb->RFCB.ValidDataLength.QuadPart = Size;
     Fcb->RFCB.AllocationSize.QuadPart = ROUND_UP_64(Size, Vcb->FatInfo.BytesPerCluster);
@@ -634,6 +643,18 @@ vfatGrabFCBFromTable(
                 DPRINT("'%wZ' '%wZ'\n", &FileNameU, FcbNameU);
                 if (RtlEqualUnicodeString(&FileNameU, FcbNameU, TRUE))
                 {
+                    /* Skip stale FCBs awaiting their final dereference: the
+                     * directory entry is already gone (VfatDelEntry ran in
+                     * cleanup) and no caller holds a handle, so they should
+                     * not satisfy a fresh lookup. They live on in the cache
+                     * until lazy-writer / section refs on the FILE_OBJECT
+                     * finally drain and IRP_MJ_CLOSE fires. */
+                    if (BooleanFlagOn(rcFCB->Flags, FCB_DELETE_PENDING) &&
+                        rcFCB->OpenHandleCount == 0)
+                    {
+                        entry = entry->next;
+                        continue;
+                    }
                     vfatGrabFCB(pVCB, rcFCB);
                     return rcFCB;
                 }

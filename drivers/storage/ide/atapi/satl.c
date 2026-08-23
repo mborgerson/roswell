@@ -509,6 +509,7 @@ AtaReqBuildLbaTaskFile(
     return TRUE;
 }
 
+#ifndef SARCH_XBOX
 static
 BOOLEAN
 AtaReqBuildNcqReadWriteTaskFile(
@@ -561,6 +562,7 @@ AtaReqBuildNcqReadWriteTaskFile(
 
     return TRUE;
 }
+#endif
 
 static
 UCHAR
@@ -605,6 +607,7 @@ AtaReqScsiReadWrite(
             break;
         }
 
+#ifndef SARCH_XBOX
         case SCSIOP_READ16:
         case SCSIOP_WRITE16:
         {
@@ -614,6 +617,7 @@ AtaReqScsiReadWrite(
                 Request->Flags |= REQUEST_FLAG_FUA;
             break;
         }
+#endif
 
         default:
             ASSERT(FALSE);
@@ -626,19 +630,26 @@ AtaReqScsiReadWrite(
     else
         Request->Flags |= REQUEST_FLAG_DATA_IN;
 
+#ifndef SARCH_XBOX
     // FIXME: HACK Workaround for disk.sys which incorrectly enables FUA support
     if (!(DevExt->Device.DeviceFlags & DEVICE_NCQ))
         Request->Flags &= ~REQUEST_FLAG_FUA;
+#else
+    /* PATA has no NCQ; FUA is never honored */
+    Request->Flags &= ~REQUEST_FLAG_FUA;
+#endif
 
     SectorCount = Request->DataTransferLength + (DevExt->Device.SectorSize - 1);
     SectorCount /= DevExt->Device.SectorSize;
 
+#ifndef SARCH_XBOX
     if (DevExt->Device.DeviceFlags & DEVICE_NCQ)
     {
         if (!AtaReqBuildNcqReadWriteTaskFile(DevExt, Request, Lba, SectorCount))
             return AtaReqTerminateInvalidRange(Srb);
     }
     else
+#endif
     {
         if (!AtaReqBuildLbaTaskFile(DevExt, Request, Lba, SectorCount))
             return AtaReqTerminateInvalidRange(Srb);
@@ -769,7 +780,9 @@ AtaReqCompleteReadCapacity(
         return COMPLETE_IRP;
     }
 
+#ifndef SARCH_XBOX
     if (Srb->Cdb[0] == SCSIOP_READ_CAPACITY)
+#endif
     {
         PREAD_CAPACITY_DATA CapacityData;
         ULONG MaximumLba;
@@ -782,6 +795,7 @@ AtaReqCompleteReadCapacity(
 
         Length = sizeof(*CapacityData);
     }
+#ifndef SARCH_XBOX
     else // SCSIOP_READ_CAPACITY16
     {
         PREAD_CAPACITY16_DATA CapacityData;
@@ -829,6 +843,7 @@ AtaReqCompleteReadCapacity(
 
         Length = CdbGetAllocationLength16((PCDB)Srb->Cdb);
     }
+#endif
 
     AtaReqCopySatlBuffer(Request, DevExt->Device.LocalBuffer, Length);
     return COMPLETE_IRP;
@@ -1530,6 +1545,10 @@ AtaReqScsiInquiry(
                                     sizeof(DevExt->InquiryData));
     }
 
+#ifdef SARCH_XBOX
+    /* No VPD pages issued here. */
+    return AtaReqTerminateInvalidField(Srb);
+#else
     switch (Cdb->CDB6INQUIRY3.PageCode)
     {
         case VPD_SUPPORTED_PAGES:
@@ -1584,6 +1603,7 @@ AtaReqScsiInquiry(
     Buffer->PageCode = Cdb->CDB6INQUIRY3.PageCode;
 
     return AtaReqCopySatlBuffer(Request, DevExt->Device.LocalBuffer, Length);
+#endif
 }
 
 static
@@ -1915,8 +1935,10 @@ AtaReqExecuteScsiAta(
 {
     switch (Srb->Cdb[0])
     {
+#ifndef SARCH_XBOX
         case SCSIOP_REPORT_LUNS:
             return AtaReqScsiReportLuns(DevExt, Request, Srb);
+#endif
 
         case SCSIOP_INQUIRY:
             return AtaReqScsiInquiry(DevExt, Request, Srb);
@@ -1933,6 +1955,7 @@ AtaReqExecuteScsiAta(
         case SCSIOP_REQUEST_SENSE:
             return AtaReqScsiRequestSense(DevExt, Request, Srb);
 
+#ifndef SARCH_XBOX
         case SCSIOP_MODE_SENSE:
         case SCSIOP_MODE_SENSE10:
             return AtaReqScsiModeSense(DevExt,
@@ -1946,6 +1969,7 @@ AtaReqExecuteScsiAta(
                                         Request,
                                         Srb,
                                         (Srb->Cdb[0] == SCSIOP_MODE_SELECT));
+#endif
 
         case SCSIOP_SERVICE_ACTION_IN16:
         {
@@ -1965,14 +1989,17 @@ AtaReqExecuteScsiAta(
         case SCSIOP_WRITE:
         case SCSIOP_READ12:
         case SCSIOP_WRITE12:
+#ifndef SARCH_XBOX
         case SCSIOP_READ16:
         case SCSIOP_WRITE16:
+#endif
             return AtaReqScsiReadWrite(DevExt, Request, Srb);
 
         case SCSIOP_SYNCHRONIZE_CACHE:
         case SCSIOP_SYNCHRONIZE_CACHE16:
             return AtaReqScsiSynchronizeCache(DevExt, Request, Srb);
 
+#ifndef SARCH_XBOX
         case SCSIOP_VERIFY:
         case SCSIOP_VERIFY12:
         case SCSIOP_VERIFY16:
@@ -1981,6 +2008,7 @@ AtaReqExecuteScsiAta(
         case SCSIOP_ATA_PASSTHROUGH12:
         case SCSIOP_ATA_PASSTHROUGH16:
             return AtaReqScsiAtaPassThrough(DevExt, Request, Srb);
+#endif
 
         default:
             break;
@@ -2024,9 +2052,11 @@ AtaReqExecuteScsiAtapi(
 {
     switch (Srb->Cdb[0])
     {
+#ifndef SARCH_XBOX
         case SCSIOP_ATA_PASSTHROUGH12:
         case SCSIOP_ATA_PASSTHROUGH16:
             return AtaReqScsiAtaPassThrough(DevExt, Request, Srb);
+#endif
 
         case SCSIOP_GET_CONFIGURATION:
             // FIXME: HACK NP21/W emulation bug

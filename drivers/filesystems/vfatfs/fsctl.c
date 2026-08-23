@@ -14,7 +14,9 @@
 #include <debug.h>
 
 extern VFAT_DISPATCH FatXDispatch;
+#ifndef SARCH_XBOX
 extern VFAT_DISPATCH FatDispatch;
+#endif
 
 /* FUNCTIONS ****************************************************************/
 
@@ -113,6 +115,11 @@ VfatHasFileSystem(
         *RecognizedFS = TRUE;
     }
 
+#ifdef SARCH_XBOX
+    /* Xbox only mounts FATX (HDD partitions); skip FAT12/16/32 probe. */
+    *RecognizedFS = FALSE;
+    (void)Boot;
+#else
     if (*RecognizedFS)
     {
         Boot = ExAllocatePoolWithTag(NonPagedPool, DiskGeometry.BytesPerSector, TAG_BUFFER);
@@ -241,6 +248,7 @@ VfatHasFileSystem(
 
         ExFreePoolWithTag(Boot, TAG_BUFFER);
     }
+#endif /* !SARCH_XBOX */
 
     if (!*RecognizedFS && PartitionInfoIsValid)
     {
@@ -361,6 +369,12 @@ ReadVolumeLabel(
     PVOID Buffer;
     NTSTATUS Status = STATUS_SUCCESS;
 
+#ifdef SARCH_XBOX
+    /* Xbox volumes are always FATX. */
+    ASSERT(IsFatX);
+    SizeDirEntry = sizeof(FATX_DIR_ENTRY);
+    EntriesPerPage = FATX_ENTRIES_PER_PAGE;
+#else
     if (IsFatX)
     {
         SizeDirEntry = sizeof(FATX_DIR_ENTRY);
@@ -371,6 +385,7 @@ ReadVolumeLabel(
         SizeDirEntry = sizeof(FAT_DIR_ENTRY);
         EntriesPerPage = FAT_ENTRIES_PER_PAGE;
     }
+#endif
 
     FileOffset.QuadPart = Start;
     if (!NoCache)
@@ -433,10 +448,12 @@ ReadVolumeLabel(
                     StringO.MaximumLength = StringO.Length = Entry->FatX.FilenameLength;
                     RtlOemStringToUnicodeString(VolumeLabel, &StringO, FALSE);
                 }
+#ifndef SARCH_XBOX
                 else
                 {
                     vfat8Dot3ToString(&Entry->Fat, VolumeLabel);
                 }
+#endif
                 break;
             }
             if (ENTRY_END(IsFatX, Entry))
@@ -522,7 +539,9 @@ VfatMount(
     ULONG HashTableSize;
     ULONG i;
     FATINFO FatInfo;
+#ifndef SARCH_XBOX
     BOOLEAN Dirty;
+#endif
 
     DPRINT("VfatMount(IrpContext %p)\n", IrpContext);
 
@@ -551,6 +570,12 @@ VfatMount(
     }
 
     /* Use prime numbers for the table size */
+#ifdef SARCH_XBOX
+    /* Xbox sees only FATX16 / FATX32, and a title holds at most a few
+     * dozen FCBs per volume; the desktop-scale tables (the FATX32 one
+     * alone was 256 KiB of per-volume extension) are title-visible RAM. */
+    HashTableSize = 257;
+#else
     if (FatInfo.FatType == FAT12)
     {
         HashTableSize = 4099; // 4096 = 4 * 1024
@@ -564,6 +589,7 @@ VfatMount(
     {
         HashTableSize = 65537; // 65536 = 64 * 1024;
     }
+#endif
     DPRINT("VFAT: Recognized volume\n");
     Status = IoCreateDevice(VfatGlobalData->DriverObject,
                             ROUND_UP(sizeof (DEVICE_EXTENSION), sizeof(ULONG)) + sizeof(HASHENTRY*) * HashTableSize,
@@ -605,6 +631,27 @@ VfatMount(
         DPRINT("RootCluster:        %u\n", DeviceExt->FatInfo.RootCluster);
     }
 
+#ifdef SARCH_XBOX
+    /* Xbox volumes are always FATX16 or FATX32. */
+    if (DeviceExt->FatInfo.FatType == FATX16)
+    {
+        DeviceExt->GetNextCluster = FAT16GetNextCluster;
+        DeviceExt->FindAndMarkAvailableCluster = FAT16FindAndMarkAvailableCluster;
+        DeviceExt->WriteCluster = FAT16WriteCluster;
+    }
+    else
+    {
+        DeviceExt->GetNextCluster = FAT32GetNextCluster;
+        DeviceExt->FindAndMarkAvailableCluster = FAT32FindAndMarkAvailableCluster;
+        DeviceExt->WriteCluster = FAT32WriteCluster;
+    }
+    /* FATX has no boot-sector dirty bit; Get/SetDirtyStatus stay NULL
+     * and their callers are compiled out. */
+
+    DeviceExt->Flags |= VCB_IS_FATX;
+    DeviceExt->BaseDateYear = 2000;
+    RtlCopyMemory(&DeviceExt->Dispatch, &FatXDispatch, sizeof(VFAT_DISPATCH));
+#else
     switch (DeviceExt->FatInfo.FatType)
     {
         case FAT12:
@@ -647,6 +694,7 @@ VfatMount(
         DeviceExt->BaseDateYear = 1980;
         RtlCopyMemory(&DeviceExt->Dispatch, &FatDispatch, sizeof(VFAT_DISPATCH));
     }
+#endif
 
     DeviceExt->StorageDevice = DeviceToMount;
     DeviceExt->StorageDevice->Vpb->DeviceObject = DeviceObject;
@@ -753,6 +801,7 @@ VfatMount(
     ReadVolumeLabel(DeviceExt, 0, vfatVolumeIsFatX(DeviceExt), &VolumeLabelU);
     Vpb->VolumeLabelLength = VolumeLabelU.Length;
 
+#ifndef SARCH_XBOX
     /* read dirty bit status */
     Status = GetDirtyStatus(DeviceExt, &Dirty);
     if (NT_SUCCESS(Status))
@@ -769,6 +818,7 @@ VfatMount(
             DPRINT1("Mounting a dirty volume\n");
         }
     }
+#endif
 
     VolumeFcb->Flags |= VCB_IS_DIRTY;
     if (BooleanFlagOn(Vpb->RealDevice->Flags, DO_SYSTEM_BOOT_PARTITION))
@@ -1072,7 +1122,13 @@ VfatMarkVolumeDirty(
 
     if (!BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_IS_DIRTY))
     {
+#ifdef SARCH_XBOX
+        /* FATX has no boot-sector dirty bit; the write path would fail
+         * its boot-sector signature check, so return that directly. */
+        Status = STATUS_DISK_CORRUPT_ERROR;
+#else
         Status = SetDirtyStatus(DeviceExt, TRUE);
+#endif
     }
 
     DeviceExt->VolumeFcb->Flags &= ~VCB_CLEAR_DIRTY;
@@ -1228,6 +1284,7 @@ VfatLockOrUnlockVolume(
         /* Flush volume & files */
         VfatFlushVolume(DeviceExt, DeviceExt->VolumeFcb);
 
+#ifndef SARCH_XBOX
         /* The volume is now clean */
         if (BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_CLEAR_DIRTY) &&
             BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_IS_DIRTY))
@@ -1236,6 +1293,7 @@ VfatLockOrUnlockVolume(
             if (NT_SUCCESS(SetDirtyStatus(DeviceExt, FALSE)))
                 ClearFlag(DeviceExt->VolumeFcb->Flags, VCB_IS_DIRTY);
         }
+#endif
 
         DeviceExt->Flags |= VCB_VOLUME_LOCKED;
         Vpb->Flags |= VPB_LOCKED;
@@ -1266,13 +1324,12 @@ VfatDismountVolume(
     DeviceExt = IrpContext->DeviceExt;
     FileObject = IrpContext->FileObject;
 
-    /* We HAVE to be locked. Windows also allows dismount with no lock
-     * but we're here mainly for 1st stage, so KISS
-     */
-    if (!BooleanFlagOn(DeviceExt->Flags, VCB_VOLUME_LOCKED))
-    {
-        return STATUS_ACCESS_DENIED;
-    }
+    /* Xbox titles dismount their cache partitions without first taking an
+     * exclusive lock -- they expect retail-Xbox semantics where the SXS
+     * (or "scratch") partitions are title-private.  Accept the dismount
+     * regardless of VCB_VOLUME_LOCKED; the flush + FCB-teardown below is
+     * safe by itself.  The VCB_IS_SYS_OR_HAS_PAGE guard below still
+     * protects the boot volume. */
 
     /* Deny dismount of boot volume */
     if (BooleanFlagOn(DeviceExt->Flags, VCB_IS_SYS_OR_HAS_PAGE))
@@ -1286,6 +1343,23 @@ VfatDismountVolume(
         return STATUS_VOLUME_DISMOUNTED;
     }
 
+    /* The teardown below destroys every FCB unconditionally; with other
+     * handles still open their FILE_OBJECTs would dangle (use-after-free
+     * on the next IO).  Refuse instead -- after flushing, so the caller's
+     * data is safe either way.  Titles dismount their private cache
+     * partitions with no other handles open, which still succeeds.
+     * (ENABLE_SWAPOUT's VfatCheckForDismount machinery does exist and a
+     * proper deferred dismount through it is the long-term answer.) */
+    if (DeviceExt->OpenHandleCount > 1)
+    {
+        DPRINT1("Dismount with %lu other open handle(s) refused\n",
+                DeviceExt->OpenHandleCount - 1);
+        ExAcquireResourceExclusiveLite(&DeviceExt->FatResource, TRUE);
+        VfatFlushVolume(DeviceExt, (PVFATFCB)FileObject->FsContext);
+        ExReleaseResourceLite(&DeviceExt->FatResource);
+        return STATUS_ACCESS_DENIED;
+    }
+
     /* Notify we'll dismount. Pass that point there's no reason we fail */
     FsRtlNotifyVolumeEvent(IrpContext->Stack->FileObject, FSRTL_VOLUME_DISMOUNT);
 
@@ -1294,6 +1368,7 @@ VfatDismountVolume(
     /* Flush volume & files */
     VfatFlushVolume(DeviceExt, (PVFATFCB)FileObject->FsContext);
 
+#ifndef SARCH_XBOX
     /* The volume is now clean */
     if (BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_CLEAR_DIRTY) &&
         BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_IS_DIRTY))
@@ -1302,6 +1377,7 @@ VfatDismountVolume(
         if (NT_SUCCESS(SetDirtyStatus(DeviceExt, FALSE)))
             DeviceExt->VolumeFcb->Flags &= ~VCB_IS_DIRTY;
     }
+#endif
 
     /* Rebrowse the FCB in order to free them now */
     while (!IsListEmpty(&DeviceExt->FcbListHead))

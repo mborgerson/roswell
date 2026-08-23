@@ -247,6 +247,10 @@ NTSTATUS
 NTAPI
 ObpSetCurrentProcessDeviceMap(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No LUID device maps; ObpReferenceDeviceMap never falls through here. */
+    return STATUS_NOT_IMPLEMENTED;
+#else
     PTOKEN Token;
     LUID LogonId;
     NTSTATUS Status;
@@ -317,6 +321,7 @@ done:
     ObDereferenceObject(Token);
 
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 
@@ -324,6 +329,19 @@ PDEVICE_MAP
 NTAPI
 ObpReferenceDeviceMap(VOID)
 {
+#ifdef SARCH_XBOX
+    /* No LUID mapping nor impersonation -- straight to per-process map. */
+    PDEVICE_MAP DeviceMap;
+
+    KeAcquireGuardedMutex(&ObpDeviceMapLock);
+    DeviceMap = PsGetCurrentProcess()->DeviceMap;
+    if (DeviceMap != NULL)
+    {
+        ++DeviceMap->ReferenceCount;
+    }
+    KeReleaseGuardedMutex(&ObpDeviceMapLock);
+    return DeviceMap;
+#else
     LUID LogonId;
     NTSTATUS Status;
     PTOKEN Token = NULL;
@@ -448,6 +466,7 @@ ObpReferenceDeviceMap(VOID)
 
     /* Return the potentially found device map */
     return DeviceMap;
+#endif /* SARCH_XBOX */
 }
 
 

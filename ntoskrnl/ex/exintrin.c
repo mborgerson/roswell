@@ -96,6 +96,13 @@ InterlockedExchangeAdd(IN OUT LONG volatile *Addend,
 
 /*
  * @implemented
+ *
+ * On Xbox PreviousMode is always KernelMode (titles run ring 0), so the
+ * `if (PreviousMode != KernelMode) ProbeFor*` guard in every Nt* syscall
+ * never fires at runtime.  Compile the body out so each caller's static
+ * dispatch into the probe shrinks to a no-op call, and so the raise
+ * helpers (ExRaiseAccessViolation / ExRaiseDatatypeMisalignment) plus
+ * MmUserProbeAddress all GC out.
  */
 VOID
 NTAPI
@@ -103,6 +110,7 @@ ProbeForRead(IN CONST VOID *Address,
              IN SIZE_T Length,
              IN ULONG Alignment)
 {
+#ifndef SARCH_XBOX
     ULONG_PTR Last, Current = (ULONG_PTR)Address;
     PAGED_CODE();
 
@@ -133,6 +141,7 @@ ProbeForRead(IN CONST VOID *Address,
 
         /* ProbeForRead doesn't check if memory pages are readable! */
     }
+#endif
 }
 
 /*
@@ -144,6 +153,7 @@ ProbeForWrite(IN PVOID Address,
               IN SIZE_T Length,
               IN ULONG Alignment)
 {
+#ifndef SARCH_XBOX
     ULONG_PTR Last, Current = (ULONG_PTR)Address;
     PAGED_CODE();
 
@@ -183,4 +193,5 @@ ProbeForWrite(IN PVOID Address,
             Current = PAGE_ROUND_DOWN(Current) + PAGE_SIZE;
         } while (Current != Last);
     }
+#endif
 }

@@ -23,6 +23,8 @@ ULONG KeTimeIncrement;
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+/* Boot-only: the time-set service ordinal is stubbed, so the clock is
+ * only programmed during Phase 1 initialization. */
 VOID
 NTAPI
 KeSetSystemTime(IN PLARGE_INTEGER NewTime,

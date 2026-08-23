@@ -162,6 +162,12 @@ NtOpenSemaphore(OUT PHANDLE SemaphoreHandle,
                 IN ACCESS_MASK DesiredAccess,
                 IN POBJECT_ATTRIBUTES ObjectAttributes)
 {
+#ifdef SARCH_XBOX
+    UNREFERENCED_PARAMETER(SemaphoreHandle);
+    UNREFERENCED_PARAMETER(DesiredAccess);
+    UNREFERENCED_PARAMETER(ObjectAttributes);
+    return STATUS_NOT_IMPLEMENTED;
+#else
     HANDLE hSemaphore;
     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
     NTSTATUS Status;
@@ -212,6 +218,7 @@ NtOpenSemaphore(OUT PHANDLE SemaphoreHandle,
 
     /* Return Status */
     return Status;
+#endif /* SARCH_XBOX */
 }
 
 /*

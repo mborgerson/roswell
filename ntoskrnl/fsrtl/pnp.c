@@ -38,6 +38,12 @@ NTAPI
 FsRtlNotifyVolumeEvent(IN PFILE_OBJECT FileObject,
                        IN ULONG EventCode)
 {
+#ifdef SARCH_XBOX
+    /* No user-mode subscribers for volume change events. */
+    UNREFERENCED_PARAMETER(FileObject);
+    UNREFERENCED_PARAMETER(EventCode);
+    return STATUS_SUCCESS;
+#else
     NTSTATUS Status;
     LPGUID Guid = NULL;
     PDEVICE_OBJECT DeviceObject = NULL;
@@ -114,4 +120,5 @@ FsRtlNotifyVolumeEvent(IN PFILE_OBJECT FileObject,
     ObDereferenceObject(DeviceObject);
 
     return Status;
+#endif
 }

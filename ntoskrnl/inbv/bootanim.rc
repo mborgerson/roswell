@@ -11,6 +11,14 @@
 
 /* Bitmaps */
 
+#ifdef SARCH_XBOX
+/* Xbox boot only reaches DisplayBootBitmap's workstation default branch,
+ * reduced to just the centred logo.  Drop the hibernate/shutdown/server-SKU
+ * variants, the copyright text, the rotating line (INBV_ROTBAR_IMPLEMENTED
+ * is off), and the progress bar -- their code paths are unreachable on
+ * Xbox. */
+IDB_LOGO_DEFAULT    BITMAP "inbv/resources/nxlogo.bmp"
+#else
 IDB_HIBERNATE_BAR   BITMAP "inbv/resources/hibernate.bmp"
 IDB_SHUTDOWN_MSG    BITMAP "inbv/resources/shutdown.bmp"
 IDB_BAR_DEFAULT     BITMAP "inbv/resources/barserver.bmp"
@@ -27,3 +35,4 @@ IDB_SERVER_FOOTER   BITMAP "inbv/resources/fserver.bmp"
 IDB_ROTATING_LINE   BITMAP "inbv/resources/line.bmp"
 IDB_PROGRESS_BAR    BITMAP "inbv/resources/progress.bmp"
 IDB_COPYRIGHT       BITMAP "inbv/resources/copyright.bmp"
+#endif

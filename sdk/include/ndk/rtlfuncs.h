@@ -3927,6 +3927,13 @@ RtlFindMessage(
     _Out_ PMESSAGE_RESOURCE_ENTRY *MessageResourceEntry
 );
 
+#ifdef SARCH_XBOX
+/* rtl/message.c is unlinked and the kernel's .rsrc message tables are
+   discarded at boot; callers take their not-found fallback arms. */
+#define RtlFindMessage(Base, Type, Language, MessageId, Entry) \
+    ((VOID)(Base), *(Entry) = NULL, STATUS_MESSAGE_NOT_FOUND)
+#endif
+
 NTSYSAPI
 ULONG
 NTAPI

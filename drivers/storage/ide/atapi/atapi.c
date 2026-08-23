@@ -70,6 +70,26 @@ AtaTypeCodeToName(
     }
 }
 
+#ifdef SARCH_XBOX
+/* No registry on Xbox; IoOpenDeviceRegistryKey returns OBJECT_NAME_NOT_FOUND
+ * unconditionally, so the AtaGet/SetRegistryKey/AtaSetPortRegistryKey
+ * paths never reach ZwOpen/CreateKey.  Stub the helper. */
+CODE_SEG("PAGE")
+NTSTATUS
+AtaOpenRegistryKey(
+    _Out_ PHANDLE KeyHandle,
+    _In_ HANDLE RootKey,
+    _In_ PUNICODE_STRING KeyName,
+    _In_ BOOLEAN Create)
+{
+    UNREFERENCED_PARAMETER(RootKey);
+    UNREFERENCED_PARAMETER(KeyName);
+    UNREFERENCED_PARAMETER(Create);
+    PAGED_CODE();
+    if (KeyHandle) *KeyHandle = NULL;
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+}
+#else
 CODE_SEG("PAGE")
 NTSTATUS
 AtaOpenRegistryKey(
@@ -107,7 +127,28 @@ AtaOpenRegistryKey(
 
     return Status;
 }
+#endif
 
+#ifdef SARCH_XBOX
+/* No registry on Xbox; IoOpenDeviceRegistryKey fails so this would just
+ * fall through to the early return.  Skip the whole machinery. */
+CODE_SEG("PAGE")
+VOID
+AtaGetRegistryKey(
+    _In_ PATAPORT_CHANNEL_EXTENSION ChanExt,
+    _In_ UCHAR TargetId,
+    _In_ PCWSTR KeyName,
+    _Out_ PULONG KeyValue,
+    _In_ ULONG DefaultValue)
+{
+    UNREFERENCED_PARAMETER(ChanExt);
+    UNREFERENCED_PARAMETER(TargetId);
+    UNREFERENCED_PARAMETER(KeyName);
+    UNREFERENCED_PARAMETER(DefaultValue);
+    PAGED_CODE();
+    if (KeyValue) *KeyValue = DefaultValue;
+}
+#else
 CODE_SEG("PAGE")
 VOID
 AtaGetRegistryKey(
@@ -174,7 +215,25 @@ AtaGetRegistryKey(
 Cleanup:
     ZwClose(HwKeyHandle);
 }
+#endif
 
+#ifdef SARCH_XBOX
+/* No registry on Xbox; IoOpenDeviceRegistryKey fails so writes are no-ops. */
+CODE_SEG("PAGE")
+VOID
+AtaSetRegistryKey(
+    _In_ PATAPORT_CHANNEL_EXTENSION ChanExt,
+    _In_ UCHAR TargetId,
+    _In_ PCWSTR KeyName,
+    _In_ ULONG KeyValue)
+{
+    UNREFERENCED_PARAMETER(ChanExt);
+    UNREFERENCED_PARAMETER(TargetId);
+    UNREFERENCED_PARAMETER(KeyName);
+    UNREFERENCED_PARAMETER(KeyValue);
+    PAGED_CODE();
+}
+#else
 CODE_SEG("PAGE")
 VOID
 AtaSetRegistryKey(
@@ -230,7 +289,23 @@ AtaSetRegistryKey(
 Cleanup:
     ZwClose(HwKeyHandle);
 }
+#endif
 
+#ifdef SARCH_XBOX
+/* No registry on Xbox; IoOpenDeviceRegistryKey fails so writes are no-ops. */
+CODE_SEG("PAGE")
+VOID
+AtaSetPortRegistryKey(
+    _In_ PATAPORT_CHANNEL_EXTENSION ChanExt,
+    _In_ PCWSTR KeyName,
+    _In_ ULONG KeyValue)
+{
+    UNREFERENCED_PARAMETER(ChanExt);
+    UNREFERENCED_PARAMETER(KeyName);
+    UNREFERENCED_PARAMETER(KeyValue);
+    PAGED_CODE();
+}
+#else
 CODE_SEG("PAGE")
 VOID
 AtaSetPortRegistryKey(
@@ -267,6 +342,7 @@ AtaSetPortRegistryKey(
         TRACE("Failed to set '%wZ' key, status 0x%lx\n", &ValueName, Status);
     }
 }
+#endif
 
 CODE_SEG("PAGE")
 NTSTATUS
@@ -300,6 +376,13 @@ AtaStorageNotificationWorker(
     _In_ PDEVICE_OBJECT DeviceObject,
     _In_opt_ PVOID Context)
 {
+#ifdef SARCH_XBOX
+    /* IOCTL_STORAGE_EVENT_NOTIFICATION is gated on Xbox; without a
+     * subscriber there's nothing to notify.  Skip the IRP build + send. */
+    UNREFERENCED_PARAMETER(DeviceObject);
+    IoFreeWorkItem(Context);
+    return;
+#else
     PIO_WORKITEM WorkItem = Context;
     PDEVICE_OBJECT TopDeviceObject;
     PIRP Irp;
@@ -343,6 +426,7 @@ AtaStorageNotificationWorker(
 Exit:
     ObDereferenceObject(TopDeviceObject);
     IoFreeWorkItem(WorkItem);
+#endif
 }
 
 VOID
@@ -498,6 +582,20 @@ AtaPnpRepeatRequest(
     return Status;
 }
 
+#ifdef SARCH_XBOX
+/* No pagefile / hibernation / crash-dump on Xbox: this minor never fires. */
+CODE_SEG("PAGE")
+NTSTATUS
+AtaPnpQueryDeviceUsageNotification(
+    _In_ PATAPORT_COMMON_EXTENSION CommonExt,
+    _In_ PIRP Irp)
+{
+    UNREFERENCED_PARAMETER(CommonExt);
+    UNREFERENCED_PARAMETER(Irp);
+    PAGED_CODE();
+    return STATUS_SUCCESS;
+}
+#else
 CODE_SEG("PAGE")
 NTSTATUS
 AtaPnpQueryDeviceUsageNotification(
@@ -549,6 +647,7 @@ AtaPnpQueryDeviceUsageNotification(
 
     return STATUS_SUCCESS;
 }
+#endif
 
 CODE_SEG("PAGE")
 NTSTATUS
@@ -584,7 +683,6 @@ AtaPnpInitializeCommonExtension(
     IoInitializeRemoveLock(&CommonExt->RemoveLock, ATAPORT_TAG, 0, 0);
 }
 
-CODE_SEG("PAGE")
 NTSTATUS
 NTAPI
 AtaAddChannel(
@@ -657,6 +755,16 @@ Failure:
     return Status;
 }
 
+#ifdef SARCH_XBOX
+/* No registry on Xbox; the MiniNT key probe always misses. */
+static
+BOOLEAN
+AtaInPEMode(VOID)
+{
+    PAGED_CODE();
+    return FALSE;
+}
+#else
 static
 CODE_SEG("INIT")
 BOOLEAN
@@ -685,6 +793,7 @@ AtaInPEMode(VOID)
 
     return FALSE;
 }
+#endif
 
 static
 CODE_SEG("INIT")
@@ -747,11 +856,19 @@ DriverEntry(
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = AtaDispatchCreateClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = AtaDispatchDeviceControl;
     DriverObject->MajorFunction[IRP_MJ_SCSI] = AtaDispatchScsi;
+#ifndef SARCH_XBOX /* ntoskrnl/po is unlinked; no Po* exports */
     DriverObject->MajorFunction[IRP_MJ_POWER] = AtaDispatchPower;
+#endif
+#ifndef SARCH_XBOX
+    /* Xbox: no WMI providers. */
     DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = AtaDispatchWmi;
+#endif
     DriverObject->MajorFunction[IRP_MJ_PNP] = AtaDispatchPnp;
     DriverObject->DriverExtension->AddDevice = AtaAddChannel;
+#ifndef SARCH_XBOX
+    /* Folded into the kernel image -- never unloaded. */
     DriverObject->DriverUnload = AtaUnload;
+#endif
 
     KeInitializeDpc(&AtapCompletionDpc, AtaReqCompletionDpc, NULL);
     InitializeSListHead(&AtapCompletionQueueList);

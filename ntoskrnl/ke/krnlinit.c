@@ -77,10 +77,12 @@ KiInitSystem(VOID)
     KeInitializeDpc(&KiTimerExpireDpc, KiTimerExpiration, NULL);
     KeSetTargetProcessorDpc(&KiTimerExpireDpc, 0);
 
+#ifndef SARCH_XBOX
     /* Initialize Profiling data */
     KeInitializeSpinLock(&KiProfileLock);
     InitializeListHead(&KiProfileListHead);
     InitializeListHead(&KiProfileSourceListHead);
+#endif
 
     /* Loop the timer table */
     for (i = 0; i < TIMER_TABLE_SIZE; i++)

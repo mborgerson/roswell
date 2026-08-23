@@ -860,10 +860,26 @@ PVOID
 NTAPI
 MmCreateKernelStack(BOOLEAN GuiStack, UCHAR Node);
 
+/* variant that takes an explicit committed-stack size.  StackSize is
+ * rounded up to a page; pass 0 to get KERNEL_STACK_SIZE.  GuiStack must be
+ * FALSE here (large/GUI stacks have their own MmLargeStackSize policy).  The
+ * returned stack must be freed with MmDeleteKernelStackEx (passing the same
+ * size), not MmDeleteKernelStack -- the latter would only release
+ * KERNEL_STACK_SIZE worth of PTEs. */
+PVOID
+NTAPI
+MmCreateKernelStackEx(BOOLEAN GuiStack, UCHAR Node, SIZE_T StackSize);
+
 VOID
 NTAPI
 MmDeleteKernelStack(PVOID Stack,
                     BOOLEAN GuiStack);
+
+VOID
+NTAPI
+MmDeleteKernelStackEx(PVOID Stack,
+                      BOOLEAN GuiStack,
+                      SIZE_T StackSize);
 
 /* balance.c / pagefile.c******************************************************/
 

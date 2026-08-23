@@ -42,6 +42,14 @@ static const UNICODE_STRING CdPrefix = RTL_CONSTANT_STRING(L"\\Device\\CdRom");
 
 /* PRIVATE FUNCTIONS *********************************************************/
 
+#ifndef SARCH_XBOX
+/* Xbox HDD is FATX with a static partition layout -- the entire MBR-style
+ * drive-letter / partition-table machinery in this file (xHalExamineMBR,
+ * xHalIoReadPartitionTable, xHalIoSetPartitionInformation,
+ * xHalIoWritePartitionTable, xHalIoAssignDriveLetters and their Halp* /
+ * IopComputeHarddiskDerangements helpers) is dead.  The HAL dispatch table
+ * in fstub/halstub.c routes the public IoReadPartitionTable / etc. through
+ * XbHalp*Stub no-ops on SARCH=xbox. */
 static NTSTATUS
 HalpQueryDriveLayout(
     _In_ PUNICODE_STRING DeviceName,
@@ -2554,6 +2562,7 @@ xHalIoWritePartitionTable(IN PDEVICE_OBJECT DeviceObject,
     if (Buffer) ExFreePoolWithTag(Buffer, TAG_FILE_SYSTEM);
     return Status;
 }
+#endif /* SARCH_XBOX (entire MBR drive-letter machinery) */
 
 /* PUBLIC FUNCTIONS **********************************************************/
 

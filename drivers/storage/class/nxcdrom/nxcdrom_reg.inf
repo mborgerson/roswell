@@ -1,0 +1,12 @@
+; Cdrom class driver -- folded into the kernel image (no .sys).
+; The service registration must survive even though the driver is no longer
+; a loadable PE: PnP binds an enumerated optical device to the "cdrom"
+; service (Control\CriticalDeviceDatabase\GenCdRom in hivesys.inf) and finds
+; the \Driver\Cdrom object IopInitializeBootDrivers created.  ImagePath is
+; cosmetic for a built-in driver.
+[AddReg]
+HKLM,"SYSTEM\CurrentControlSet\Services\cdrom","ErrorControl",0x00010001,0x00000001
+HKLM,"SYSTEM\CurrentControlSet\Services\cdrom","Group",0x00000000,"SCSI CDROM Class"
+HKLM,"SYSTEM\CurrentControlSet\Services\cdrom","ImagePath",0x00020000,"system32\ntoskrnl.exe"
+HKLM,"SYSTEM\CurrentControlSet\Services\cdrom","Start",0x00010001,0x00000001
+HKLM,"SYSTEM\CurrentControlSet\Services\cdrom","Type",0x00010001,0x00000001

@@ -18,6 +18,7 @@
 
 /* GLOBALS ******************************************************************/
 
+#if DBG
 const char* FileInformationClassNames[] =
 {
     "??????",
@@ -63,6 +64,12 @@ const char* FileInformationClassNames[] =
     "FileShortNameInformation",
     "FileMaximumInformation"
 };
+#else
+/* Release: the only callers reference this table from DPRINT statements that
+   compile to dead code; provide a single-entry stub so the linker still has
+   a symbol to satisfy the typecheck. */
+const char* FileInformationClassNames[1] = { "" };
+#endif
 
 /* FUNCTIONS ****************************************************************/
 
@@ -233,6 +240,7 @@ VfatSetBasicInformation(
             NotifyFilter |= FILE_NOTIFY_CHANGE_LAST_WRITE;
         }
     }
+#ifndef SARCH_XBOX
     else
     {
         if (BasicInfo->CreationTime.QuadPart != 0 && BasicInfo->CreationTime.QuadPart != -1)
@@ -262,6 +270,7 @@ VfatSetBasicInformation(
             NotifyFilter |= FILE_NOTIFY_CHANGE_LAST_WRITE;
         }
     }
+#endif
 
     VfatUpdateEntry(DeviceExt, FCB);
 
@@ -309,6 +318,7 @@ VfatGetBasicInformation(
                                    &BasicInfo->LastWriteTime);
         BasicInfo->ChangeTime = BasicInfo->LastWriteTime;
     }
+#ifndef SARCH_XBOX
     else
     {
         FsdDosDateTimeToSystemTime(DeviceExt,
@@ -325,6 +335,7 @@ VfatGetBasicInformation(
                                    &BasicInfo->LastWriteTime);
         BasicInfo->ChangeTime = BasicInfo->LastWriteTime;
     }
+#endif
 
     BasicInfo->FileAttributes = *FCB->Attributes & 0x3f;
     /* Synthesize FILE_ATTRIBUTE_NORMAL */
@@ -608,7 +619,14 @@ VfatSetRenameInformation(
 
         Status = ObReferenceObjectByHandle(RenameInfo->RootDirectory,
                                            FILE_READ_DATA,
+#ifdef SARCH_XBOX
+                                           /* in-image view: the object
+                                            * type variable, not the
+                                            * import-slot indirection */
+                                           IoFileObjectType,
+#else
                                            *IoFileObjectType,
+#endif
                                            ExGetPreviousMode(),
                                            (PVOID *)&RootFileObject,
                                            NULL);
@@ -668,7 +686,11 @@ VfatSetRenameInformation(
                 /* Get its FO to get the FCB */
                 Status = ObReferenceObjectByHandle(TargetHandle,
                                                    FILE_WRITE_DATA,
+#ifdef SARCH_XBOX
+                                                   IoFileObjectType,
+#else
                                                    *IoFileObjectType,
+#endif
                                                    KernelMode,
                                                    (PVOID *)&TargetFileObject,
                                                    NULL);
@@ -1064,6 +1086,7 @@ VfatGetNetworkOpenInformation(
                                    &NetworkInfo->LastWriteTime);
         NetworkInfo->ChangeTime.QuadPart = NetworkInfo->LastWriteTime.QuadPart;
     }
+#ifndef SARCH_XBOX
     else
     {
         FsdDosDateTimeToSystemTime(DeviceExt,
@@ -1080,6 +1103,7 @@ VfatGetNetworkOpenInformation(
                                    &NetworkInfo->LastWriteTime);
         NetworkInfo->ChangeTime.QuadPart = NetworkInfo->LastWriteTime.QuadPart;
     }
+#endif
 
     if (vfatFCBIsDirectory(Fcb))
     {
@@ -1406,10 +1430,12 @@ VfatSetAllocationSizeInformation(
             Cluster = NCluster;
         }
 
+#ifndef SARCH_XBOX
         if (DeviceExt->FatInfo.FatType == FAT32)
         {
             FAT32UpdateFreeClustersCount(DeviceExt);
         }
+#endif
     }
     else
     {
