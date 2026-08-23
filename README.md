@@ -1,6 +1,8 @@
 nxkrnl (Roswell)
 ================
 
+[![codecov](https://codecov.io/github/mborgerson/roswell/graph/badge.svg?token=VEZ05WHR6Z)](https://codecov.io/github/mborgerson/roswell)
+
 An open-source kernel for the original Xbox, based on [ReactOS](https://reactos.org/).
 
 Where ReactOS is able to run Windows software, this kernel is able to run Xbox software.
