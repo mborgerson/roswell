@@ -73,7 +73,7 @@ jobs:
             libslirp0
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ matrix.variant }}-${{ github.sha }}
