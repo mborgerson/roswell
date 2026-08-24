@@ -1457,6 +1457,45 @@ NtWaitForMultipleObjectsEx(ULONG Count, PHANDLE Handles, WAIT_TYPE Type,
                                          (KPROCESSOR_MODE)WaitMode,
                                          Alertable, Timeout);
 }
+/*
+ * RtlCaptureContext, filling the Xbox public CONTEXT layout (see
+ * XBOX_CONTEXT in sdk/lib/rtl/i386/except.c: ContextFlags, 0x204-byte
+ * float area, Edi at 0x208 ... SegSs at 0x234).  NT x86 semantics: the
+ * caller must have an EBP frame, and the captured context is the
+ * caller's state as of its own return -- Ebp = [ebp], Eip = [ebp+4],
+ * Esp = ebp+8.  Volatiles are stored as at entry; the float area AND
+ * ContextFlags are left untouched (retail-verified: the caller's
+ * ContextFlags value survives the call).
+ */
+__asm__(
+    ".text\n"
+    ".globl _XeRtlCaptureContext@4\n"
+    "_XeRtlCaptureContext@4:\n\t"
+    "pushl %edx\n\t"                  /* preserve entry edx */
+    "movl 8(%esp), %edx\n\t"          /* ContextRecord */
+    "movl %eax, 0x21C(%edx)\n\t"      /* Eax */
+    "movl %ecx, 0x218(%edx)\n\t"      /* Ecx */
+    "popl %eax\n\t"
+    "movl %eax, 0x214(%edx)\n\t"      /* Edx (entry value) */
+    "movl %ebx, 0x210(%edx)\n\t"      /* Ebx */
+    "movl %esi, 0x20C(%edx)\n\t"      /* Esi */
+    "movl %edi, 0x208(%edx)\n\t"      /* Edi */
+    "xorl %eax, %eax\n\t"
+    "movw %cs, %ax\n\t"
+    "movl %eax, 0x228(%edx)\n\t"      /* SegCs */
+    "movw %ss, %ax\n\t"
+    "movl %eax, 0x234(%edx)\n\t"      /* SegSs */
+    "pushfl\n\t"
+    "popl %eax\n\t"
+    "movl %eax, 0x22C(%edx)\n\t"      /* EFlags */
+    "movl (%ebp), %eax\n\t"
+    "movl %eax, 0x220(%edx)\n\t"      /* Ebp = [ebp] */
+    "movl 4(%ebp), %eax\n\t"
+    "movl %eax, 0x224(%edx)\n\t"      /* Eip = [ebp+4] */
+    "leal 8(%ebp), %eax\n\t"
+    "movl %eax, 0x230(%edx)\n\t"      /* Esp = ebp+8 */
+    "ret $4\n");
+
 NTSTATUS NTAPI
 NtSignalAndWaitForSingleObjectEx(HANDLE SignalHandle, HANDLE WaitHandle,
                                      CHAR WaitMode, BOOLEAN Alertable,
