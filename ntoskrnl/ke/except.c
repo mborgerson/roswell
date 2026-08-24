@@ -168,6 +168,49 @@ KiRaiseException(
 
 /* SYSTEM CALLS ***************************************************************/
 
+#if defined(SARCH_XBOX) && defined(_M_IX86)
+/*
+ * On Xbox the Zw syscall thunks are gone (Zw==Nt), so the kernel's own
+ * RtlRaiseException/RtlUnwind tails -- and any ring-0 title -- reach
+ * NtContinue/NtRaiseException by direct call, with no syscall trap
+ * frame to edit.  Resume a direct-call NtContinue by restoring the
+ * context in place: stage a pop frame just below the target Esp (dead
+ * stack belonging to the frames being abandoned) and pop into the
+ * registers.  Segments are ignored -- flat ring 0.
+ */
+static DECLSPEC_NORETURN
+VOID
+KiXboxRestoreContext(
+    _In_ PCONTEXT Context)
+{
+    ULONG *Stage = (ULONG *)Context->Esp;
+
+    *--Stage = Context->Eip;
+    *--Stage = Context->Eax;
+    *--Stage = Context->Ecx;
+    *--Stage = Context->Edx;
+    *--Stage = Context->EFlags;
+    *--Stage = Context->Ebp;
+    *--Stage = Context->Ebx;
+    *--Stage = Context->Esi;
+    *--Stage = Context->Edi;
+
+    __asm__ __volatile__(
+        "movl %0, %%esp\n\t"
+        "popl %%edi\n\t"
+        "popl %%esi\n\t"
+        "popl %%ebx\n\t"
+        "popl %%ebp\n\t"
+        "popfl\n\t"
+        "popl %%edx\n\t"
+        "popl %%ecx\n\t"
+        "popl %%eax\n\t"
+        "ret"
+        :: "r"(Stage) : "memory");
+    __builtin_unreachable();
+}
+#endif
+
 NTSTATUS
 NTAPI
 NtRaiseException(
@@ -188,6 +231,21 @@ NtRaiseException(
     /* Get trap frame and link previous one */
     Thread = KeGetCurrentThread();
     TrapFrame = Thread->TrapFrame;
+#if defined(SARCH_XBOX) && defined(_M_IX86)
+    if (TrapFrame == NULL)
+    {
+        /* Direct call with no syscall frame: RtlRaiseException already
+         * ran the first-chance dispatch, so this exception is
+         * unhandled kernel-mode -- report it instead of faulting on
+         * the missing frame. */
+        KeBugCheckEx(KMODE_EXCEPTION_NOT_HANDLED,
+                     (ULONG_PTR)ExceptionRecord->ExceptionCode,
+                     (ULONG_PTR)ExceptionRecord->ExceptionAddress,
+                     ExceptionRecord->NumberParameters != 0 ?
+                         ExceptionRecord->ExceptionInformation[0] : 0,
+                     0);
+    }
+#endif
     Thread->TrapFrame = KiGetLinkedTrapFrame(TrapFrame);
 
     /* Set exception list */
@@ -230,6 +288,13 @@ NtContinue(
     /* Get trap frame and link previous one*/
     Thread = KeGetCurrentThread();
     TrapFrame = Thread->TrapFrame;
+#if defined(SARCH_XBOX) && defined(_M_IX86)
+    if (TrapFrame == NULL)
+    {
+        /* Direct call -- no syscall frame to edit; restore in place. */
+        KiXboxRestoreContext(Context);
+    }
+#endif
     Thread->TrapFrame = KiGetLinkedTrapFrame(TrapFrame);
 
     /* Continue from this point on */
