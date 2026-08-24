@@ -1509,13 +1509,66 @@ XeNtOpenSymbolicLinkObject(PHANDLE Handle, PXBE_OBJECT_ATTRIBUTES XAttr)
         RtlFreeUnicodeString(&name);
     return status;
 }
+/*
+ * Xbox OBJECT_DIRECTORY_INFORMATION is { OBJECT_STRING Name; ULONG Type; }
+ * with ANSI in-buffer names; ReactOS fills NT-shape entries ({ UNICODE
+ * Name; UNICODE TypeName; }).  Query into a scratch pool buffer and
+ * repack: entry headers first (zeroed terminator included), ANSI name
+ * data after.  The ANSI repack always fits: it needs at most the same
+ * space the NT shape already fit into.  Type is left 0 -- the retail
+ * field's encoding is undocumented and titles enumerate by name.
+ */
 NTSTATUS NTAPI
 XeNtQueryDirectoryObject(HANDLE Handle, PVOID Buffer, ULONG Length,
                            BOOLEAN RestartScan, PULONG Context,
                            PULONG ReturnLength)
 {
-    return ros_NtQueryDirectoryObject(Handle, Buffer, Length, FALSE, RestartScan,
-                                      Context, ReturnLength);
+    typedef struct { ANSI_STRING Name; ULONG Type; } XBE_ODI;
+    typedef struct { UNICODE_STRING Name; UNICODE_STRING TypeName; } NT_ODI;
+    NT_ODI *nt;
+    NTSTATUS status;
+    ULONG count, i;
+    PVOID tmp;
+
+    if (Length < sizeof(XBE_ODI))
+        return STATUS_BUFFER_TOO_SMALL;
+
+    tmp = ExAllocatePoolWithTag(PagedPool, Length, 'iDbX');
+    if (tmp == NULL)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    status = ros_NtQueryDirectoryObject(Handle, tmp, Length, FALSE,
+                                        RestartScan, Context, ReturnLength);
+    if (!NT_SUCCESS(status))
+    {
+        ExFreePoolWithTag(tmp, 'iDbX');
+        return status;
+    }
+
+    nt = tmp;
+    for (count = 0; nt[count].Name.Length != 0; count++)
+        ;
+
+    XBE_ODI *out = Buffer;
+    PCHAR data = (PCHAR)&out[count + 1];
+    for (i = 0; i < count; i++)
+    {
+        USHORT chars = nt[i].Name.Length / sizeof(WCHAR);
+        ULONG c;
+        for (c = 0; c < chars; c++)
+            data[c] = (CHAR)nt[i].Name.Buffer[c];
+        out[i].Name.Buffer = data;
+        out[i].Name.Length = chars;
+        out[i].Name.MaximumLength = chars;
+        out[i].Type = 0;
+        data += chars;
+    }
+    RtlZeroMemory(&out[count], sizeof(out[count]));
+
+    ExFreePoolWithTag(tmp, 'iDbX');
+    if (ReturnLength != NULL)
+        *ReturnLength = (ULONG)(data - (PCHAR)Buffer);
+    return status;
 }
 
 /*
