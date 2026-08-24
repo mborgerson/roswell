@@ -520,6 +520,53 @@ static bool t_skip_instruction_continue(void)
     return true;
 }
 
+/* RtlCaptureContext requires an EBP frame in its caller (NT x86
+ * contract), so call it through an asm shim that guarantees one.  The
+ * captured context is the shim-caller's state as of the shim's
+ * return: Eip lands back in this translation unit, Ebp is this
+ * function's frame. */
+__asm__(
+    ".text\n"
+    "_capture_with_frame:\n\t"
+    "pushl %ebp\n\t"
+    "movl %esp, %ebp\n\t"
+    "pushl 8(%ebp)\n\t"
+    "call _RtlCaptureContext@4\n\t"
+    "popl %ebp\n\t"
+    "ret\n");
+extern void __cdecl capture_with_frame(CONTEXT *ctx);
+
+static bool t_capture_context(void)
+{
+    /* Force a frame so %ebp is meaningful at the call site. */
+    volatile char *pad = __builtin_alloca(16);
+    pad[0] = 0;
+
+    CONTEXT ctx;
+    memset(&ctx, 0xEE, sizeof(ctx));
+    capture_with_frame(&ctx);
+
+    /* Retail leaves ContextFlags untouched -- the fill must survive. */
+    ASSERT_EQ_U32(ctx.ContextFlags, 0xEEEEEEEE);
+
+    /* Eip: back into this function's body. */
+    ULONG fn = (ULONG)(ULONG_PTR)t_capture_context;
+    if (ctx.Eip < fn || ctx.Eip > fn + 0x200)
+        FAIL_AND_RETURN("Eip %08x not in test fn %08x",
+                        (unsigned)ctx.Eip, (unsigned)fn);
+
+    /* Ebp: this frame.  Esp: within it. */
+    ULONG frame = (ULONG)(ULONG_PTR)__builtin_frame_address(0);
+    ASSERT_EQ_U32(ctx.Ebp, frame);
+    ASSERT_TRUE(ctx.Esp > frame - 0x1000 && ctx.Esp < frame + 0x100);
+
+    /* Ring-0 flat segments, interrupts on. */
+    ASSERT_TRUE(ctx.SegCs != 0 && (ctx.SegCs & 3) == 0);
+    ASSERT_TRUE(ctx.SegSs != 0 && (ctx.SegSs & 3) == 0);
+    ASSERT_TRUE(ctx.EFlags & 0x200);
+    return true;
+}
+
 static const test_entry_t ke_exceptions_entries[] = {
     {"raise_exception_roundtrip", t_raise_exception_roundtrip},
     {"raise_status",              t_raise_status},
@@ -532,6 +579,7 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"search_order_and_unwind",   t_search_order_and_unwind},
     {"context_read_layout",       t_context_read_layout},
     {"skip_instruction_continue", t_skip_instruction_continue},
+    {"capture_context",           t_capture_context},
     /* xemu's TCG computes masked results regardless of the FPU/MXCSR
      * exception masks, so #MF/#XF never deliver under emulation (both
      * kernels agree).  Would pass on hardware; keep as TODO so they
