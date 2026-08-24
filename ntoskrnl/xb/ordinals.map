@@ -195,6 +195,7 @@
 224  NtResumeThread
 225  NtSetEvent
 226  NtSetInformationFile
+230  NtSignalAndWaitForSingleObjectEx
 232  NtUserIoApcDispatcher
 233  NtWaitForSingleObject
 234  NtWaitForSingleObjectEx       # the *Ex waits add a wait mode

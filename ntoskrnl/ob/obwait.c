@@ -561,6 +561,109 @@ NxkWaitForMultipleObjectsMode(IN ULONG Count,
     return Status;
 }
 
+/*
+ * Xbox: atomically signal one handle and wait on another, honoring an
+ * explicit WaitMode.  Signal + wait stay atomic the NT way: the release
+ * routines are called with Wait=TRUE so the dispatcher lock is held
+ * through to the KeWaitForSingleObject dispatch.  Handles are referenced
+ * in KernelMode (the title runs ring-0); only the wait mode comes from
+ * the caller.
+ */
+NTSTATUS
+NTAPI
+NxkSignalAndWaitForSingleObjectMode(IN HANDLE SignalHandle,
+                                    IN HANDLE WaitHandle,
+                                    IN KPROCESSOR_MODE WaitMode,
+                                    IN BOOLEAN Alertable,
+                                    IN PLARGE_INTEGER Timeout OPTIONAL)
+{
+    POBJECT_TYPE Type;
+    PVOID SignalObj, WaitObj, WaitableObject;
+    NTSTATUS Status;
+
+    Status = ObReferenceObjectByHandle(SignalHandle,
+                                       0,
+                                       NULL,
+                                       KernelMode,
+                                       &SignalObj,
+                                       NULL);
+    if (!NT_SUCCESS(Status)) return Status;
+
+    Status = ObReferenceObjectByHandle(WaitHandle,
+                                       SYNCHRONIZE,
+                                       NULL,
+                                       KernelMode,
+                                       &WaitObj,
+                                       NULL);
+    if (!NT_SUCCESS(Status))
+    {
+        ObDereferenceObject(SignalObj);
+        return Status;
+    }
+
+    WaitableObject = OBJECT_TO_OBJECT_HEADER(WaitObj)->Type->DefaultObject;
+    if (IsPointerOffset(WaitableObject))
+    {
+        WaitableObject = (PVOID)((ULONG_PTR)WaitObj +
+                                 (ULONG_PTR)WaitableObject);
+    }
+
+    Type = OBJECT_TO_OBJECT_HEADER(SignalObj)->Type;
+    if (Type == ExEventObjectType)
+    {
+        KeSetEvent(SignalObj, EVENT_INCREMENT, TRUE);
+    }
+    else if (Type == ExMutantObjectType)
+    {
+        /* Raises on over-release / not-owned. */
+        _SEH2_TRY
+        {
+            KeReleaseMutant(SignalObj, MUTANT_INCREMENT, FALSE, TRUE);
+        }
+        _SEH2_EXCEPT(((_SEH2_GetExceptionCode() == STATUS_ABANDONED) ||
+                      (_SEH2_GetExceptionCode() == STATUS_MUTANT_NOT_OWNED)) ?
+                      EXCEPTION_EXECUTE_HANDLER :
+                      EXCEPTION_CONTINUE_SEARCH)
+        {
+            Status = _SEH2_GetExceptionCode();
+        }
+        _SEH2_END;
+    }
+    else if (Type == ExSemaphoreObjectType)
+    {
+        /* Raises when the semaphore limit would be exceeded. */
+        _SEH2_TRY
+        {
+            KeReleaseSemaphore(SignalObj, SEMAPHORE_INCREMENT, 1, TRUE);
+        }
+        _SEH2_EXCEPT((_SEH2_GetExceptionCode() ==
+                      STATUS_SEMAPHORE_LIMIT_EXCEEDED) ?
+                     EXCEPTION_EXECUTE_HANDLER :
+                     EXCEPTION_CONTINUE_SEARCH)
+        {
+            Status = _SEH2_GetExceptionCode();
+        }
+        _SEH2_END;
+    }
+    else
+    {
+        Status = STATUS_OBJECT_TYPE_MISMATCH;
+    }
+
+    if (NT_SUCCESS(Status))
+    {
+        Status = KeWaitForSingleObject(WaitableObject,
+                                       UserRequest,
+                                       WaitMode,
+                                       Alertable,
+                                       Timeout);
+    }
+
+    ObDereferenceObject(WaitObj);
+    ObDereferenceObject(SignalObj);
+    return Status;
+}
+
 /*++
 * @name NtSignalAndWaitForSingleObject
 * @implemented NT4

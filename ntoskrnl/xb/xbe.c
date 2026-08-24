@@ -913,6 +913,8 @@ extern NTSTATUS NTAPI NxkWaitForSingleObjectMode(
     HANDLE, KPROCESSOR_MODE, BOOLEAN, PLARGE_INTEGER);
 extern NTSTATUS NTAPI NxkWaitForMultipleObjectsMode(
     ULONG, PHANDLE, WAIT_TYPE, KPROCESSOR_MODE, BOOLEAN, PLARGE_INTEGER);
+extern NTSTATUS NTAPI NxkSignalAndWaitForSingleObjectMode(
+    HANDLE, HANDLE, KPROCESSOR_MODE, BOOLEAN, PLARGE_INTEGER);
 extern NTSTATUS NTAPI ros_NtWaitForMultipleObjects(
     ULONG, PHANDLE, WAIT_TYPE, BOOLEAN, PLARGE_INTEGER)
     __asm__("_NtWaitForMultipleObjects@20");
@@ -1442,6 +1444,15 @@ NtWaitForMultipleObjectsEx(ULONG Count, PHANDLE Handles, WAIT_TYPE Type,
     return NxkWaitForMultipleObjectsMode(Count, Handles, Type,
                                          (KPROCESSOR_MODE)WaitMode,
                                          Alertable, Timeout);
+}
+NTSTATUS NTAPI
+NtSignalAndWaitForSingleObjectEx(HANDLE SignalHandle, HANDLE WaitHandle,
+                                     CHAR WaitMode, BOOLEAN Alertable,
+                                     PLARGE_INTEGER Timeout)
+{
+    return NxkSignalAndWaitForSingleObjectMode(SignalHandle, WaitHandle,
+                                               (KPROCESSOR_MODE)WaitMode,
+                                               Alertable, Timeout);
 }
 NTSTATUS NTAPI
 XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
