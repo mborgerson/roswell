@@ -218,6 +218,44 @@ static void provoke_ud2(void)
     __asm__ volatile("ud2");
 }
 
+/* #GP: load a garbage selector.  A faulting segment load leaves the
+ * register unchanged, and gs is unused in ring 0. */
+static void provoke_gp(void)
+{
+    __asm__ volatile("movw $0x9b, %%ax; movw %%ax, %%gs" ::: "eax");
+}
+
+/* #DB: single-step trap on the instruction after TF is set.  The trap
+ * gate clears TF for the handler, and unwind recovery abandons the
+ * TF-set context, so stepping does not resume. */
+static void provoke_single_step(void)
+{
+    __asm__ volatile(
+        "pushfl\n\t"
+        "orl $0x100, (%%esp)\n\t"
+        "popfl\n\t"
+        "nop"
+        ::: "memory", "cc");
+}
+
+/* #OF: signed overflow + into. */
+static void provoke_into(void)
+{
+    __asm__ volatile("movb $0x7f, %%al; addb $1, %%al; into" ::: "eax", "cc");
+}
+
+/* #BR: bound check against a [0,1] range with index 5.  clang's
+ * assembler dropped the mnemonic, so encode bound %eax,(%edx) raw. */
+static void provoke_bound(void)
+{
+    static const int range[2] = { 0, 1 };
+    __asm__ volatile(
+        "movl $5, %%eax\n\t"
+        "movl %0, %%edx\n\t"
+        ".byte 0x62, 0x02"
+        :: "r"(range) : "eax", "edx");
+}
+
 static void provoke_x87_div0(void)
 {
     /* Unmask the x87 zero-divide exception, compute 1.0/0.0, and force
@@ -339,6 +377,29 @@ static bool t_integer_divide_by_zero(void)
 static bool t_illegal_instruction(void)
 {
     return expect_exception(provoke_ud2, STATUS_ILLEGAL_INSTRUCTION);
+}
+
+static bool t_general_protection(void)
+{
+    return expect_exception(provoke_gp, STATUS_ACCESS_VIOLATION);
+}
+
+static bool t_single_step(void)
+{
+    return expect_exception(provoke_single_step,
+                            (NTSTATUS)0x80000004L /* STATUS_SINGLE_STEP */);
+}
+
+static bool t_integer_overflow(void)
+{
+    return expect_exception(provoke_into,
+                            (NTSTATUS)0xC0000095L /* INTEGER_OVERFLOW */);
+}
+
+static bool t_bound_range(void)
+{
+    return expect_exception(provoke_bound,
+                            (NTSTATUS)0xC000008CL /* ARRAY_BOUNDS_EXCEEDED */);
 }
 
 static void provoke_int3(void)
@@ -574,6 +635,10 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"write_access_violation",    t_write_access_violation},
     {"integer_divide_by_zero",    t_integer_divide_by_zero},
     {"illegal_instruction",       t_illegal_instruction},
+    {"general_protection",        t_general_protection},
+    {"single_step",               t_single_step},
+    {"integer_overflow",          t_integer_overflow},
+    {"bound_range",               t_bound_range},
     {"breakpoint",                t_breakpoint},
     {"continue_after_commit",     t_continue_after_commit},
     {"search_order_and_unwind",   t_search_order_and_unwind},
