@@ -289,6 +289,59 @@ static bool t_volume_info_queries(void)
     return true;
 }
 
+
+#ifndef STATUS_DIRECTORY_NOT_EMPTY
+#define STATUS_DIRECTORY_NOT_EMPTY ((NTSTATUS)0xC0000101L)
+#endif
+
+/* Delete-disposition on a non-empty directory must be refused, and
+ * succeed once the directory is emptied. */
+static bool t_delete_nonempty_dir_rejected(void)
+{
+    ASSERT_TRUE(ensure_dir());
+
+    char subdir[160];
+    leaf_path(subdir, sizeof(subdir), "subdir");
+    HANDLE hd;
+    NTSTATUS s = open_at(subdir, GENERIC_READ, FILE_OPEN_IF,
+                         FILE_DIRECTORY_FILE, &hd);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    NtClose(hd);
+
+    char inner[160];
+    leaf_path(inner, sizeof(inner), "subdir\\inner.bin");
+    HANDLE hf;
+    s = open_at(inner, GENERIC_WRITE, FILE_OVERWRITE_IF,
+                FILE_NON_DIRECTORY_FILE, &hf);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    NtClose(hf);
+
+    FILE_DISPOSITION_INFORMATION di = { .DeleteFile = TRUE };
+    IO_STATUS_BLOCK iosb;
+    s = open_at(subdir, GENERIC_READ | DELETE, FILE_OPEN,
+                FILE_DIRECTORY_FILE, &hd);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    s = NtSetInformationFile(hd, &iosb, &di, sizeof(di),
+                             FileDispositionInformation);
+    NtClose(hd);
+    ASSERT_NTSTATUS(s, STATUS_DIRECTORY_NOT_EMPTY);
+
+    /* Empty it, then the delete must go through. */
+    s = open_at(inner, GENERIC_READ | DELETE, FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_DELETE_ON_CLOSE, &hf);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    NtClose(hf);
+
+    s = open_at(subdir, GENERIC_READ | DELETE, FILE_OPEN,
+                FILE_DIRECTORY_FILE, &hd);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    s = NtSetInformationFile(hd, &iosb, &di, sizeof(di),
+                             FileDispositionInformation);
+    NtClose(hd);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    return true;
+}
+
 static const test_entry_t io_finfo_entries[] = {
     {"position_info_roundtrip", t_position_info_roundtrip},
     {"basic_info_query_set",    t_basic_info_query_set},
@@ -296,6 +349,7 @@ static const test_entry_t io_finfo_entries[] = {
     {"rename_same_directory",   t_rename_same_directory},
     {"disposition_deletes",     t_disposition_deletes},
     {"volume_info_queries",     t_volume_info_queries},
+    {"delete_nonempty_dir_rejected", t_delete_nonempty_dir_rejected},
 };
 
 DEFINE_GROUP(io_finfo, "io/finfo");
