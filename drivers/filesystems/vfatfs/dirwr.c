@@ -346,7 +346,8 @@ vfatFindDirSpace(
             }
             AllocationSize.QuadPart = pDirFcb->RFCB.FileSize.u.LowPart + DeviceExt->FatInfo.BytesPerCluster;
             Status = VfatSetAllocationSizeInformation(pDirFcb->FileObject, pDirFcb,
-                                                      DeviceExt, &AllocationSize);
+                                                      DeviceExt, &AllocationSize,
+                                                      FALSE);
             if (!NT_SUCCESS(Status))
             {
                 return FALSE;

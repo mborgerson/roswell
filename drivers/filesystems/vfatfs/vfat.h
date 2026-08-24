@@ -1110,7 +1110,8 @@ VfatSetAllocationSizeInformation(
     PFILE_OBJECT FileObject,
     PVFATFCB Fcb,
     PDEVICE_EXTENSION DeviceExt,
-    PLARGE_INTEGER AllocationSize);
+    PLARGE_INTEGER AllocationSize,
+    BOOLEAN AllocationOnly);
 
 /* flush.c */
 

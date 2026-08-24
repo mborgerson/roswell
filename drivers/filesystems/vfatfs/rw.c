@@ -1081,7 +1081,8 @@ VfatWrite(
 
         AllocationSize.QuadPart = ByteOffset.u.LowPart + Length;
         Status = VfatSetAllocationSizeInformation(IrpContext->FileObject, Fcb,
-                                                  IrpContext->DeviceExt, &AllocationSize);
+                                                  IrpContext->DeviceExt, &AllocationSize,
+                                                  FALSE);
 
         ExReleaseResourceLite(&IrpContext->DeviceExt->DirResource);
 

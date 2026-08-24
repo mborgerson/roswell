@@ -1231,12 +1231,27 @@ UpdateFileSize(
     CcSetFileSizes(FileObject, (PCC_FILE_SIZES)&Fcb->RFCB.AllocationSize);
 }
 
+/* Grow only the allocation; EOF and the on-disk FileSize stay put
+ * (FileAllocationInformation semantics -- retail-verified). */
+static
+VOID
+UpdateAllocationSize(
+    PFILE_OBJECT FileObject,
+    PVFATFCB Fcb,
+    ULONG Size,
+    ULONG ClusterSize)
+{
+    Fcb->RFCB.AllocationSize.QuadPart = ROUND_UP_64(Size, ClusterSize);
+    CcSetFileSizes(FileObject, (PCC_FILE_SIZES)&Fcb->RFCB.AllocationSize);
+}
+
 NTSTATUS
 VfatSetAllocationSizeInformation(
     PFILE_OBJECT FileObject,
     PVFATFCB Fcb,
     PDEVICE_EXTENSION DeviceExt,
-    PLARGE_INTEGER AllocationSize)
+    PLARGE_INTEGER AllocationSize,
+    BOOLEAN AllocationOnly)
 {
     ULONG OldSize;
     ULONG Cluster, FirstCluster;
@@ -1372,7 +1387,10 @@ VfatSetAllocationSizeInformation(
                 return STATUS_DISK_FULL;
             }
         }
-        UpdateFileSize(FileObject, Fcb, NewSize, ClusterSize, vfatVolumeIsFatX(DeviceExt));
+        if (AllocationOnly)
+            UpdateAllocationSize(FileObject, Fcb, NewSize, ClusterSize);
+        else
+            UpdateFileSize(FileObject, Fcb, NewSize, ClusterSize, vfatVolumeIsFatX(DeviceExt));
     }
     else if (NewSize + ClusterSize <= Fcb->RFCB.AllocationSize.u.LowPart)
     {
@@ -1437,7 +1455,7 @@ VfatSetAllocationSizeInformation(
         }
 #endif
     }
-    else
+    else if (!AllocationOnly)
     {
         UpdateFileSize(FileObject, Fcb, NewSize, ClusterSize, vfatVolumeIsFatX(DeviceExt));
     }
@@ -1682,7 +1700,9 @@ VfatSetInformation(
             Status = VfatSetAllocationSizeInformation(IrpContext->FileObject,
                                                       FCB,
                                                       IrpContext->DeviceExt,
-                                                      (PLARGE_INTEGER)SystemBuffer);
+                                                      (PLARGE_INTEGER)SystemBuffer,
+                                                      FileInformationClass ==
+                                                      FileAllocationInformation);
             break;
 
         case FileBasicInformation:

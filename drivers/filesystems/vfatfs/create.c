@@ -803,7 +803,8 @@ VfatCreateFile(
                 VfatSetAllocationSizeInformation(FileObject,
                                                  pFcb,
                                                  DeviceExt,
-                                                 &Irp->Overlay.AllocationSize);
+                                                 &Irp->Overlay.AllocationSize,
+                                                 FALSE);
                 VfatSetExtendedAttributes(FileObject,
                                           Irp->AssociatedIrp.SystemBuffer,
                                           Stack->Parameters.Create.EaLength);
@@ -991,7 +992,8 @@ VfatCreateFile(
             Status = VfatSetAllocationSizeInformation(FileObject,
                                                       pFcb,
                                                       DeviceExt,
-                                                      &Irp->Overlay.AllocationSize);
+                                                      &Irp->Overlay.AllocationSize,
+                                                      FALSE);
             ExReleaseResourceLite(&(pFcb->MainResource));
             if (!NT_SUCCESS (Status))
             {
