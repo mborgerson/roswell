@@ -95,6 +95,38 @@ static bool t_delay_long_cumulative(void)
     return true;
 }
 
+
+/* NtSetSystemTime drives the RTC write path.  Jump an hour ahead,
+ * verify the clock followed and the previous time was returned, then
+ * restore.  Tolerances are generous: the point is the path, not
+ * precision. */
+static bool t_set_system_time_roundtrip(void)
+{
+    LARGE_INTEGER before, target, prev = { .QuadPart = 0 }, now;
+    KeQuerySystemTime(&before);
+
+    target.QuadPart = before.QuadPart + (LONGLONG)3600 * 10000000;
+    NTSTATUS s = NtSetSystemTime(&target, &prev);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    LONGLONG dprev = prev.QuadPart - before.QuadPart;
+    if (dprev < 0)
+        dprev = -dprev;
+
+    KeQuerySystemTime(&now);
+    LONGLONG dnow = now.QuadPart - target.QuadPart;
+    if (dnow < 0)
+        dnow = -dnow;
+
+    /* Put the clock back before asserting anything. */
+    s = NtSetSystemTime(&prev, NULL);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    ASSERT_TRUE(dprev < (LONGLONG)60 * 10000000);
+    ASSERT_TRUE(dnow < (LONGLONG)60 * 10000000);
+    return true;
+}
+
 static const test_entry_t ke_time_entries[] = {
     {"query_system_time_nonzero", t_query_system_time_nonzero},
     {"perf_frequency_xbox",       t_perf_frequency_xbox},
@@ -103,6 +135,7 @@ static const test_entry_t ke_time_entries[] = {
     {"delay_returns_after_interval", t_delay_returns_after_interval},
     {"delay_long_cumulative",     t_delay_long_cumulative},
     {"stall_returns",             t_stall_returns},
+    {"set_system_time_roundtrip", t_set_system_time_roundtrip},
 };
 
 DEFINE_GROUP(ke_time, "ke/time");
