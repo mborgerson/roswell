@@ -57,6 +57,7 @@ DECLARE_GROUP(io_rawfs);
 DECLARE_GROUP(hal_av);
 DECLARE_GROUP(ke_exceptions);
 DECLARE_GROUP(io_fatx16);
+DECLARE_GROUP(ob_handles);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -91,6 +92,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_rawfs,
     &g_group_ke_exceptions,
     &g_group_io_fatx16,
+    &g_group_ob_handles,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
     &g_group_hal_av,
