@@ -148,6 +148,10 @@ jobs:
         with:
           files: coverage.info
           disable_search: true
+          # The tracefile's line set comes straight from DWARF; codecov's
+          # heuristic file fixes would only second-guess it, and reading
+          # the vendored ISO-8859 sources spams decode warnings.
+          disable_file_fixes: true
           flags: api-regression
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
