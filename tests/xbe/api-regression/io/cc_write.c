@@ -569,6 +569,50 @@ out:
     return ok;
 }
 
+
+/* A write starting beyond EOF must extend the file through the gap
+ * (the kernel zeroes cache pages over the hole on the way -- but per
+ * the header note, the on-disk gap content is NOT asserted). */
+static bool t_gap_write_extends(void)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s = open_path(CC_SCRATCH, &h, GENERIC_READ | GENERIC_WRITE,
+                           FILE_OVERWRITE_IF, 0, &iosb);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    unsigned char lo[0x1000], hi[0x1000], back[0x1000];
+    fill_pattern(lo, sizeof(lo), 0, 0x5A);
+    fill_pattern(hi, sizeof(hi), 0x20000, 0x5A);
+
+    LARGE_INTEGER off0 = { .QuadPart = 0 };
+    LARGE_INTEGER off128k = { .QuadPart = 0x20000 };
+    s = NtWriteFile(h, NULL, NULL, NULL, &iosb, lo, sizeof(lo), &off0);
+    if (NT_SUCCESS(s))
+        s = NtWriteFile(h, NULL, NULL, NULL, &iosb, hi, sizeof(hi),
+                        &off128k);
+    if (!NT_SUCCESS(s)) {
+        NtClose(h);
+        unlink_path(CC_SCRATCH);
+        FAIL_AND_RETURN("gap write -> 0x%08x", (unsigned)s);
+    }
+
+    FILE_NETWORK_OPEN_INFORMATION ni;
+    s = NtQueryInformationFile(h, &iosb, &ni, sizeof(ni),
+                               FileNetworkOpenInformation);
+    bool size_ok = NT_SUCCESS(s) &&
+                   ni.EndOfFile.QuadPart == 0x20000 + 0x1000;
+
+    s = NtReadFile(h, NULL, NULL, NULL, &iosb, back, sizeof(back),
+                   &off128k);
+    NtClose(h);
+    unlink_path(CC_SCRATCH);
+    ASSERT_TRUE(size_ok);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    ASSERT_TRUE(memcmp(hi, back, sizeof(back)) == 0);
+    return true;
+}
+
 static const test_entry_t io_cc_write_entries[] = {
     {"flush_buffers_visibility",  t_flush_buffers_visibility},
     {"cross_handle_no_flush",     t_cross_handle_no_flush},
@@ -577,6 +621,7 @@ static const test_entry_t io_cc_write_entries[] = {
     {"extend_preserves_data",     t_extend_preserves_data},
     {"small_file_reopen",         t_small_file_reopen},
     {"subdir_small_reopen",       t_subdir_small_reopen},
+    {"gap_write_extends",         t_gap_write_extends},
 };
 
 DEFINE_GROUP(io_cc_write, "io/cc-write");

@@ -81,6 +81,7 @@ static bool t_fs_size_query(void)
     return true;
 }
 
+
 static const test_entry_t io_rawfs_entries[] = {
     {"dasd_open_mounts_raw", t_dasd_open_mounts_raw},
     {"sector_read",          t_sector_read},
