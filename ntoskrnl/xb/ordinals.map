@@ -196,6 +196,7 @@
 224  NtResumeThread
 225  NtSetEvent
 226  XeNtSetInformationFile          # rename target: Xbox ANSI -> NT WCHAR
+228  NtSetSystemTime
 230  NtSignalAndWaitForSingleObjectEx
 232  NtUserIoApcDispatcher
 233  NtWaitForSingleObject
