@@ -674,8 +674,13 @@ KiTrap05Handler(IN PKTRAP_FRAME TrapFrame)
     /* Check for VDM trap */
     ASSERT(KiVdmTrap(TrapFrame) == FALSE);
 
+#ifndef SARCH_XBOX
     /* Check for kernel-mode fault */
     if (!KiUserTrap(TrapFrame)) KiSystemFatalException(EXCEPTION_BOUND_CHECK, TrapFrame);
+#else
+    /* Ring-0 titles fault here legitimately; retail dispatches BOUND
+     * to the title's SEH chain like any other fault. */
+#endif
 
     /* Enable interrupts */
     _enable();
@@ -1187,6 +1192,21 @@ KiTrap0DHandler(IN PKTRAP_FRAME TrapFrame)
      * Silence unused-variable warnings for the user-trap-only locals. */
     (void)i; (void)j; (void)Iopl; (void)Privileged;
     (void)Instructions; (void)Instruction;
+
+    /* A title #GP (bad selector load, privileged-state abuse) must
+     * dispatch to its SEH chain -- retail raises ACCESS_VIOLATION.
+     * Faults inside the trap-exit path itself (the IRET and lazy-
+     * segment cases below) come from kernel EIPs, so keep those
+     * special cases ahead of the dispatch for kernel addresses. */
+    if (TrapFrame->Eip < (ULONG_PTR)MmSystemRangeStart)
+    {
+        _enable();
+        KiDispatchException2Args(STATUS_ACCESS_VIOLATION,
+                                 TrapFrame->Eip,
+                                 0,
+                                 0xFFFFFFFF,
+                                 TrapFrame);
+    }
 #endif
 
     /*
