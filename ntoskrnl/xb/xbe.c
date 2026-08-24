@@ -919,6 +919,9 @@ extern NTSTATUS NTAPI NxkSignalAndWaitForSingleObjectMode(
 extern NTSTATUS NTAPI ros_NtQuerySymbolicLinkObject(
     HANDLE, PUNICODE_STRING, PULONG)
     __asm__("_NtQuerySymbolicLinkObject@12");
+extern NTSTATUS NTAPI ros_NtDuplicateObject(
+    HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG)
+    __asm__("_NtDuplicateObject@28");
 /* Internal object-directory type (ob/obdir.c). */
 extern POBJECT_TYPE ObpDirectoryObjectType;
 extern NTSTATUS NTAPI ObOpenObjectByName(
@@ -1523,6 +1526,13 @@ XeNtQuerySymbolicLinkObject(HANDLE Handle, PANSI_STRING Target,
     status = RtlUnicodeStringToAnsiString(&a, &u, FALSE);
     Target->Length = a.Length;
     return status;
+}
+NTSTATUS NTAPI
+XeNtDuplicateObject(HANDLE Source, PHANDLE Target, ULONG Options)
+{
+    return ros_NtDuplicateObject(NtCurrentProcess(), Source,
+                                 NtCurrentProcess(), Target, 0, 0,
+                                 Options | DUPLICATE_SAME_ACCESS);
 }
 NTSTATUS NTAPI
 XeNtOpenDirectoryObject(PHANDLE Handle, PXBE_OBJECT_ATTRIBUTES XAttr)

@@ -176,6 +176,7 @@
 193  XeNtCreateSemaphore             # Xbox: 4 args, no DesiredAccess
 222  NtReleaseSemaphore               # signature matches NT (HANDLE, LONG, PLONG)
 196  NtDeviceIoControlFile
+197  XeNtDuplicateObject             # Xbox @12: current process, same access
 198  NtFlushBuffersFile
 199  XeNtFreeVirtualMemory
 200  XeNtFsControlFile               # trace wrapper -- visible IOCTL fail / success
