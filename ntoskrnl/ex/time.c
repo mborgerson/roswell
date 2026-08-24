@@ -539,6 +539,7 @@ NtSetSystemTime(IN PLARGE_INTEGER SystemTime,
         _SEH2_END;
     }
 
+#ifndef SARCH_XBOX
     /* Read time zone information from the registry and set the clock */
     Status = RtlQueryTimeZoneInformation(&TimeZoneInformation);
     if (!NT_SUCCESS(Status))
@@ -557,10 +558,15 @@ NtSetSystemTime(IN PLARGE_INTEGER SystemTime,
 
         /* Set the system time and notify the system */
         KeSetSystemTime(&NewSystemTime, &OldSystemTime, FALSE, NULL);
-#ifndef SARCH_XBOX
         PoNotifySystemTimeSet();
-#endif
     }
+#else
+    /* No registry: the timezone lives in the EEPROM and is applied by
+     * the title, not refreshed here.  The registry read would fail and
+     * clobber the (successful) clock-set status. */
+    UNREFERENCED_PARAMETER(TimeZoneInformation);
+    UNREFERENCED_PARAMETER(TimeZoneIdSave);
+#endif
 
     /* Return status */
     return Status;
