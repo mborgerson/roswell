@@ -915,6 +915,9 @@ extern NTSTATUS NTAPI NxkWaitForMultipleObjectsMode(
     ULONG, PHANDLE, WAIT_TYPE, KPROCESSOR_MODE, BOOLEAN, PLARGE_INTEGER);
 extern NTSTATUS NTAPI NxkSignalAndWaitForSingleObjectMode(
     HANDLE, HANDLE, KPROCESSOR_MODE, BOOLEAN, PLARGE_INTEGER);
+extern NTSTATUS NTAPI ros_NtQuerySymbolicLinkObject(
+    HANDLE, PUNICODE_STRING, PULONG)
+    __asm__("_NtQuerySymbolicLinkObject@12");
 extern NTSTATUS NTAPI ros_NtWaitForMultipleObjects(
     ULONG, PHANDLE, WAIT_TYPE, BOOLEAN, PLARGE_INTEGER)
     __asm__("_NtWaitForMultipleObjects@20");
@@ -1458,6 +1461,29 @@ NTSTATUS NTAPI
 XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
 {
     return ObReferenceObjectByHandle(Handle, 0, Type, KernelMode, Object, NULL);
+}
+/* Xbox returns the link target as ANSI; the ReactOS implementation
+ * fills a UNICODE_STRING, so query into a scratch buffer and fold. */
+NTSTATUS NTAPI
+XeNtQuerySymbolicLinkObject(HANDLE Handle, PANSI_STRING Target,
+                              PULONG ReturnedLength)
+{
+    WCHAR wbuf[128];
+    UNICODE_STRING u = { 0, sizeof(wbuf), wbuf };
+    NTSTATUS status = ros_NtQuerySymbolicLinkObject(Handle, &u, NULL);
+    if (!NT_SUCCESS(status))
+        return status;
+
+    ULONG chars = u.Length / sizeof(WCHAR);
+    if (ReturnedLength != NULL)
+        *ReturnedLength = chars;
+    if (Target->MaximumLength < chars)
+        return STATUS_BUFFER_TOO_SMALL;
+
+    ANSI_STRING a = { 0, Target->MaximumLength, Target->Buffer };
+    status = RtlUnicodeStringToAnsiString(&a, &u, FALSE);
+    Target->Length = a.Length;
+    return status;
 }
 NTSTATUS NTAPI
 XeNtOpenDirectoryObject(PHANDLE Handle, PXBE_OBJECT_ATTRIBUTES XAttr)

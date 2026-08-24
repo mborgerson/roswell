@@ -187,7 +187,7 @@
 208  XeNtQueryDirectoryObject
 210  XeNtQueryFullAttributesFile
 211  NtQueryInformationFile
-215  NtQuerySymbolicLinkObject
+215  XeNtQuerySymbolicLinkObject     # folds the UNICODE target to ANSI
 217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
 218  NtQueryVolumeInformationFile
 219  XeNtReadFile
