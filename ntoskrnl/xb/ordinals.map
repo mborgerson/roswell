@@ -238,6 +238,7 @@
 294  XeRtlLeaveCriticalSection
 301  RtlNtStatusToDosError
 302  RtlRaiseException
+303  RtlRaiseStatus
 304  RtlTimeFieldsToTime
 305  RtlTimeToTimeFields              # (PLARGE_INTEGER, PTIME_FIELDS); identical to NT
 306  XeRtlTryEnterCriticalSection
