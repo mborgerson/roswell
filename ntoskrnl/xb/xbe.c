@@ -1504,6 +1504,58 @@ XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
         RtlFreeUnicodeString(&name);
     return status;
 }
+/*
+ * Xbox FILE_RENAME_INFORMATION carries the target as an ANSI
+ * OBJECT_STRING; NT's inlines a counted WCHAR array.  Rebuild the NT
+ * shape in pool for rename, pass everything else through untouched.
+ */
+NTSTATUS NTAPI
+XeNtSetInformationFile(HANDLE File, PIO_STATUS_BLOCK Iosb, PVOID Info,
+                         ULONG Length, FILE_INFORMATION_CLASS Class)
+{
+    typedef struct {
+        BOOLEAN ReplaceIfExists;
+        HANDLE RootDirectory;
+        ANSI_STRING FileName;
+    } XBE_RENAME;
+
+    if (Class == FileRenameInformation)
+    {
+        XBE_RENAME *x = Info;
+        PFILE_RENAME_INFORMATION nt;
+        UNICODE_STRING u;
+        ULONG ntlen;
+        NTSTATUS status;
+
+        if (Length < sizeof(XBE_RENAME) || x->FileName.Buffer == NULL ||
+            x->FileName.Length == 0)
+            return STATUS_INVALID_PARAMETER;
+
+        status = RtlAnsiStringToUnicodeString(&u, &x->FileName, TRUE);
+        if (!NT_SUCCESS(status))
+            return status;
+
+        ntlen = FIELD_OFFSET(FILE_RENAME_INFORMATION, FileName) + u.Length;
+        nt = ExAllocatePoolWithTag(PagedPool, ntlen, 'nRbX');
+        if (nt == NULL)
+        {
+            RtlFreeUnicodeString(&u);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        nt->ReplaceIfExists = x->ReplaceIfExists;
+        nt->RootDirectory = x->RootDirectory;
+        nt->FileNameLength = u.Length;
+        RtlCopyMemory(nt->FileName, u.Buffer, u.Length);
+
+        status = NtSetInformationFile(File, Iosb, nt, ntlen, Class);
+
+        ExFreePoolWithTag(nt, 'nRbX');
+        RtlFreeUnicodeString(&u);
+        return status;
+    }
+
+    return NtSetInformationFile(File, Iosb, Info, Length, Class);
+}
 /* Xbox returns the link target as ANSI; the ReactOS implementation
  * fills a UNICODE_STRING, so query into a scratch buffer and fold. */
 NTSTATUS NTAPI
