@@ -52,6 +52,7 @@ DECLARE_GROUP(io_mdl);
 DECLARE_GROUP(mm_pressure);
 DECLARE_GROUP(ke_waitmulti);
 DECLARE_GROUP(ob_symlink);
+DECLARE_GROUP(io_finfo);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -82,6 +83,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_mdl,
     &g_group_ke_waitmulti,
     &g_group_ob_symlink,
+    &g_group_io_finfo,
     /* Last: exhausts and recovers all of memory. */
     &g_group_mm_pressure,
 };
