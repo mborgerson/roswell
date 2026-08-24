@@ -32,6 +32,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ob/symlink.c \
        $(CURDIR)/io/finfo.c \
        $(CURDIR)/io/rawfs.c \
+       $(CURDIR)/ke/exceptions.c \
        $(CURDIR)/hal/av.c \
        $(CURDIR)/mm/pressure.c
 include $(NXDK_DIR)/Makefile
