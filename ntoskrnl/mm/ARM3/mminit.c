@@ -665,6 +665,11 @@ MiIsRegularMemory(IN PLOADER_PARAMETER_BLOCK LoaderBlock,
     return FALSE;
 }
 
+/* The nxmm page supply builds the PFN state; the ARM3 builders below
+ * are only called from !NXK_MM_PHYS branches.  INIT sections are
+ * KEEP'd by the linker script, so unreferenced definitions survive
+ * --gc-sections unless compiled out. */
+#ifndef NXK_MM_PHYS
 CODE_SEG("INIT")
 VOID
 NTAPI
@@ -1066,6 +1071,7 @@ MiBuildPfnDatabaseSelf(VOID)
         PointerPte++;
     }
 }
+#endif /* !NXK_MM_PHYS */
 
 CODE_SEG("INIT")
 VOID
