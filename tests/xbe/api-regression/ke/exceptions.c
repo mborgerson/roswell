@@ -428,6 +428,98 @@ static bool t_sse_divide_by_zero(void)
     return ok;
 }
 
+/* ---- CONTEXT layout ----------------------------------------------------- */
+
+/* These pin the public CONTEXT layout as handlers see it (this file
+ * compiles against the Xbox definition): the kernel must present and
+ * honor these offsets even though it uses a different layout
+ * internally. */
+
+static ULONG g_ctx_eip, g_ctx_esp, g_ctx_cs;
+
+static int __cdecl h_read_ctx_unwind(EXCEPTION_RECORD *rec, void *frame,
+                                     CONTEXT *ctx, void *disp)
+{
+    (void)disp;
+    if (rec->ExceptionFlags & EXCEPTION_UNWIND)
+        return XD_CONTINUE_SEARCH;
+    record(rec);
+    g_ctx_eip = ctx->Eip;
+    g_ctx_esp = ctx->Esp;
+    g_ctx_cs = ctx->SegCs;
+    RtlUnwind(frame, NULL, rec, 0);
+    longjmp(g_jb, 1);
+}
+
+static bool t_context_read_layout(void)
+{
+    seh_frame f;
+    reset_state();
+    g_ctx_eip = g_ctx_esp = g_ctx_cs = 0;
+
+    if (setjmp(g_jb) == 0) {
+        push_frame(&f, h_read_ctx_unwind);
+        provoke_read_av();
+        pop_frame(&f);
+        FAIL_AND_RETURN("no exception was raised");
+    }
+    irq_on();
+    pop_frame(&f);
+    ASSERT_NTSTATUS(g_code, STATUS_ACCESS_VIOLATION);
+
+    /* Eip must point into the provoker. */
+    ULONG lo = (ULONG)(ULONG_PTR)provoke_read_av;
+    if (g_ctx_eip < lo || g_ctx_eip > lo + 64)
+        FAIL_AND_RETURN("ctx Eip %08x not near provoker %08x",
+                        (unsigned)g_ctx_eip, (unsigned)lo);
+    /* Ring-0 code selector, stack pointer near this frame. */
+    ASSERT_TRUE(g_ctx_cs != 0 && (g_ctx_cs & 3) == 0);
+    ULONG here = (ULONG)(ULONG_PTR)&f;
+    ASSERT_TRUE(g_ctx_esp > here - 0x10000 && g_ctx_esp < here + 0x1000);
+    return true;
+}
+
+/* Skip the faulting instruction by advancing ctx->Eip -- the classic
+ * filter fixup.  ud2 is two bytes, so Eip += 2 resumes at the nop. */
+static int __cdecl h_skip2_continue(EXCEPTION_RECORD *rec, void *frame,
+                                    CONTEXT *ctx, void *disp)
+{
+    (void)disp;
+    if (rec->ExceptionFlags & EXCEPTION_UNWIND)
+        return XD_CONTINUE_SEARCH;
+    record(rec);
+    if (++g_fault_count > 3) {
+        RtlUnwind(frame, NULL, rec, 0);
+        longjmp(g_jb, 3);
+    }
+    ctx->Eip += 2;
+    return XD_CONTINUE_EXECUTION;
+}
+
+static bool t_skip_instruction_continue(void)
+{
+    seh_frame f;
+    volatile int after = 0;
+    reset_state();
+    g_fault_count = 0;
+
+    if (setjmp(g_jb) == 0) {
+        push_frame(&f, h_skip2_continue);
+        __asm__ volatile("ud2; nop");
+        after = 1;
+        pop_frame(&f);
+    } else {
+        irq_on();
+        pop_frame(&f);
+        FAIL_AND_RETURN("Eip advance not honored (%d faults)",
+                        g_fault_count);
+    }
+
+    ASSERT_NTSTATUS(g_code, STATUS_ILLEGAL_INSTRUCTION);
+    ASSERT_TRUE(after == 1);
+    return true;
+}
+
 static const test_entry_t ke_exceptions_entries[] = {
     {"raise_exception_roundtrip", t_raise_exception_roundtrip},
     {"raise_status",              t_raise_status},
@@ -438,6 +530,8 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"breakpoint",                t_breakpoint},
     {"continue_after_commit",     t_continue_after_commit},
     {"search_order_and_unwind",   t_search_order_and_unwind},
+    {"context_read_layout",       t_context_read_layout},
+    {"skip_instruction_continue", t_skip_instruction_continue},
     /* xemu's TCG computes masked results regardless of the FPU/MXCSR
      * exception masks, so #MF/#XF never deliver under emulation (both
      * kernels agree).  Would pass on hardware; keep as TODO so they
