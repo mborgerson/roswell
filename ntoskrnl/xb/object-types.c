@@ -12,17 +12,7 @@
  */
 
 #include <ntdef.h>
-
-typedef struct _XBOX_OBJECT_TYPE
-{
-    PVOID AllocateProcedure;
-    PVOID FreeProcedure;
-    PVOID CloseProcedure;
-    PVOID DeleteProcedure;
-    PVOID ParseProcedure;
-    PVOID DefaultObject;
-    ULONG PoolTag;
-} XBOX_OBJECT_TYPE;
+#include "object-types.h"
 
 #define XB_OT(tag) { NULL, NULL, NULL, NULL, NULL, NULL, (tag) }
 
@@ -34,3 +24,4 @@ XBOX_OBJECT_TYPE XeExSemaphoreObjectType = XB_OT('ameS');
 XBOX_OBJECT_TYPE XeExMutantObjectType   = XB_OT('atuM');
 XBOX_OBJECT_TYPE XeIoFileObjectType     = XB_OT('eliF');
 XBOX_OBJECT_TYPE XeIoDeviceObjectType   = XB_OT('iveD');
+XBOX_OBJECT_TYPE XeObDirectoryObjectType = XB_OT('eriD');

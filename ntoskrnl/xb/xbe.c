@@ -25,6 +25,7 @@
 #include <ndk/ketypes.h>
 
 #include "strace.h"
+#include "object-types.h"
 #include "mm/mm.h"
 
 /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
@@ -918,6 +919,11 @@ extern NTSTATUS NTAPI NxkSignalAndWaitForSingleObjectMode(
 extern NTSTATUS NTAPI ros_NtQuerySymbolicLinkObject(
     HANDLE, PUNICODE_STRING, PULONG)
     __asm__("_NtQuerySymbolicLinkObject@12");
+/* Internal object-directory type (ob/obdir.c). */
+extern POBJECT_TYPE ObpDirectoryObjectType;
+extern NTSTATUS NTAPI ObOpenObjectByName(
+    POBJECT_ATTRIBUTES, POBJECT_TYPE, KPROCESSOR_MODE, PACCESS_STATE,
+    ACCESS_MASK, PVOID, PHANDLE);
 extern NTSTATUS NTAPI ros_NtWaitForMultipleObjects(
     ULONG, PHANDLE, WAIT_TYPE, BOOLEAN, PLARGE_INTEGER)
     __asm__("_NtWaitForMultipleObjects@20");
@@ -1457,10 +1463,43 @@ NtSignalAndWaitForSingleObjectEx(HANDLE SignalHandle, HANDLE WaitHandle,
                                                (KPROCESSOR_MODE)WaitMode,
                                                Alertable, Timeout);
 }
+/*
+ * Titles pass the exported 28-byte Xbox-shape type structs
+ * (xb/object-types.c); map them back to the ReactOS internal types.  A
+ * pointer that isn't one of the decoys is assumed to already be an
+ * internal type (kernel-internal callers).
+ */
+static POBJECT_TYPE
+XeObjectTypeToInternal(PVOID Type)
+{
+    if (Type == &XeExEventObjectType)     return ExEventObjectType;
+    if (Type == &XeExSemaphoreObjectType) return ExSemaphoreObjectType;
+    if (Type == &XeExMutantObjectType)    return ExMutantObjectType;
+    if (Type == &XePsThreadObjectType)    return PsThreadType;
+    if (Type == &XeIoFileObjectType)      return IoFileObjectType;
+    if (Type == &XeIoDeviceObjectType)    return IoDeviceObjectType;
+    if (Type == &XeObDirectoryObjectType) return ObpDirectoryObjectType;
+    return (POBJECT_TYPE)Type;
+}
 NTSTATUS NTAPI
 XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
 {
-    return ObReferenceObjectByHandle(Handle, 0, Type, KernelMode, Object, NULL);
+    return ObReferenceObjectByHandle(Handle, 0, XeObjectTypeToInternal(Type),
+                                     KernelMode, Object, NULL);
+}
+NTSTATUS NTAPI
+XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
+                       PVOID ParseContext, PHANDLE Handle)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = ObOpenObjectByName(oa, XeObjectTypeToInternal(Type),
+                                         KernelMode, NULL, GENERIC_ALL,
+                                         ParseContext, Handle);
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
 }
 /* Xbox returns the link target as ANSI; the ReactOS implementation
  * fills a UNICODE_STRING, so query into a scratch buffer and fold. */

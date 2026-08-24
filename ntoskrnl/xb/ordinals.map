@@ -207,6 +207,8 @@
 # Remaining anonymous OBJECT_TYPE ords (240/245/249/256) follow the same
 # pattern as 259 when needed: bind to the corresponding ReactOS Ob/Io*Type
 # pointer.  Add them when a title imports them.
+240  ObDirectoryObjectType  XeObDirectoryObjectType  # 28-byte Xbox-shape struct
+243  XeObOpenObjectByName            # Xbox @16: decoy type + ANSI oa -> NT
 246  XeObReferenceObjectByHandle
 250  ObfDereferenceObject
 
