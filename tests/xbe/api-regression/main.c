@@ -54,6 +54,7 @@ DECLARE_GROUP(ke_waitmulti);
 DECLARE_GROUP(ob_symlink);
 DECLARE_GROUP(io_finfo);
 DECLARE_GROUP(io_rawfs);
+DECLARE_GROUP(hal_av);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -86,6 +87,9 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ob_symlink,
     &g_group_io_finfo,
     &g_group_io_rawfs,
+    /* Allocates a permanent framebuffer, so keep it after the FS/IO
+     * groups but before the memory-exhaustion finale. */
+    &g_group_hal_av,
     /* Last: exhausts and recovers all of memory. */
     &g_group_mm_pressure,
 };
