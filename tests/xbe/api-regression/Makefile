@@ -29,5 +29,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/mm/cache.c \
        $(CURDIR)/io/mdl.c \
        $(CURDIR)/ke/waitmulti.c \
+       $(CURDIR)/ob/symlink.c \
        $(CURDIR)/mm/pressure.c
 include $(NXDK_DIR)/Makefile
