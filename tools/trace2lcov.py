@@ -196,6 +196,11 @@ def main():
                 rel = os.path.normpath(rel)
                 if not os.path.exists(os.path.join(src_root, rel)):
                     rel = None
+                # Generated sources (export scaffolds, resource glue)
+                # live inside cmake build trees; they aren't part of
+                # the codebase being measured.
+                elif re.match(r"build[^/]*/", rel):
+                    rel = None
             _cache[src] = rel
         return _cache[src]
 
