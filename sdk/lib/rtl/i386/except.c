@@ -59,6 +59,105 @@ RtlGetCallersAddress(OUT PVOID *CallersAddress,
     }
 }
 
+#ifdef SARCH_XBOX
+/*
+ * The Xbox public CONTEXT differs from the NT layout the kernel uses
+ * internally: no debug registers, no data-segment fields, and an
+ * FXSAVE-shaped float area (0x208 bytes) directly after ContextFlags.
+ * Title handlers and filters read and write through the Xbox layout,
+ * so convert at the handler-call boundary.  Title code lives below the
+ * kernel base; kernel-side handlers (PSEH) get the NT layout
+ * unchanged.  The float area is not carried across -- retail leaves
+ * fp state to the handler's own fxsave if it cares.
+ *
+ * The 0x204-byte float area is the packed Xbox FLOATING_SAVE_AREA:
+ * four WORDs, six DWORDs, 128+128+224 raw bytes, Cr0NpxState.
+ */
+typedef struct _XBOX_CONTEXT
+{
+    ULONG ContextFlags;
+    UCHAR FloatSave[0x204];
+    ULONG Edi;
+    ULONG Esi;
+    ULONG Ebx;
+    ULONG Edx;
+    ULONG Ecx;
+    ULONG Eax;
+    ULONG Ebp;
+    ULONG Eip;
+    ULONG SegCs;
+    ULONG EFlags;
+    ULONG Esp;
+    ULONG SegSs;
+} XBOX_CONTEXT;
+
+static EXCEPTION_DISPOSITION
+RtlpCallHandler(IN PEXCEPTION_RECORD ExceptionRecord,
+                IN PEXCEPTION_REGISTRATION_RECORD RegistrationFrame,
+                IN OUT PCONTEXT Context,
+                IN PVOID DispatcherContext,
+                IN BOOLEAN ForUnwind)
+{
+    PEXCEPTION_ROUTINE Handler = RegistrationFrame->Handler;
+    EXCEPTION_DISPOSITION Disposition;
+    XBOX_CONTEXT XboxContext;
+
+    if ((ULONG_PTR)Handler >= 0x80000000)
+    {
+        return ForUnwind
+            ? RtlpExecuteHandlerForUnwind(ExceptionRecord, RegistrationFrame,
+                                          Context, DispatcherContext, Handler)
+            : RtlpExecuteHandlerForException(ExceptionRecord,
+                                             RegistrationFrame, Context,
+                                             DispatcherContext, Handler);
+    }
+
+    RtlZeroMemory(XboxContext.FloatSave, sizeof(XboxContext.FloatSave));
+    XboxContext.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    XboxContext.Edi = Context->Edi;
+    XboxContext.Esi = Context->Esi;
+    XboxContext.Ebx = Context->Ebx;
+    XboxContext.Edx = Context->Edx;
+    XboxContext.Ecx = Context->Ecx;
+    XboxContext.Eax = Context->Eax;
+    XboxContext.Ebp = Context->Ebp;
+    XboxContext.Eip = Context->Eip;
+    XboxContext.SegCs = Context->SegCs;
+    XboxContext.EFlags = Context->EFlags;
+    XboxContext.Esp = Context->Esp;
+    XboxContext.SegSs = Context->SegSs;
+
+    Disposition = ForUnwind
+        ? RtlpExecuteHandlerForUnwind(ExceptionRecord, RegistrationFrame,
+                                      (PCONTEXT)&XboxContext,
+                                      DispatcherContext, Handler)
+        : RtlpExecuteHandlerForException(ExceptionRecord, RegistrationFrame,
+                                         (PCONTEXT)&XboxContext,
+                                         DispatcherContext, Handler);
+
+    /* Carry handler modifications (Eip surgery, register fixes) back. */
+    Context->Edi = XboxContext.Edi;
+    Context->Esi = XboxContext.Esi;
+    Context->Ebx = XboxContext.Ebx;
+    Context->Edx = XboxContext.Edx;
+    Context->Ecx = XboxContext.Ecx;
+    Context->Eax = XboxContext.Eax;
+    Context->Ebp = XboxContext.Ebp;
+    Context->Eip = XboxContext.Eip;
+    Context->EFlags = XboxContext.EFlags;
+    Context->Esp = XboxContext.Esp;
+
+    return Disposition;
+}
+#else
+#define RtlpCallHandler(Record, Frame, Ctx, DispCtx, ForUnwind)         \
+    ((ForUnwind)                                                        \
+     ? RtlpExecuteHandlerForUnwind((Record), (Frame), (Ctx), (DispCtx), \
+                                   (Frame)->Handler)                    \
+     : RtlpExecuteHandlerForException((Record), (Frame), (Ctx),         \
+                                      (DispCtx), (Frame)->Handler))
+#endif
+
 /*
  * @implemented
  */
@@ -132,11 +231,11 @@ RtlDispatchException(IN PEXCEPTION_RECORD ExceptionRecord,
                               sizeof(*RegistrationFrame));
 
         /* Call the handler */
-        Disposition = RtlpExecuteHandlerForException(ExceptionRecord,
-                                                     RegistrationFrame,
-                                                     Context,
-                                                     &DispatcherContext,
-                                                     RegistrationFrame->Handler);
+        Disposition = RtlpCallHandler(ExceptionRecord,
+                                      RegistrationFrame,
+                                      Context,
+                                      &DispatcherContext,
+                                      FALSE);
 
         /* Check if this is a nested frame */
         if (RegistrationFrame == NestedFrame)
@@ -344,11 +443,11 @@ RtlUnwind(IN PVOID TargetFrame OPTIONAL,
         else
         {
             /* Call the handler */
-            Disposition = RtlpExecuteHandlerForUnwind(ExceptionRecord,
-                                                      RegistrationFrame,
-                                                      Context,
-                                                      &DispatcherContext,
-                                                      RegistrationFrame->Handler);
+            Disposition = RtlpCallHandler(ExceptionRecord,
+                                          RegistrationFrame,
+                                          Context,
+                                          &DispatcherContext,
+                                          TRUE);
 
             switch(Disposition)
             {
