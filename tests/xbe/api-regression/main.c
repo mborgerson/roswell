@@ -50,6 +50,7 @@ DECLARE_GROUP(mm_vmcontract);
 DECLARE_GROUP(mm_cache);
 DECLARE_GROUP(io_mdl);
 DECLARE_GROUP(mm_pressure);
+DECLARE_GROUP(ke_waitmulti);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -78,6 +79,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_mm_vmcontract,
     &g_group_mm_cache,
     &g_group_io_mdl,
+    &g_group_ke_waitmulti,
     /* Last: exhausts and recovers all of memory. */
     &g_group_mm_pressure,
 };
