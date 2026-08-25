@@ -59,7 +59,13 @@ START_TEST(RtlZeroMemory)
     /* Zero exactly 1 byte */
     RtlFillMemory(Buffer, sizeof(Buffer), 0xEE);
     RtlZeroMemory(Buffer + 15, 1);
-    ok(Buffer[14] == 0xEE, "Buffer[14] = 0x%x, expected 0xEE\n", Buffer[14]);
+    for (i = 0; i < 15; i++)
+    {
+        ok(Buffer[i] == 0xEE, "Buffer[%lu] = 0x%x, expected 0xEE\n", (ULONG)i, Buffer[i]);
+    }
     ok(Buffer[15] == 0, "Buffer[15] = 0x%x, expected 0\n", Buffer[15]);
-    ok(Buffer[16] == 0xEE, "Buffer[16] = 0x%x, expected 0xEE\n", Buffer[16]);
+    for (i = 16; i < sizeof(Buffer); i++)
+    {
+        ok(Buffer[i] == 0xEE, "Buffer[%lu] = 0x%x, expected 0xEE\n", (ULONG)i, Buffer[i]);
+    }
 }
