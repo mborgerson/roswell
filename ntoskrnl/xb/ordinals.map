@@ -246,6 +246,7 @@
 306  XeRtlTryEnterCriticalSection
 308  RtlUnicodeStringToAnsiString
 312  RtlUnwind
+320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #
 322  XboxHardwareInfo              # 8-byte XBOX_HARDWARE_INFO; USB-hub flag + GPU/MCP revs (not the 4-byte scaffold)
