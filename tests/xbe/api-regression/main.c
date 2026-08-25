@@ -26,6 +26,7 @@ void test_record_failure(const char *file, int line, const char *fmt, ...)
 DECLARE_GROUP(rtl_status);
 DECLARE_GROUP(rtl_string);
 DECLARE_GROUP(rtl_time);
+DECLARE_GROUP(rtl_memory);
 DECLARE_GROUP(ke_event);
 DECLARE_GROUP(ke_semaphore);
 DECLARE_GROUP(ke_time);
@@ -63,6 +64,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
     &g_group_rtl_string,
     &g_group_rtl_time,
+    &g_group_rtl_memory,
     &g_group_ke_event,
     &g_group_ke_semaphore,
     &g_group_ke_time,

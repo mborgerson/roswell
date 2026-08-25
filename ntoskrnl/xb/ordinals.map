@@ -228,16 +228,20 @@
 # --- Rtl* ---------------------------------------------------------------- #
 260  RtlAnsiStringToUnicodeString
 265  XeRtlCaptureContext             # fills the Xbox CONTEXT layout
+268  RtlCompareMemory
 269  RtlCompareMemoryUlong
 271  RtlCompareUnicodeString
 277  XeRtlEnterCriticalSection       # xbe's own minimal recursive lock
 279  RtlEqualString
+284  RtlFillMemory
+285  RtlFillMemoryUlong
 280  RtlEqualUnicodeString
 287  RtlFreeUnicodeString
 289  RtlInitAnsiString
 290  RtlInitUnicodeString
 291  XeRtlInitializeCriticalSection
 294  XeRtlLeaveCriticalSection
+298  RtlMoveMemory
 301  RtlNtStatusToDosError
 302  RtlRaiseException
 303  RtlRaiseStatus

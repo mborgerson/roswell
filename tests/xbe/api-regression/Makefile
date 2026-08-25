@@ -5,6 +5,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/rtl/status.c \
        $(CURDIR)/rtl/string.c \
        $(CURDIR)/rtl/time.c \
+       $(CURDIR)/rtl/memory.c \
        $(CURDIR)/ke/event.c \
        $(CURDIR)/ke/semaphore.c \
        $(CURDIR)/ke/time.c \
