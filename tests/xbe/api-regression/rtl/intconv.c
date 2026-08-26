@@ -196,6 +196,22 @@ static bool t_extended_integer_multiply(void)
     return true;
 }
 
+static bool t_extended_large_integer_divide(void)
+{
+    LARGE_INTEGER d, r;
+    ULONG rem = 0;
+
+    d.QuadPart = 1000000007LL;
+    r = RtlExtendedLargeIntegerDivide(d, 7, &rem);
+    ASSERT_TRUE(r.QuadPart == 142857143LL);
+    ASSERT_EQ_U32(rem, 6);
+
+    /* A NULL remainder pointer is tolerated. */
+    r = RtlExtendedLargeIntegerDivide(d, 1000, NULL);
+    ASSERT_TRUE(r.QuadPart == 1000000LL);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
@@ -206,6 +222,7 @@ static const test_entry_t rtl_intconv_entries[] = {
     {"append_string_to_string", t_append_string_to_string},
     {"free_ansi_string", t_free_ansi_string},
     {"extended_integer_multiply", t_extended_integer_multiply},
+    {"extended_large_integer_divide", t_extended_large_integer_divide},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
