@@ -53,6 +53,9 @@
 28   ExReleaseReadWriteLock           # ERWLOCK release (xb/rwlock.c)
 30   ExSemaphoreObjectType  XeExSemaphoreObjectType  # 28-byte Xbox-shape struct
 31                                    # no NT ExTimerObjectType; needs adapter
+32   ExfInterlockedInsertHeadList  XbExfInterlockedInsertHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
+33   ExfInterlockedInsertTailList  XbExfInterlockedInsertTailList  # FASTCALL splice, interrupts off (xb/exflist.c)
+34   ExfInterlockedRemoveHeadList  XbExfInterlockedRemoveHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
 
 # --- DATA: HalDiskCachePartitionCount ------------------------------------- #
 # Count of HDD cache partitions (X:, Y:, Z: on retail).  Titles register
