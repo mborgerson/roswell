@@ -75,11 +75,25 @@ static bool t_upcase_unicode_alloc(void)
     return true;
 }
 
+static bool t_create_unicode(void)
+{
+    UNICODE_STRING u;
+    ASSERT_TRUE(RtlCreateUnicodeString(&u, L"created"));
+    ASSERT_NOT_NULL(u.Buffer);
+    ASSERT_EQ_U32(u.Length, 7 * sizeof(WCHAR));
+    /* MaximumLength includes the NUL terminator. */
+    ASSERT_EQ_U32(u.MaximumLength, 8 * sizeof(WCHAR));
+    ASSERT_TRUE(wcscmp(u.Buffer, L"created") == 0);
+    RtlFreeUnicodeString(&u);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
     {"upcase_unicode_inplace", t_upcase_unicode_inplace},
     {"upcase_unicode_alloc", t_upcase_unicode_alloc},
+    {"create_unicode", t_create_unicode},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
