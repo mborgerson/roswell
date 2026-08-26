@@ -239,6 +239,7 @@
 272  RtlCopyString
 273  RtlCopyUnicodeString
 274  RtlCreateUnicodeString
+275  RtlDowncaseUnicodeChar
 277  XeRtlEnterCriticalSection       # xbe's own minimal recursive lock
 279  RtlEqualString
 281  RtlExtendedIntegerMultiply

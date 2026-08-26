@@ -22,8 +22,20 @@ static bool t_upcase_unicode_char(void)
     return true;
 }
 
+static bool t_downcase_unicode_char(void)
+{
+    ASSERT_EQ_U32(RtlDowncaseUnicodeChar(L'A'), L'a');
+    ASSERT_EQ_U32(RtlDowncaseUnicodeChar(L'Z'), L'z');
+    ASSERT_EQ_U32(RtlDowncaseUnicodeChar(L'a'), L'a');
+    ASSERT_EQ_U32(RtlDowncaseUnicodeChar(L'0'), L'0');
+    /* A-grave (U+00C0) downcases to a-grave (U+00E0). */
+    ASSERT_EQ_U32(RtlDowncaseUnicodeChar(0x00C0), 0x00E0);
+    return true;
+}
+
 static const test_entry_t rtl_nlscase_entries[] = {
     {"upcase_unicode_char", t_upcase_unicode_char},
+    {"downcase_unicode_char", t_downcase_unicode_char},
 };
 
 DEFINE_GROUP(rtl_nlscase, "rtl/nlscase");
