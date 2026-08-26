@@ -166,6 +166,23 @@ static bool t_append_string_to_string(void)
     return true;
 }
 
+static bool t_free_ansi_string(void)
+{
+    UNICODE_STRING u;
+    ANSI_STRING a;
+
+    RtlInitUnicodeString(&u, L"deallocate");
+    ASSERT_NTSTATUS(RtlUnicodeStringToAnsiString(&a, &u, TRUE),
+                    STATUS_SUCCESS);
+    ASSERT_NOT_NULL(a.Buffer);
+    ASSERT_EQ_U32(a.Length, 10);
+
+    RtlFreeAnsiString(&a);
+    ASSERT_TRUE(a.Buffer == NULL);
+    ASSERT_EQ_U32(a.Length, 0);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
@@ -174,6 +191,7 @@ static const test_entry_t rtl_intconv_entries[] = {
     {"copy_string", t_copy_string},
     {"upper_string", t_upper_string},
     {"append_string_to_string", t_append_string_to_string},
+    {"free_ansi_string", t_free_ansi_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");

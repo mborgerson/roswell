@@ -244,6 +244,7 @@
 284  RtlFillMemory
 285  RtlFillMemoryUlong
 280  RtlEqualUnicodeString
+286  RtlFreeAnsiString
 287  RtlFreeUnicodeString
 289  RtlInitAnsiString
 290  RtlInitUnicodeString
