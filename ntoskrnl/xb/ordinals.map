@@ -250,6 +250,7 @@
 306  XeRtlTryEnterCriticalSection
 308  RtlUnicodeStringToAnsiString
 312  RtlUnwind
+316  RtlUpperChar
 320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #
