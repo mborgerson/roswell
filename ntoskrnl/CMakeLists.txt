@@ -142,6 +142,7 @@ list(APPEND PCH_SKIP_SOURCE
     xb/strace.c
     xb/rwlock.c
     xb/rtlprintf.c
+    xb/rtlbyteswap.c
     xb/xbe.c
     xb/object-types.c
     xb/devnode.c

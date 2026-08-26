@@ -32,6 +32,7 @@ DECLARE_GROUP(rtl_intconv);
 DECLARE_GROUP(rtl_nlscase);
 DECLARE_GROUP(rtl_printf);
 DECLARE_GROUP(rtl_critsec);
+DECLARE_GROUP(rtl_byteswap);
 DECLARE_GROUP(ke_event);
 DECLARE_GROUP(ke_semaphore);
 DECLARE_GROUP(ke_time);
@@ -78,6 +79,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_rtl_nlscase,
     &g_group_rtl_printf,
     &g_group_rtl_critsec,
+    &g_group_rtl_byteswap,
     &g_group_ke_event,
     &g_group_ke_semaphore,
     &g_group_ke_time,

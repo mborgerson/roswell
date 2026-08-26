@@ -276,6 +276,7 @@
 304  RtlTimeFieldsToTime
 305  RtlTimeToTimeFields              # (PLARGE_INTEGER, PTIME_FIELDS); identical to NT
 306  XeRtlTryEnterCriticalSection
+307  RtlUlongByteSwap              # FASTCALL byteswap (xb/rtlbyteswap.c)
 308  RtlUnicodeStringToAnsiString
 310  RtlUnicodeToMultiByteN
 311  RtlUnicodeToMultiByteSize
@@ -285,6 +286,7 @@
 315  RtlUpcaseUnicodeToMultiByteN
 316  RtlUpperChar
 317  RtlUpperString
+318  RtlUshortByteSwap             # FASTCALL byteswap (xb/rtlbyteswap.c)
 320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #

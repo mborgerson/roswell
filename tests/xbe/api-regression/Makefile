@@ -11,6 +11,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/rtl/nlscase.c \
        $(CURDIR)/rtl/printf.c \
        $(CURDIR)/rtl/critsec.c \
+       $(CURDIR)/rtl/byteswap.c \
        $(CURDIR)/ke/event.c \
        $(CURDIR)/ke/semaphore.c \
        $(CURDIR)/ke/time.c \
