@@ -58,9 +58,28 @@ static bool t_integer_to_char(void)
     return true;
 }
 
+static bool t_integer_to_unicode_string(void)
+{
+    UNICODE_STRING u;
+    WCHAR buf[16];
+
+    u.Length = 0;
+    u.MaximumLength = sizeof(buf);
+    u.Buffer = buf;
+
+    ASSERT_NTSTATUS(RtlIntegerToUnicodeString(65535, 10, &u), STATUS_SUCCESS);
+    ASSERT_EQ_U32(u.Length, 5 * sizeof(WCHAR));
+    ASSERT_TRUE(wcsncmp(u.Buffer, L"65535", 5) == 0);
+
+    ASSERT_NTSTATUS(RtlIntegerToUnicodeString(0x100, 16, &u), STATUS_SUCCESS);
+    ASSERT_TRUE(wcsncmp(u.Buffer, L"100", 3) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
+    {"integer_to_unicode_string", t_integer_to_unicode_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");

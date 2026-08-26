@@ -246,6 +246,7 @@
 290  RtlInitUnicodeString
 291  XeRtlInitializeCriticalSection
 292  RtlIntegerToChar
+293  RtlIntegerToUnicodeString
 294  XeRtlLeaveCriticalSection
 297  RtlMapGenericMask
 298  RtlMoveMemory
