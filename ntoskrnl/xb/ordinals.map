@@ -261,6 +261,7 @@
 297  RtlMapGenericMask
 298  RtlMoveMemory
 299  RtlMultiByteToUnicodeN
+300  RtlMultiByteToUnicodeSize
 301  RtlNtStatusToDosError
 302  RtlRaiseException
 303  RtlRaiseStatus
