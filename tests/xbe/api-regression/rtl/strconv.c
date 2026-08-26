@@ -88,12 +88,35 @@ static bool t_create_unicode(void)
     return true;
 }
 
+static bool t_append_unicode_to_string(void)
+{
+    UNICODE_STRING d;
+    WCHAR buf[32];
+
+    d.Length = 0;
+    d.MaximumLength = sizeof(buf);
+    d.Buffer = buf;
+
+    ASSERT_NTSTATUS(RtlAppendUnicodeToString(&d, L"foo"), STATUS_SUCCESS);
+    ASSERT_NTSTATUS(RtlAppendUnicodeToString(&d, L"bar"), STATUS_SUCCESS);
+    ASSERT_EQ_U32(d.Length, 6 * sizeof(WCHAR));
+    ASSERT_TRUE(wcsncmp(d.Buffer, L"foobar", 6) == 0);
+
+    /* Overflow past MaximumLength returns STATUS_BUFFER_TOO_SMALL. */
+    WCHAR tiny[3];
+    UNICODE_STRING t = { 0, sizeof(tiny), tiny };
+    ASSERT_NTSTATUS(RtlAppendUnicodeToString(&t, L"toolong"),
+                    STATUS_BUFFER_TOO_SMALL);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
     {"upcase_unicode_inplace", t_upcase_unicode_inplace},
     {"upcase_unicode_alloc", t_upcase_unicode_alloc},
     {"create_unicode", t_create_unicode},
+    {"append_unicode_to_string", t_append_unicode_to_string},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
