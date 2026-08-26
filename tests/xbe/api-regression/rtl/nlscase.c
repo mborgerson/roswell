@@ -102,6 +102,28 @@ static bool t_unicode_to_multibyte_size(void)
     return true;
 }
 
+static bool t_upcase_unicode_to_multibyte(void)
+{
+    char mb[8];
+    ULONG result = 0xdead;
+
+    memset(mb, 0, sizeof(mb));
+    ASSERT_NTSTATUS(RtlUpcaseUnicodeToMultiByteN(mb, sizeof(mb), &result,
+                                                 L"aBc", 3 * sizeof(WCHAR)),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(result, 3);
+    ASSERT_TRUE(memcmp(mb, "ABC", 3) == 0);
+
+    /* Destination shorter than the source truncates to MbSize. */
+    memset(mb, 0, sizeof(mb));
+    ASSERT_NTSTATUS(RtlUpcaseUnicodeToMultiByteN(mb, 2, &result,
+                                                 L"aBc", 3 * sizeof(WCHAR)),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(result, 2);
+    ASSERT_TRUE(memcmp(mb, "AB", 2) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_nlscase_entries[] = {
     {"upcase_unicode_char", t_upcase_unicode_char},
     {"downcase_unicode_char", t_downcase_unicode_char},
@@ -109,6 +131,7 @@ static const test_entry_t rtl_nlscase_entries[] = {
     {"downcase_unicode_string", t_downcase_unicode_string},
     {"multibyte_to_unicode_size", t_multibyte_to_unicode_size},
     {"unicode_to_multibyte_size", t_unicode_to_multibyte_size},
+    {"upcase_unicode_to_multibyte", t_upcase_unicode_to_multibyte},
 };
 
 DEFINE_GROUP(rtl_nlscase, "rtl/nlscase");

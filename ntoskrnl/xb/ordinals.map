@@ -274,6 +274,7 @@
 312  RtlUnwind
 313  RtlUpcaseUnicodeChar
 314  RtlUpcaseUnicodeString
+315  RtlUpcaseUnicodeToMultiByteN
 316  RtlUpperChar
 317  RtlUpperString
 320  RtlZeroMemory
