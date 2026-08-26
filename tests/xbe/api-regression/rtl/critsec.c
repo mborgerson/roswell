@@ -59,9 +59,100 @@ static bool t_and_region_reuse(void)
     return true;
 }
 
+/*
+ * The plain Enter/Leave/Init/TryEnter variants (no critical region), so
+ * unlike the AndRegion pair above they can safely exercise recursion: a
+ * nested plain acquire touches only the lock's RecursionCount, never the
+ * thread's kernel-APC-disable counter.
+ */
+static bool t_plain_init_state(void)
+{
+    RTL_CRITICAL_SECTION cs;
+    RtlInitializeCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.LockCount, (ULONG)-1);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+    ASSERT_TRUE(cs.OwningThread == NULL);
+    return true;
+}
+
+static bool t_plain_roundtrip(void)
+{
+    RTL_CRITICAL_SECTION cs;
+    RtlInitializeCriticalSection(&cs);
+
+    RtlEnterCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+    ASSERT_NOT_NULL(cs.OwningThread);
+
+    RtlLeaveCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+    ASSERT_TRUE(cs.OwningThread == NULL);
+    return true;
+}
+
+/* Recursive acquire nests RecursionCount and only the final leave frees it. */
+static bool t_plain_recursion(void)
+{
+    RTL_CRITICAL_SECTION cs;
+    RtlInitializeCriticalSection(&cs);
+
+    RtlEnterCriticalSection(&cs);
+    RtlEnterCriticalSection(&cs);
+    RtlEnterCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 3);
+    ASSERT_NOT_NULL(cs.OwningThread);
+
+    RtlLeaveCriticalSection(&cs);
+    RtlLeaveCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+    ASSERT_NOT_NULL(cs.OwningThread);   /* still held by the outer acquire */
+
+    RtlLeaveCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+    ASSERT_TRUE(cs.OwningThread == NULL);
+    return true;
+}
+
+/* TryEnter on a free lock acquires it and reports success. */
+static bool t_try_enter_free(void)
+{
+    RTL_CRITICAL_SECTION cs;
+    RtlInitializeCriticalSection(&cs);
+
+    ASSERT_TRUE(RtlTryEnterCriticalSection(&cs));
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+    ASSERT_NOT_NULL(cs.OwningThread);
+
+    RtlLeaveCriticalSection(&cs);
+    ASSERT_TRUE(cs.OwningThread == NULL);
+    return true;
+}
+
+/* TryEnter on a lock this thread already owns nests, like a plain enter. */
+static bool t_try_enter_recursive(void)
+{
+    RTL_CRITICAL_SECTION cs;
+    RtlInitializeCriticalSection(&cs);
+
+    RtlEnterCriticalSection(&cs);
+    ASSERT_TRUE(RtlTryEnterCriticalSection(&cs));
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 2);
+
+    RtlLeaveCriticalSection(&cs);
+    RtlLeaveCriticalSection(&cs);
+    ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+    ASSERT_TRUE(cs.OwningThread == NULL);
+    return true;
+}
+
 static const test_entry_t rtl_critsec_entries[] = {
     {"and_region_roundtrip", t_and_region_roundtrip},
     {"and_region_reuse",     t_and_region_reuse},
+    {"plain_init_state",     t_plain_init_state},
+    {"plain_roundtrip",      t_plain_roundtrip},
+    {"plain_recursion",      t_plain_recursion},
+    {"try_enter_free",       t_try_enter_free},
+    {"try_enter_recursive",  t_try_enter_recursive},
 };
 
 DEFINE_GROUP(rtl_critsec, "rtl/critsec");
