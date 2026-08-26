@@ -230,6 +230,7 @@
 262  RtlAppendUnicodeStringToString
 263  RtlAppendUnicodeToString
 265  XeRtlCaptureContext             # fills the Xbox CONTEXT layout
+267  RtlCharToInteger
 268  RtlCompareMemory
 269  RtlCompareMemoryUlong
 271  RtlCompareUnicodeString
