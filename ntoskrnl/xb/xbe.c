@@ -2283,6 +2283,20 @@ ULONG NTAPI XeRtlTryEnterCriticalSection(_Inout_ PVOID Cs)
     return FALSE;
 }
 
+/* The AndRegion variants pair the critical section with a critical region:
+ * each entry disables kernel-APC delivery, each exit re-enables it, so a
+ * recursive acquire/release stays balanced (one region push per enter). */
+VOID NTAPI XeRtlEnterCriticalSectionAndRegion(_Inout_ PVOID Cs)
+{
+    KeEnterCriticalRegion();
+    XeRtlEnterCriticalSection(Cs);
+}
+VOID NTAPI XeRtlLeaveCriticalSectionAndRegion(_Inout_ PVOID Cs)
+{
+    XeRtlLeaveCriticalSection(Cs);
+    KeLeaveCriticalRegion();
+}
+
 /* Xbox Interlocked* ordinals are __fastcall (args in ECX/EDX), so the
  * wrappers must be FASTCALL too -- a stdcall wrapper reads stack garbage. */
 LONG FASTCALL XeInterlockedIncrement(_Inout_ LONG volatile *V)

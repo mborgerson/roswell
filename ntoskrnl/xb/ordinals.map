@@ -248,6 +248,7 @@
 275  RtlDowncaseUnicodeChar
 276  RtlDowncaseUnicodeString
 277  XeRtlEnterCriticalSection       # xbe's own minimal recursive lock
+278  XeRtlEnterCriticalSectionAndRegion  # enter CS + KeEnterCriticalRegion
 279  RtlEqualString
 281  RtlExtendedIntegerMultiply
 282  RtlExtendedLargeIntegerDivide
@@ -263,6 +264,7 @@
 292  RtlIntegerToChar
 293  RtlIntegerToUnicodeString
 294  XeRtlLeaveCriticalSection
+295  XeRtlLeaveCriticalSectionAndRegion  # leave CS + KeLeaveCriticalRegion
 296  RtlLowerChar
 297  RtlMapGenericMask
 298  RtlMoveMemory
