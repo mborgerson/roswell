@@ -245,6 +245,7 @@
 290  RtlInitUnicodeString
 291  XeRtlInitializeCriticalSection
 294  XeRtlLeaveCriticalSection
+297  RtlMapGenericMask
 298  RtlMoveMemory
 299  RtlMultiByteToUnicodeN
 301  RtlNtStatusToDosError

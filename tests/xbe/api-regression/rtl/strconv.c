@@ -154,6 +154,30 @@ static bool t_unicode_to_multibyte(void)
     return true;
 }
 
+static bool t_map_generic_mask(void)
+{
+    GENERIC_MAPPING map = { 0x00000111, 0x00000222, 0x00000444, 0x00000777 };
+    ACCESS_MASK m;
+
+    m = GENERIC_READ;
+    RtlMapGenericMask(&m, &map);
+    ASSERT_EQ_U32(m, 0x00000111);
+
+    m = GENERIC_READ | GENERIC_WRITE;
+    RtlMapGenericMask(&m, &map);
+    ASSERT_EQ_U32(m, 0x00000333);
+
+    m = GENERIC_ALL;
+    RtlMapGenericMask(&m, &map);
+    ASSERT_EQ_U32(m, 0x00000777);
+
+    /* A specific-only mask is left untouched. */
+    m = 0x00000008;
+    RtlMapGenericMask(&m, &map);
+    ASSERT_EQ_U32(m, 0x00000008);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
@@ -164,6 +188,7 @@ static const test_entry_t rtl_strconv_entries[] = {
     {"append_unicode_string_to_string", t_append_unicode_string_to_string},
     {"multibyte_to_unicode", t_multibyte_to_unicode},
     {"unicode_to_multibyte", t_unicode_to_multibyte},
+    {"map_generic_mask", t_map_generic_mask},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
