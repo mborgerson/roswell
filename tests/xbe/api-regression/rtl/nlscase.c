@@ -33,9 +33,22 @@ static bool t_downcase_unicode_char(void)
     return true;
 }
 
+static bool t_lower_char(void)
+{
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('A'), 'a');
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('M'), 'm');
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('Z'), 'z');
+    /* Already-lower and non-letters pass through unchanged. */
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('a'), 'a');
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('5'), '5');
+    ASSERT_EQ_U32((unsigned char)RtlLowerChar('-'), '-');
+    return true;
+}
+
 static const test_entry_t rtl_nlscase_entries[] = {
     {"upcase_unicode_char", t_upcase_unicode_char},
     {"downcase_unicode_char", t_downcase_unicode_char},
+    {"lower_char", t_lower_char},
 };
 
 DEFINE_GROUP(rtl_nlscase, "rtl/nlscase");

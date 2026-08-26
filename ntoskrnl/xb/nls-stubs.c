@@ -134,6 +134,14 @@ RtlUpperChar(IN CHAR Source)
     return Source;
 }
 
+CHAR NTAPI
+RtlLowerChar(IN CHAR Source)
+{
+    if (Source >= 'A' && Source <= 'Z')
+        return Source + ('a' - 'A');
+    return Source;
+}
+
 /* --- Codepage conversion (ASCII fast-path) -------------------------------- */
 
 NTSTATUS NTAPI

@@ -256,6 +256,7 @@
 292  RtlIntegerToChar
 293  RtlIntegerToUnicodeString
 294  XeRtlLeaveCriticalSection
+296  RtlLowerChar
 297  RtlMapGenericMask
 298  RtlMoveMemory
 299  RtlMultiByteToUnicodeN
