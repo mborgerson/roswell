@@ -2457,12 +2457,16 @@ VOID NTAPI XeRtlLeaveCriticalSectionAndRegion(_Inout_ PVOID Cs)
 
 /* Xbox Interlocked* ordinals are __fastcall (args in ECX/EDX), so the
  * wrappers must be FASTCALL too -- a stdcall wrapper reads stack garbage. */
+LONG FASTCALL XeInterlockedCompareExchange(_Inout_ LONG volatile *Destination, _In_ LONG Exchange, _In_ LONG Comperand)
+{ return InterlockedCompareExchange(Destination, Exchange, Comperand); }
 LONG FASTCALL XeInterlockedIncrement(_Inout_ LONG volatile *V)
 { return InterlockedIncrement(V); }
 LONG FASTCALL XeInterlockedDecrement(_Inout_ LONG volatile *V)
 { return InterlockedDecrement(V); }
 LONG FASTCALL XeInterlockedExchange(_Inout_ LONG volatile *V, _In_ LONG N)
 { return InterlockedExchange(V, N); }
+LONG FASTCALL XeInterlockedExchangeAdd(_Inout_ LONG volatile *Addend, _In_ LONG Value)
+{ return InterlockedExchangeAdd(Addend, Value); }
 
 /*
  * Resolve an Xbox kernel ordinal against the kernel image's PE export
