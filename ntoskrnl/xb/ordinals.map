@@ -77,9 +77,11 @@
 50   HalWriteSMBusValue            # SMBus byte/word write
 
 # --- Interlocked* (Xbox: __fastcall) -------------------------------------- #
+51   XeInterlockedCompareExchange
 52   XeInterlockedDecrement
 53   XeInterlockedIncrement
 54   XeInterlockedExchange
+55   XeInterlockedExchangeAdd
 56   ExInterlockedFlushSList          # fastcall ABI matches
 57   XeInterlockedPopEntrySList      # thunks to RtlInterlockedPopEntrySList
 58   XeInterlockedPushEntrySList
