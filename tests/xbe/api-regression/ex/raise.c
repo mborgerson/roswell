@@ -12,8 +12,27 @@
 #include <excpt.h>
 #include <string.h>
 
+#ifndef STATUS_INVALID_PARAMETER
+#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xC000000DL)
+#endif
+
 static volatile ULONG g_caught;
 static volatile int   g_returned;
+
+static bool t_raise_status(void)
+{
+    g_caught = 0;
+    g_returned = 0;
+    __try {
+        ExRaiseStatus(STATUS_INVALID_PARAMETER);
+        g_returned = 1;
+    } __except (g_caught = (ULONG)_exception_code(),
+                EXCEPTION_EXECUTE_HANDLER) {
+    }
+    ASSERT_EQ_U32(g_returned, 0);
+    ASSERT_EQ_U32(g_caught, (ULONG)STATUS_INVALID_PARAMETER);
+    return true;
+}
 
 static bool t_raise_exception(void)
 {
@@ -39,6 +58,7 @@ static bool t_raise_exception(void)
 }
 
 static const test_entry_t ex_raise_entries[] = {
+    {"raise_status",    t_raise_status},
     {"raise_exception", t_raise_exception},
 };
 
