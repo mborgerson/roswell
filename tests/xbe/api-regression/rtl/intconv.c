@@ -141,6 +141,31 @@ static bool t_upper_string(void)
     return true;
 }
 
+static bool t_append_string_to_string(void)
+{
+    ANSI_STRING d, s;
+    char buf[16];
+
+    d.Length = 0;
+    d.MaximumLength = sizeof(buf);
+    d.Buffer = buf;
+
+    RtlInitAnsiString(&s, "head");
+    ASSERT_NTSTATUS(RtlAppendStringToString(&d, &s), STATUS_SUCCESS);
+    RtlInitAnsiString(&s, "-tail");
+    ASSERT_NTSTATUS(RtlAppendStringToString(&d, &s), STATUS_SUCCESS);
+    ASSERT_EQ_U32(d.Length, 9);
+    ASSERT_TRUE(strncmp(d.Buffer, "head-tail", 9) == 0);
+
+    /* Overflow past MaximumLength is rejected. */
+    char tiny[4];
+    ANSI_STRING t = { 0, sizeof(tiny), tiny };
+    RtlInitAnsiString(&s, "toolong");
+    ASSERT_NTSTATUS(RtlAppendStringToString(&t, &s),
+                    STATUS_BUFFER_TOO_SMALL);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
@@ -148,6 +173,7 @@ static const test_entry_t rtl_intconv_entries[] = {
     {"compare_string", t_compare_string},
     {"copy_string", t_copy_string},
     {"upper_string", t_upper_string},
+    {"append_string_to_string", t_append_string_to_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
