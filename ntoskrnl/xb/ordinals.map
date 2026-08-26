@@ -317,3 +317,9 @@
 358  HalIsResetOrShutdownPending
 359  IoMarkIrpMustComplete
 360  HalInitiateShutdown
+
+# --- Rtl printf family (xb/rtlprintf.c -> runtime _vsnprintf) ------------- #
+361  RtlSnprintf
+362  RtlSprintf
+363  RtlVsnprintf
+364  RtlVsprintf

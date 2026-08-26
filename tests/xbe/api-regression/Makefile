@@ -9,6 +9,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/rtl/strconv.c \
        $(CURDIR)/rtl/intconv.c \
        $(CURDIR)/rtl/nlscase.c \
+       $(CURDIR)/rtl/printf.c \
        $(CURDIR)/ke/event.c \
        $(CURDIR)/ke/semaphore.c \
        $(CURDIR)/ke/time.c \
