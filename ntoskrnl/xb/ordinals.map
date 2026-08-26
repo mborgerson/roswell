@@ -243,6 +243,7 @@
 279  RtlEqualString
 281  RtlExtendedIntegerMultiply
 282  RtlExtendedLargeIntegerDivide
+283  RtlExtendedMagicDivide
 284  RtlFillMemory
 285  RtlFillMemoryUlong
 280  RtlEqualUnicodeString

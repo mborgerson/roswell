@@ -212,6 +212,27 @@ static bool t_extended_large_integer_divide(void)
     return true;
 }
 
+static bool t_extended_magic_divide(void)
+{
+    LARGE_INTEGER d, magic, r;
+
+    /* magic/shift chosen so the result equals Dividend / 3. */
+    magic.QuadPart = (LONGLONG)0xAAAAAAAAAAAAAAABULL;
+
+    d.QuadPart = 30;
+    r = RtlExtendedMagicDivide(d, magic, 1);
+    ASSERT_TRUE(r.QuadPart == 10LL);
+
+    d.QuadPart = 99;
+    r = RtlExtendedMagicDivide(d, magic, 1);
+    ASSERT_TRUE(r.QuadPart == 33LL);
+
+    d.QuadPart = -30;
+    r = RtlExtendedMagicDivide(d, magic, 1);
+    ASSERT_TRUE(r.QuadPart == -10LL);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
@@ -223,6 +244,7 @@ static const test_entry_t rtl_intconv_entries[] = {
     {"free_ansi_string", t_free_ansi_string},
     {"extended_integer_multiply", t_extended_integer_multiply},
     {"extended_large_integer_divide", t_extended_large_integer_divide},
+    {"extended_magic_divide", t_extended_magic_divide},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
