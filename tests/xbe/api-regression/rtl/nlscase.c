@@ -87,12 +87,28 @@ static bool t_multibyte_to_unicode_size(void)
     return true;
 }
 
+static bool t_unicode_to_multibyte_size(void)
+{
+    ULONG size = 0xdead;
+
+    /* Single-byte codepage: each WCHAR becomes one byte. */
+    ASSERT_NTSTATUS(RtlUnicodeToMultiByteSize(&size, L"hello", 5 * sizeof(WCHAR)),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(size, 5);
+
+    ASSERT_NTSTATUS(RtlUnicodeToMultiByteSize(&size, L"", 0),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(size, 0);
+    return true;
+}
+
 static const test_entry_t rtl_nlscase_entries[] = {
     {"upcase_unicode_char", t_upcase_unicode_char},
     {"downcase_unicode_char", t_downcase_unicode_char},
     {"lower_char", t_lower_char},
     {"downcase_unicode_string", t_downcase_unicode_string},
     {"multibyte_to_unicode_size", t_multibyte_to_unicode_size},
+    {"unicode_to_multibyte_size", t_unicode_to_multibyte_size},
 };
 
 DEFINE_GROUP(rtl_nlscase, "rtl/nlscase");
