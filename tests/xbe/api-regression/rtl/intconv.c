@@ -98,11 +98,39 @@ static bool t_compare_string(void)
     return true;
 }
 
+static bool t_copy_string(void)
+{
+    ANSI_STRING src, dst;
+    char dstbuf[16];
+
+    RtlInitAnsiString(&src, "content");
+    dst.Length = 0;
+    dst.MaximumLength = sizeof(dstbuf);
+    dst.Buffer = dstbuf;
+
+    RtlCopyString(&dst, &src);
+    ASSERT_EQ_U32(dst.Length, 7);
+    ASSERT_TRUE(strncmp(dst.Buffer, "content", 7) == 0);
+
+    /* A NULL source empties the destination. */
+    RtlCopyString(&dst, NULL);
+    ASSERT_EQ_U32(dst.Length, 0);
+
+    /* Copy truncates to the destination's MaximumLength. */
+    char smallbuf[3];
+    ANSI_STRING small = { 0, sizeof(smallbuf), smallbuf };
+    RtlCopyString(&small, &src);
+    ASSERT_EQ_U32(small.Length, 3);
+    ASSERT_TRUE(strncmp(small.Buffer, "con", 3) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
     {"integer_to_unicode_string", t_integer_to_unicode_string},
     {"compare_string", t_compare_string},
+    {"copy_string", t_copy_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
