@@ -227,7 +227,14 @@ typedef struct _WAIT_CONTEXT_BLOCK {
 $endif (_WDMDDK_)
 $if (_NTDDK_)
 /* DEVICE_OBJECT.Flags */
+#ifdef SARCH_XBOX
+/* The console publishes a named device as 0x18 and gates opens on the
+ * initializing bit, so those two take the values titles act on; the
+ * NT-only bits they displace move clear of the published byte. */
+#define DO_DEVICE_HAS_NAME                0x00000008
+#else
 #define DO_DEVICE_HAS_NAME                0x00000040
+#endif
 #define DO_SYSTEM_BOOT_PARTITION          0x00000100
 #define DO_LONG_TERM_REQUESTS             0x00000200
 #define DO_NEVER_LAST_DEVICE              0x00000400
@@ -245,10 +252,17 @@ $if (_WDMDDK_)
 #define DO_UNLOAD_PENDING                 0x00000001
 #define DO_VERIFY_VOLUME                  0x00000002
 #define DO_BUFFERED_IO                    0x00000004
+#ifdef SARCH_XBOX
+#define DO_DEVICE_INITIALIZING            0x00000010
+#define DO_EXCLUSIVE                      0x00100000
+#define DO_DIRECT_IO                      0x00200000
+#define DO_MAP_IO_BUFFER                  0x00400000
+#else
 #define DO_EXCLUSIVE                      0x00000008
 #define DO_DIRECT_IO                      0x00000010
 #define DO_MAP_IO_BUFFER                  0x00000020
 #define DO_DEVICE_INITIALIZING            0x00000080
+#endif
 #define DO_SHUTDOWN_REGISTERED            0x00000800
 #define DO_BUS_ENUMERATED_DEVICE          0x00001000
 #define DO_POWER_PAGABLE                  0x00002000
@@ -285,6 +299,52 @@ $if (_WDMDDK_)
 $endif (_WDMDDK_)
 
 $if (_WDMDDK_)
+#ifdef SARCH_XBOX
+/* Titles link block-device drivers of their own and read this structure
+ * directly, so the leading fields sit at the offsets the console
+ * publishes (Flags 0x14, DeviceExtension 0x18, StackSize 0x1e).  The
+ * fields the console has no equivalent for keep their names and follow
+ * the published prefix, which leaves every kernel-side user unchanged.
+ * Offset 0x0c carries the mounted-or-self device on the console; NT's
+ * NextDevice occupies it here and no title reads it. */
+typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _DEVICE_OBJECT {
+  CSHORT Type;                                  /* 0x00 */
+  USHORT Size;                                  /* 0x02 */
+  LONG ReferenceCount;                          /* 0x04 */
+  struct _DRIVER_OBJECT *DriverObject;          /* 0x08 */
+  struct _DEVICE_OBJECT *NextDevice;            /* 0x0c */
+  struct _IRP *CurrentIrp;                      /* 0x10 */
+  ULONG Flags;                                  /* 0x14 */
+  PVOID DeviceExtension;                        /* 0x18 */
+  UCHAR DeviceType;                             /* 0x1c */
+  UCHAR StartIoFlags;                           /* 0x1d */
+  CCHAR StackSize;                              /* 0x1e */
+  BOOLEAN DeletePending;                        /* 0x1f */
+  ULONG SectorSize;                             /* 0x20 */
+  ULONG AlignmentRequirement;                   /* 0x24 */
+  KDEVICE_QUEUE DeviceQueue;                    /* 0x28 */
+  KEVENT DeviceLock;
+  ULONG StartIoKey;
+  /* Past the title-visible prefix. */
+  /* Set when the driver object below belongs to the title: it is then a
+     plain structure, ending at its 14-entry dispatch table. */
+  BOOLEAN TitleOwnedDriver;
+  struct _DEVICE_OBJECT *AttachedDevice;
+  PIO_TIMER Timer;
+  ULONG Characteristics;
+  volatile PVPB Vpb;
+  union {
+    LIST_ENTRY ListEntry;
+    WAIT_CONTEXT_BLOCK Wcb;
+  } Queue;
+  KDPC Dpc;
+  ULONG ActiveThreadCount;
+  PSECURITY_DESCRIPTOR SecurityDescriptor;
+  USHORT Spare1;
+  struct _DEVOBJ_EXTENSION *DeviceObjectExtension;
+  PVOID Reserved;
+} DEVICE_OBJECT, *PDEVICE_OBJECT;
+#else
 typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _DEVICE_OBJECT {
   CSHORT Type;
   USHORT Size;
@@ -315,6 +375,7 @@ typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _DEVICE_OBJECT {
   struct _DEVOBJ_EXTENSION *DeviceObjectExtension;
   PVOID Reserved;
 } DEVICE_OBJECT, *PDEVICE_OBJECT;
+#endif
 
 typedef enum _IO_SESSION_STATE {
   IoSessionStateCreated = 1,
@@ -1883,6 +1944,47 @@ $if (_WDMDDK_)
 ** IRP function codes
 */
 
+#ifdef SARCH_XBOX
+/* The console's dispatch table is 14 entries: it has no named pipes,
+ * EAs, volume-information set, or lock control, and the survivors close
+ * up to fill 0-13.  A title's DRIVER_OBJECT is sized to exactly those
+ * 14, so these values are contract -- IRP_MJ_DEVICE_CONTROL really is
+ * 10.  The NT-only majors keep their names above the console's range,
+ * where only the kernel's own drivers are ever indexed. */
+#define IRP_MJ_CREATE                     0x00
+#define IRP_MJ_CLOSE                      0x01
+#define IRP_MJ_READ                       0x02
+#define IRP_MJ_WRITE                      0x03
+#define IRP_MJ_QUERY_INFORMATION          0x04
+#define IRP_MJ_SET_INFORMATION            0x05
+#define IRP_MJ_FLUSH_BUFFERS              0x06
+#define IRP_MJ_QUERY_VOLUME_INFORMATION   0x07
+#define IRP_MJ_DIRECTORY_CONTROL          0x08
+#define IRP_MJ_FILE_SYSTEM_CONTROL        0x09
+#define IRP_MJ_DEVICE_CONTROL             0x0a
+#define IRP_MJ_INTERNAL_DEVICE_CONTROL    0x0b
+#define IRP_MJ_SCSI                       0x0b
+#define IRP_MJ_SHUTDOWN                   0x0c
+#define IRP_MJ_CLEANUP                    0x0d
+#define IRP_MJ_XBOX_MAXIMUM_FUNCTION      0x0d
+/* Past the console's table. */
+#define IRP_MJ_CREATE_NAMED_PIPE          0x0e
+#define IRP_MJ_QUERY_EA                   0x0f
+#define IRP_MJ_SET_EA                     0x10
+#define IRP_MJ_SET_VOLUME_INFORMATION     0x11
+#define IRP_MJ_LOCK_CONTROL               0x12
+#define IRP_MJ_CREATE_MAILSLOT            0x13
+#define IRP_MJ_QUERY_SECURITY             0x14
+#define IRP_MJ_SET_SECURITY               0x15
+#define IRP_MJ_POWER                      0x16
+#define IRP_MJ_SYSTEM_CONTROL             0x17
+#define IRP_MJ_DEVICE_CHANGE              0x18
+#define IRP_MJ_QUERY_QUOTA                0x19
+#define IRP_MJ_SET_QUOTA                  0x1a
+#define IRP_MJ_PNP                        0x1b
+#define IRP_MJ_PNP_POWER                  0x1b
+#define IRP_MJ_MAXIMUM_FUNCTION           0x1b
+#else
 #define IRP_MJ_CREATE                     0x00
 #define IRP_MJ_CREATE_NAMED_PIPE          0x01
 #define IRP_MJ_CLOSE                      0x02
@@ -1914,6 +2016,7 @@ $if (_WDMDDK_)
 #define IRP_MJ_PNP                        0x1b
 #define IRP_MJ_PNP_POWER                  0x1b
 #define IRP_MJ_MAXIMUM_FUNCTION           0x1b
+#endif
 
 #define IRP_MN_SCSI_CLASS                 0x01
 
@@ -2273,6 +2376,33 @@ typedef NTSTATUS
   _Inout_ struct _IRP *Irp);
 typedef DRIVER_DISPATCH_PAGED *PDRIVER_DISPATCH_PAGED;
 
+#ifdef SARCH_XBOX
+/* Titles register driver objects of their own and the kernel dispatches
+ * straight into them, so StartIo and the dispatch table sit where the
+ * console publishes them (0x00 and 0x0c).  A title's table is 14 entries
+ * long; ours extends past that for the NT-only majors, which are only
+ * ever indexed on the kernel's own drivers. */
+typedef struct _DRIVER_OBJECT {
+  PDRIVER_STARTIO DriverStartIo;                /* 0x00 */
+  PVOID DriverDeleteDevice;                     /* 0x04 */
+  PVOID DriverDismountVolume;                   /* 0x08 */
+  PDRIVER_DISPATCH MajorFunction[IRP_MJ_MAXIMUM_FUNCTION + 1];  /* 0x0c */
+  /* Past the title-visible prefix. */
+  CSHORT Type;
+  CSHORT Size;
+  PDEVICE_OBJECT DeviceObject;
+  ULONG Flags;
+  PVOID DriverStart;
+  ULONG DriverSize;
+  PVOID DriverSection;
+  PDRIVER_EXTENSION DriverExtension;
+  UNICODE_STRING DriverName;
+  PUNICODE_STRING HardwareDatabase;
+  struct _FAST_IO_DISPATCH *FastIoDispatch;
+  PDRIVER_INITIALIZE DriverInit;
+  PDRIVER_UNLOAD DriverUnload;
+} DRIVER_OBJECT, *PDRIVER_OBJECT;
+#else
 typedef struct _DRIVER_OBJECT {
   CSHORT Type;
   CSHORT Size;
@@ -2290,6 +2420,7 @@ typedef struct _DRIVER_OBJECT {
   PDRIVER_UNLOAD DriverUnload;
   PDRIVER_DISPATCH MajorFunction[IRP_MJ_MAXIMUM_FUNCTION + 1];
 } DRIVER_OBJECT, *PDRIVER_OBJECT;
+#endif
 
 typedef struct _DMA_ADAPTER {
   USHORT Version;
@@ -2760,6 +2891,85 @@ typedef VOID
   _Inout_ _IRQL_uses_cancel_ struct _IRP *Irp);
 typedef DRIVER_CANCEL *PDRIVER_CANCEL;
 
+#ifdef SARCH_XBOX
+/* Titles receive real IRPs in their own dispatch and StartIo routines
+ * and read them field by field -- IoStatus at 0x10, UserBuffer at 0x30,
+ * Tail.Overlay.CurrentStackLocation at 0x5c -- and even link an IRP into
+ * a list of their own through Tail.Overlay.ListEntry, holding a pointer
+ * into the middle of the packet.  The published prefix therefore has to
+ * be laid out exactly, pointer identity included; the NT-only fields
+ * keep their names and follow it, so every kernel-side user is
+ * unchanged.  sizeof() is larger than the console's 0x68 as a result,
+ * which no title observes: the stack location is reached through the
+ * CurrentStackLocation pointer, never by arithmetic on the IRP. */
+typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _IRP {
+  CSHORT Type;                          /* 0x00 */
+  USHORT Size;                          /* 0x02 */
+  ULONG Flags;                          /* 0x04 */
+  LIST_ENTRY ThreadListEntry;           /* 0x08 */
+  IO_STATUS_BLOCK IoStatus;             /* 0x10 */
+  CHAR StackCount;                      /* 0x18 */
+  CHAR CurrentLocation;                 /* 0x19 */
+  BOOLEAN PendingReturned;              /* 0x1a */
+  BOOLEAN Cancel;                       /* 0x1b */
+  PIO_STATUS_BLOCK UserIosb;            /* 0x1c */
+  PKEVENT UserEvent;                    /* 0x20 */
+  union {                               /* 0x28 */
+    struct {
+      _ANONYMOUS_UNION union {
+        PIO_APC_ROUTINE UserApcRoutine;
+        PVOID IssuingProcess;
+      } DUMMYUNIONNAME;
+      PVOID UserApcContext;
+    } AsynchronousParameters;
+    LARGE_INTEGER AllocationSize;
+  } Overlay;
+  PVOID UserBuffer;                     /* 0x30 */
+  PVOID SegmentArray;                   /* 0x34 */
+  ULONG LockedBufferLength;             /* 0x38 */
+  union {                               /* 0x3c */
+    struct {
+      _ANONYMOUS_UNION union {
+        KDEVICE_QUEUE_ENTRY DeviceQueueEntry;
+        _ANONYMOUS_STRUCT struct {
+          PVOID DriverContext[5];
+        } DUMMYSTRUCTNAME;
+        /* The console spends its fifth driver-context slot where NT
+         * keeps AuxiliaryBuffer (which sits past Thread on NT and has
+         * no console equivalent); NT drivers only ever use slots 0-3,
+         * so the two can share. */
+        struct {
+          PVOID DriverContextReserved[4];
+          PCHAR AuxiliaryBuffer;        /* 0x4c */
+        };
+      } DUMMYUNIONNAME;
+      PETHREAD Thread;                  /* 0x50 */
+      _ANONYMOUS_STRUCT struct {
+        LIST_ENTRY ListEntry;           /* 0x54 */
+        _ANONYMOUS_UNION union {
+          struct _IO_STACK_LOCATION *CurrentStackLocation;  /* 0x5c */
+          ULONG PacketType;
+        } DUMMYUNIONNAME;
+      } DUMMYSTRUCTNAME;
+      struct _FILE_OBJECT *OriginalFileObject;             /* 0x60 */
+    } Overlay;
+    KAPC Apc;
+    PVOID CompletionKey;
+  } Tail;
+  /* Past the title-visible prefix. */
+  struct _MDL *MdlAddress;
+  union {
+    struct _IRP *MasterIrp;
+    volatile LONG IrpCount;
+    PVOID SystemBuffer;
+  } AssociatedIrp;
+  volatile PDRIVER_CANCEL CancelRoutine;
+  KPROCESSOR_MODE RequestorMode;
+  KIRQL CancelIrql;
+  CCHAR ApcEnvironment;
+  UCHAR AllocationFlags;
+} IRP, *PIRP;
+#else
 typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _IRP {
   CSHORT Type;
   USHORT Size;
@@ -2817,6 +3027,7 @@ typedef struct DECLSPEC_ALIGN(MEMORY_ALLOCATION_ALIGNMENT) _IRP {
     PVOID CompletionKey;
   } Tail;
 } IRP, *PIRP;
+#endif
 
 typedef enum _IO_PAGING_PRIORITY {
   IoPagingPriorityInvalid,
@@ -3206,12 +3417,27 @@ typedef struct _IO_STACK_LOCATION {
       ULONG POINTER_ALIGNMENT Key;
       LARGE_INTEGER ByteOffset;
     } LockControl;
+#ifdef SARCH_XBOX
+    /* The console carries the input buffer itself and puts the control
+     * code last, where NT keeps Type3InputBuffer.  Both names refer to
+     * the same slot so existing users are unaffected. */
+    struct {
+      ULONG OutputBufferLength;                 /* +0x04 */
+      _ANONYMOUS_UNION union {                  /* +0x08 */
+        PVOID InputBuffer;
+        PVOID Type3InputBuffer;
+      } DUMMYUNIONNAME;
+      ULONG POINTER_ALIGNMENT InputBufferLength; /* +0x0c */
+      ULONG POINTER_ALIGNMENT IoControlCode;     /* +0x10 */
+    } DeviceIoControl;
+#else
     struct {
       ULONG OutputBufferLength;
       ULONG POINTER_ALIGNMENT InputBufferLength;
       ULONG POINTER_ALIGNMENT IoControlCode;
       PVOID Type3InputBuffer;
     } DeviceIoControl;
+#endif
     struct {
       SECURITY_INFORMATION SecurityInformation;
       ULONG POINTER_ALIGNMENT Length;

@@ -415,8 +415,17 @@ IopUnloadDevice(IN PDEVICE_OBJECT DeviceObject)
             ObDereferenceSecurityDescriptor(DeviceObject->SecurityDescriptor, 1);
         }
 
-        /* Remove the device from the list */
+        /* Remove the device from the list (a title's driver object keeps
+         * no such list -- see IoCreateDevice) */
+#ifdef SARCH_XBOX
+        if (!DeviceObject->TitleOwnedDriver)
+        {
+            IopEditDeviceList(DeviceObject->DriverObject, DeviceObject,
+                              IopRemove);
+        }
+#else
         IopEditDeviceList(DeviceObject->DriverObject, DeviceObject, IopRemove);
+#endif
 
         /* Dereference the keep-alive */
         ObDereferenceObject(DeviceObject);
@@ -1045,6 +1054,18 @@ IoAttachDeviceToDeviceStackSafe(IN PDEVICE_OBJECT SourceDevice,
  * Status
  *    @implemented
  */
+#ifdef SARCH_XBOX
+NTSTATUS
+NTAPI
+IopCreateDevice(IN PDRIVER_OBJECT DriverObject,
+                IN ULONG DeviceExtensionSize,
+                IN PUNICODE_STRING DeviceName,
+                IN DEVICE_TYPE DeviceType,
+                IN ULONG DeviceCharacteristics,
+                IN BOOLEAN Exclusive,
+                IN BOOLEAN TitleOwnedDriver,
+                OUT PDEVICE_OBJECT *DeviceObject)
+#else
 NTSTATUS
 NTAPI
 IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
@@ -1054,6 +1075,7 @@ IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
                IN ULONG DeviceCharacteristics,
                IN BOOLEAN Exclusive,
                OUT PDEVICE_OBJECT *DeviceObject)
+#endif
 {
     WCHAR AutoNameBuffer[20];
     UNICODE_STRING AutoName;
@@ -1244,10 +1266,25 @@ IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
     }
 
     /* Now do the final linking */
+#ifdef SARCH_XBOX
+    /* A driver object the title owns is a plain structure: it has no
+     * object header to reference and no device list to thread onto, and
+     * both of those fields sit past its end.  Drivers are permanent on
+     * the console, so neither is needed for one. */
+    CreatedDeviceObject->TitleOwnedDriver = TitleOwnedDriver;
+    CreatedDeviceObject->DriverObject = DriverObject;
+    if (!TitleOwnedDriver)
+    {
+        ObReferenceObject(DriverObject);
+        ASSERT((DriverObject->Flags & DRVO_UNLOAD_INVOKED) == 0);
+        IopEditDeviceList(DriverObject, CreatedDeviceObject, IopAdd);
+    }
+#else
     ObReferenceObject(DriverObject);
     ASSERT((DriverObject->Flags & DRVO_UNLOAD_INVOKED) == 0);
     CreatedDeviceObject->DriverObject = DriverObject;
     IopEditDeviceList(DriverObject, CreatedDeviceObject, IopAdd);
+#endif
 
 #ifndef SARCH_XBOX
     /* Link with the power manager */
@@ -1262,6 +1299,27 @@ IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
 
     return STATUS_SUCCESS;
 }
+
+#ifdef SARCH_XBOX
+/*
+ * @implemented
+ */
+NTSTATUS
+NTAPI
+IoCreateDevice(IN PDRIVER_OBJECT DriverObject,
+               IN ULONG DeviceExtensionSize,
+               IN PUNICODE_STRING DeviceName,
+               IN DEVICE_TYPE DeviceType,
+               IN ULONG DeviceCharacteristics,
+               IN BOOLEAN Exclusive,
+               OUT PDEVICE_OBJECT *DeviceObject)
+{
+    return IopCreateDevice(DriverObject, DeviceExtensionSize, DeviceName,
+                           DeviceType, DeviceCharacteristics, Exclusive,
+                           FALSE, DeviceObject);
+}
+#endif
+
 
 /*
  * IoDeleteDevice

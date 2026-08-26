@@ -719,9 +719,19 @@ NTSTATUS NTAPI XeUnloadSection(_Inout_ PXBE_SECTION Section)
 }
 
 /* --- Io* adapters: Xbox sigs differ from NT (ANSI names, fewer args) ---- */
-/* Xbox DEVICE_OBJECT has DeviceExtension at +0x18 (NT keeps PIO_TIMER there,
- * normally NULL).  Stamp the Xbox-shape slot so the title can read
- * fs:[deviceobj + 0x18] and get its extension. */
+/* IoCreateDevice, plus the provenance of the driver object. */
+extern NTSTATUS NTAPI IopCreateDevice(
+    _In_ PDRIVER_OBJECT DriverObject,
+    _In_ ULONG DeviceExtensionSize,
+    _In_opt_ PUNICODE_STRING DeviceName,
+    _In_ DEVICE_TYPE DeviceType,
+    _In_ ULONG DeviceCharacteristics,
+    _In_ BOOLEAN Exclusive,
+    _In_ BOOLEAN TitleOwnedDriver,
+    _Out_ PDEVICE_OBJECT *DeviceObject);
+
+/* DEVICE_OBJECT already carries the console's field order, so only the
+ * ANSI device name needs converting. */
 NTSTATUS NTAPI
 XeIoCreateDevice(_In_ PVOID DriverObject,
                    _In_ ULONG DeviceExtensionSize,
@@ -742,16 +752,13 @@ XeIoCreateDevice(_In_ PVOID DriverObject,
         if (NT_SUCCESS(RtlAnsiStringToUnicodeString(&uname, &aname, TRUE)))
             pname = &uname;
     }
-    s = IoCreateDevice((PDRIVER_OBJECT)DriverObject, DeviceExtensionSize,
-                       pname, DeviceType, /*Characteristics*/ 0, Exclusive,
-                       &dev);
+    /* The driver object belongs to the title. */
+    s = IopCreateDevice((PDRIVER_OBJECT)DriverObject, DeviceExtensionSize,
+                        pname, DeviceType, /*Characteristics*/ 0, Exclusive,
+                        /*TitleOwnedDriver*/ TRUE, &dev);
     if (uname.Buffer != NULL) RtlFreeUnicodeString(&uname);
     if (NT_SUCCESS(s) && dev != NULL)
-    {
-        /* Copy DeviceExtension into the Xbox-layout slot at +0x18. */
-        ((PVOID *)dev)[6] = dev->DeviceExtension;
         *DeviceObject = dev;
-    }
     return s;
 }
 

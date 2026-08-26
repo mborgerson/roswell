@@ -1452,6 +1452,27 @@ extern LIST_ENTRY IopDeviceActionRequestList;
 extern RESERVE_IRP_ALLOCATOR IopReserveIrpAllocator;
 extern BOOLEAN IoRemoteBootClient;
 
+#ifdef SARCH_XBOX
+//
+// IoCreateDevice, plus the provenance of the driver object.  A driver
+// object the title owns is a plain 0x44-byte structure with no object
+// header and none of the fields kept past the dispatch table, so the
+// usual driver bookkeeping must not be run against one.
+//
+NTSTATUS
+NTAPI
+IopCreateDevice(
+    IN PDRIVER_OBJECT DriverObject,
+    IN ULONG DeviceExtensionSize,
+    IN PUNICODE_STRING DeviceName,
+    IN DEVICE_TYPE DeviceType,
+    IN ULONG DeviceCharacteristics,
+    IN BOOLEAN Exclusive,
+    IN BOOLEAN TitleOwnedDriver,
+    OUT PDEVICE_OBJECT *DeviceObject
+);
+#endif
+
 //
 // Inlined Functions
 //

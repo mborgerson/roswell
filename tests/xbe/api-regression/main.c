@@ -63,6 +63,7 @@ DECLARE_GROUP(xe_sections);
 DECLARE_GROUP(mm_vmcontract);
 DECLARE_GROUP(mm_cache);
 DECLARE_GROUP(io_mdl);
+DECLARE_GROUP(io_irplayout);
 DECLARE_GROUP(mm_pressure);
 DECLARE_GROUP(ke_waitmulti);
 DECLARE_GROUP(ob_symlink);
@@ -117,6 +118,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_mm_vmcontract,
     &g_group_mm_cache,
     &g_group_io_mdl,
+    &g_group_io_irplayout,
     &g_group_ke_waitmulti,
     &g_group_ob_symlink,
     &g_group_io_finfo,
