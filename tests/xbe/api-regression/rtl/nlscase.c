@@ -45,10 +45,38 @@ static bool t_lower_char(void)
     return true;
 }
 
+static bool t_downcase_unicode_string(void)
+{
+    UNICODE_STRING src, dst;
+    WCHAR srcbuf[] = L"MixedCASE123";
+    WCHAR dstbuf[16];
+
+    RtlInitUnicodeString(&src, srcbuf);
+    dst.Length = 0;
+    dst.MaximumLength = sizeof(dstbuf);
+    dst.Buffer = dstbuf;
+
+    ASSERT_NTSTATUS(RtlDowncaseUnicodeString(&dst, &src, FALSE),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(dst.Length, src.Length);
+    ASSERT_TRUE(wcsncmp(dst.Buffer, L"mixedcase123", 12) == 0);
+
+    /* Allocating variant returns a fresh buffer. */
+    UNICODE_STRING out;
+    ASSERT_NTSTATUS(RtlDowncaseUnicodeString(&out, &src, TRUE),
+                    STATUS_SUCCESS);
+    ASSERT_NOT_NULL(out.Buffer);
+    ASSERT_EQ_U32(out.Length, src.Length);
+    ASSERT_TRUE(wcsncmp(out.Buffer, L"mixedcase123", 12) == 0);
+    RtlFreeUnicodeString(&out);
+    return true;
+}
+
 static const test_entry_t rtl_nlscase_entries[] = {
     {"upcase_unicode_char", t_upcase_unicode_char},
     {"downcase_unicode_char", t_downcase_unicode_char},
     {"lower_char", t_lower_char},
+    {"downcase_unicode_string", t_downcase_unicode_string},
 };
 
 DEFINE_GROUP(rtl_nlscase, "rtl/nlscase");
