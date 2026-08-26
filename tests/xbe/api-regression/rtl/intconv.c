@@ -35,8 +35,32 @@ static bool t_char_to_integer(void)
     return true;
 }
 
+static bool t_integer_to_char(void)
+{
+    char buf[16];
+
+    ASSERT_NTSTATUS(RtlIntegerToChar(12345, 10, sizeof(buf), buf),
+                    STATUS_SUCCESS);
+    ASSERT_TRUE(strcmp(buf, "12345") == 0);
+
+    ASSERT_NTSTATUS(RtlIntegerToChar(0xdead, 16, sizeof(buf), buf),
+                    STATUS_SUCCESS);
+    ASSERT_TRUE(strcmp(buf, "DEAD") == 0);
+
+    /* base 0 behaves as base 10. */
+    ASSERT_NTSTATUS(RtlIntegerToChar(42, 0, sizeof(buf), buf),
+                    STATUS_SUCCESS);
+    ASSERT_TRUE(strcmp(buf, "42") == 0);
+
+    /* Too small a buffer overflows. */
+    ASSERT_NTSTATUS(RtlIntegerToChar(12345, 10, 3, buf),
+                    STATUS_BUFFER_OVERFLOW);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
+    {"integer_to_char", t_integer_to_char},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
