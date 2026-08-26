@@ -242,6 +242,7 @@
 262  RtlAppendUnicodeStringToString
 263  RtlAppendUnicodeToString
 265  XeRtlCaptureContext             # fills the Xbox CONTEXT layout
+266  RtlCaptureStackBackTrace        # kernel frame walk (flat ring-0; no user gate)
 267  RtlCharToInteger
 268  RtlCompareMemory
 269  RtlCompareMemoryUlong
@@ -263,6 +264,7 @@
 280  RtlEqualUnicodeString
 286  RtlFreeAnsiString
 287  RtlFreeUnicodeString
+288  RtlGetCallersAddress            # two-frame walk via RtlCaptureStackBackTrace
 289  RtlInitAnsiString
 290  RtlInitUnicodeString
 291  XeRtlInitializeCriticalSection
@@ -292,6 +294,7 @@
 316  RtlUpperChar
 317  RtlUpperString
 318  RtlUshortByteSwap             # FASTCALL byteswap (xb/rtlbyteswap.c)
+319  RtlWalkFrameChain               # EBP-chain walk; user-mode gate off for Xbox
 320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #

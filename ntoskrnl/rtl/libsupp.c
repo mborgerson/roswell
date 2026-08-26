@@ -480,7 +480,15 @@ RtlWalkFrameChain(OUT PVOID *Callers,
             if ((StackBegin < Eip) && (Eip < StackEnd)) break;
 
             /* Check if we reached a user-mode address */
+#ifndef SARCH_XBOX
             if (!(Flags) && !(Eip & 0x80000000)) break; // FIXME: 3GB breakage
+#else
+            /*
+             * The console runs a single flat ring-0 address space and loads
+             * titles low, so a cleared high bit does not mark a user frame;
+             * the surrounding stack-bounds checks terminate the walk instead.
+             */
+#endif
 
             /* Save this frame */
             Callers[i] = (PVOID)Eip;
