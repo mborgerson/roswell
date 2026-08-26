@@ -58,6 +58,7 @@ KeSetSystemTime(IN PLARGE_INTEGER NewTime,
 
     /* Set the new system time (ordering of these operations is critical) */
     KiWriteSystemTime(&SharedUserData->SystemTime, *NewTime);
+    KiWriteSystemTime(&KeSystemTime, *NewTime);
 
     /* Check if this was for the HAL and set the RTC time */
     if (HalTime) ExCmosClockIsSane = HalSetRealTimeClock(&TimeFields);

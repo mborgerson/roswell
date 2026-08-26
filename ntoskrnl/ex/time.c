@@ -356,6 +356,7 @@ ExRefreshTimeZoneInformation(IN PLARGE_INTEGER CurrentBootTime)
     /* Change it for user-mode applications */
     CurrentTime.QuadPart += ExpTimeZoneBias.QuadPart;
     KiWriteSystemTime(&SharedUserData->SystemTime, CurrentTime);
+    KiWriteSystemTime(&KeSystemTime, CurrentTime);
 
     /* Return success */
     return TRUE;

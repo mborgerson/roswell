@@ -18,6 +18,12 @@ LONG KiTickOffset;
 ULONG KeTimeAdjustment;
 BOOLEAN KiTimeAdjustmentEnabled = FALSE;
 
+/* The console has no shared user-data page: titles read the interrupt and
+ * system time straight from these exported counters, which mirror the values
+ * the clock interrupt maintains. */
+volatile KSYSTEM_TIME KeInterruptTime = { 0, 0, 0 };
+volatile KSYSTEM_TIME KeSystemTime = { 0, 0, 0 };
+
 /* FUNCTIONS ******************************************************************/
 
 FORCEINLINE
@@ -75,6 +81,7 @@ KeUpdateSystemTime(IN PKTRAP_FRAME TrapFrame,
     InterruptTime.QuadPart = *(ULONGLONG*)&SharedUserData->InterruptTime;
     InterruptTime.QuadPart += Increment;
     KiWriteSystemTime(&SharedUserData->InterruptTime, InterruptTime);
+    KiWriteSystemTime(&KeInterruptTime, InterruptTime);
 
     /* Check for timer expiration */
     KiCheckForTimerExpiration(Prcb, TrapFrame, InterruptTime);
@@ -96,6 +103,7 @@ KeUpdateSystemTime(IN PKTRAP_FRAME TrapFrame,
         CurrentTime.QuadPart = *(ULONGLONG*)&SharedUserData->SystemTime;
         CurrentTime.QuadPart += KeTimeAdjustment;
         KiWriteSystemTime(&SharedUserData->SystemTime, CurrentTime);
+        KiWriteSystemTime(&KeSystemTime, CurrentTime);
 
         /* Update the tick count */
         CurrentTime.QuadPart = (*(ULONGLONG*)&KeTickCount) + 1;

@@ -148,6 +148,8 @@ extern PVOID KeUserCallbackDispatcher;
 extern PVOID KeUserExceptionDispatcher;
 extern PVOID KeRaiseUserExceptionDispatcher;
 extern ULONG KeTimeIncrement;
+extern volatile KSYSTEM_TIME KeInterruptTime;
+extern volatile KSYSTEM_TIME KeSystemTime;
 extern ULONG KeTimeAdjustment;
 extern BOOLEAN KiTimeAdjustmentEnabled;
 extern LONG KiTickOffset;
