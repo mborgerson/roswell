@@ -781,9 +781,9 @@ XeIoStartPacket(_In_ PVOID DeviceObject, _In_ PVOID Irp,
 /* --- KeQueryInterruptTime / Performance counter -- ULONGLONG returns ---- */
 ULONGLONG NTAPI XeKeQueryInterruptTime(VOID)
 {
-    LARGE_INTEGER t;
-    KeQueryTickCount(&t);
-    return t.QuadPart * 100000ULL;  /* ticks * 10ms in 100ns units */
+    /* The live interrupt-time counter the clock advances (1ms ticks); the
+     * same value the exported KeInterruptTime datum carries. */
+    return KeQueryInterruptTime();
 }
 /* The Xbox performance counter is the ACPI PM timer, a 24-bit free-running
  * counter at PMBASE+0x08 (PMBASE = 0x8000 on retail, set by the BIOS via

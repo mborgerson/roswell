@@ -48,6 +48,20 @@ static bool t_interrupt_time_advances(void)
     return true;
 }
 
+static bool t_interrupt_time_matches_query(void)
+{
+    /* KeInterruptTime is the same counter KeQueryInterruptTime returns;
+     * read moments apart they must agree to within a few ticks. */
+    ULONGLONG g = read_systime(&KeInterruptTime);
+    ULONGLONG q = KeQueryInterruptTime();
+    ULONGLONG diff = (q >= g) ? (q - g) : (g - q);
+    if (diff > 10 * 10000)
+        FAIL_AND_RETURN("KeInterruptTime %llu vs query %llu differ %llu ms",
+                        (unsigned long long)g, (unsigned long long)q,
+                        (unsigned long long)(diff / 10000));
+    return true;
+}
+
 static bool t_system_time_matches_query(void)
 {
     ULONGLONG s = read_systime(&KeSystemTime);
@@ -65,9 +79,10 @@ static bool t_system_time_matches_query(void)
 }
 
 static const test_entry_t ke_timebase_entries[] = {
-    {"time_increment",            t_time_increment},
-    {"interrupt_time_advances",   t_interrupt_time_advances},
-    {"system_time_matches_query", t_system_time_matches_query},
+    {"time_increment",             t_time_increment},
+    {"interrupt_time_advances",    t_interrupt_time_advances},
+    {"interrupt_time_matches_query", t_interrupt_time_matches_query},
+    {"system_time_matches_query",  t_system_time_matches_query},
 };
 
 DEFINE_GROUP(ke_timebase, "ke/timebase");
