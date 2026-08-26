@@ -264,6 +264,7 @@
 312  RtlUnwind
 314  RtlUpcaseUnicodeString
 316  RtlUpperChar
+317  RtlUpperString
 320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #

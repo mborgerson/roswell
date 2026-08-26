@@ -125,12 +125,29 @@ static bool t_copy_string(void)
     return true;
 }
 
+static bool t_upper_string(void)
+{
+    ANSI_STRING src, dst;
+    char dstbuf[16];
+
+    RtlInitAnsiString(&src, "MixedCase!");
+    dst.Length = 0;
+    dst.MaximumLength = sizeof(dstbuf);
+    dst.Buffer = dstbuf;
+
+    RtlUpperString(&dst, &src);
+    ASSERT_EQ_U32(dst.Length, src.Length);
+    ASSERT_TRUE(strncmp(dst.Buffer, "MIXEDCASE!", 10) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
     {"integer_to_unicode_string", t_integer_to_unicode_string},
     {"compare_string", t_compare_string},
     {"copy_string", t_copy_string},
+    {"upper_string", t_upper_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
