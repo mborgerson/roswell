@@ -127,6 +127,20 @@ static bool t_append_unicode_string_to_string(void)
     return true;
 }
 
+static bool t_multibyte_to_unicode(void)
+{
+    WCHAR uni[16];
+    ULONG got = 0;
+    const char *mb = "ascii";
+
+    ASSERT_NTSTATUS(RtlMultiByteToUnicodeN(uni, sizeof(uni), &got,
+                                           (PCHAR)mb, 5),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(got, 5 * sizeof(WCHAR));
+    ASSERT_TRUE(wcsncmp(uni, L"ascii", 5) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
@@ -135,6 +149,7 @@ static const test_entry_t rtl_strconv_entries[] = {
     {"create_unicode", t_create_unicode},
     {"append_unicode_to_string", t_append_unicode_to_string},
     {"append_unicode_string_to_string", t_append_unicode_string_to_string},
+    {"multibyte_to_unicode", t_multibyte_to_unicode},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");

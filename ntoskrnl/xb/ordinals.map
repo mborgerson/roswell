@@ -246,6 +246,7 @@
 291  XeRtlInitializeCriticalSection
 294  XeRtlLeaveCriticalSection
 298  RtlMoveMemory
+299  RtlMultiByteToUnicodeN
 301  RtlNtStatusToDosError
 302  RtlRaiseException
 303  RtlRaiseStatus
