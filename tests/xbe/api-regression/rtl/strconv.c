@@ -110,6 +110,23 @@ static bool t_append_unicode_to_string(void)
     return true;
 }
 
+static bool t_append_unicode_string_to_string(void)
+{
+    UNICODE_STRING d, s;
+    WCHAR buf[32];
+
+    d.Length = 0;
+    d.MaximumLength = sizeof(buf);
+    d.Buffer = buf;
+    RtlInitUnicodeString(&s, L"tail");
+
+    RtlAppendUnicodeToString(&d, L"head-");
+    ASSERT_NTSTATUS(RtlAppendUnicodeStringToString(&d, &s), STATUS_SUCCESS);
+    ASSERT_EQ_U32(d.Length, 9 * sizeof(WCHAR));
+    ASSERT_TRUE(wcsncmp(d.Buffer, L"head-tail", 9) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
@@ -117,6 +134,7 @@ static const test_entry_t rtl_strconv_entries[] = {
     {"upcase_unicode_alloc", t_upcase_unicode_alloc},
     {"create_unicode", t_create_unicode},
     {"append_unicode_to_string", t_append_unicode_to_string},
+    {"append_unicode_string_to_string", t_append_unicode_string_to_string},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
