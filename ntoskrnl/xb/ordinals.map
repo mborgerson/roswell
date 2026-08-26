@@ -154,6 +154,7 @@
 152                                   # Xbox returns ULONG, reactos sig differs
 153  XeKeSynchronizeExecution        # title's KINTERRUPT has NULL ActualLock; route through the shadow
 156  KeTickCount                      # ntoskrnl's tick counter (low dword aliases)
+157  KeTimeIncrement                  # nominal 100ns clock-tick period (retail 10000 = 1ms)
 158  KeWaitForMultipleObjects
 159  KeWaitForSingleObject
 160  KfRaiseIrql

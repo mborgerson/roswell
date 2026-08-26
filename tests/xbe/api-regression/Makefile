@@ -16,6 +16,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ke/event.c \
        $(CURDIR)/ke/semaphore.c \
        $(CURDIR)/ke/time.c \
+       $(CURDIR)/ke/timebase.c \
        $(CURDIR)/ex/pool.c \
        $(CURDIR)/ex/raise.c \
        $(CURDIR)/ex/rwlock.c \
