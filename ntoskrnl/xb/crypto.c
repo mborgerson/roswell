@@ -96,11 +96,26 @@ XcModExp(_Out_ PVOID Out, _In_ PVOID In, _In_ PVOID Mod,
     return 0;
 }
 
+/*
+ * Force odd parity on every key byte: the low bit is the parity bit, set
+ * so each byte carries an odd number of 1s.  The upper seven bits are the
+ * key material and are left untouched.
+ */
 VOID NTAPI
 XcDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
 {
-    UNREFERENCED_PARAMETER(Key);
-    UNREFERENCED_PARAMETER(KeyLen);
+    PUCHAR k = (PUCHAR)Key;
+    ULONG i;
+
+    for (i = 0; i < KeyLen; i++)
+    {
+        UCHAR b = k[i] & 0xFE;
+        UCHAR p = b;
+        p ^= p >> 4;
+        p ^= p >> 2;
+        p ^= p >> 1;
+        k[i] = b | ((p & 1) ^ 1);
+    }
 }
 
 VOID NTAPI
