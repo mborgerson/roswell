@@ -183,6 +183,19 @@ static bool t_free_ansi_string(void)
     return true;
 }
 
+static bool t_extended_integer_multiply(void)
+{
+    LARGE_INTEGER m, r;
+
+    m.QuadPart = 1000000;
+    r = RtlExtendedIntegerMultiply(m, 1000);
+    ASSERT_TRUE(r.QuadPart == 1000000000LL);
+
+    r = RtlExtendedIntegerMultiply(m, -3);
+    ASSERT_TRUE(r.QuadPart == -3000000LL);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
@@ -192,6 +205,7 @@ static const test_entry_t rtl_intconv_entries[] = {
     {"upper_string", t_upper_string},
     {"append_string_to_string", t_append_string_to_string},
     {"free_ansi_string", t_free_ansi_string},
+    {"extended_integer_multiply", t_extended_integer_multiply},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
