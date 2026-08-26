@@ -39,8 +39,43 @@ static bool t_add_large_statistic(void)
     return true;
 }
 
+static bool t_compare_exchange64(void)
+{
+    LONGLONG dest, exch, cmp, prev;
+
+    /* Comparand matches: destination is replaced, old value returned. */
+    dest = 100; exch = 999; cmp = 100;
+    prev = ExInterlockedCompareExchange64(&dest, &exch, &cmp);
+    ASSERT_TRUE(prev == 100);
+    ASSERT_TRUE(dest == 999);
+
+    /* Comparand mismatches: destination untouched, old value returned. */
+    dest = 100; exch = 999; cmp = 50;
+    prev = ExInterlockedCompareExchange64(&dest, &exch, &cmp);
+    ASSERT_TRUE(prev == 100);
+    ASSERT_TRUE(dest == 100);
+
+    /* Full 64-bit compare/exchange across the 32-bit boundary. */
+    dest = 0x00000001DEADBEEFULL;
+    exch = 0xFEEDFACE12345678ULL;
+    cmp  = 0x00000001DEADBEEFULL;
+    prev = ExInterlockedCompareExchange64(&dest, &exch, &cmp);
+    ASSERT_TRUE((ULONGLONG)prev == 0x00000001DEADBEEFULL);
+    ASSERT_TRUE((ULONGLONG)dest == 0xFEEDFACE12345678ULL);
+
+    /* High-dword-only difference is detected (no exchange). */
+    dest = 0x0000000100000000ULL;
+    exch = 0x1111111111111111ULL;
+    cmp  = 0x0000000200000000ULL;
+    prev = ExInterlockedCompareExchange64(&dest, &exch, &cmp);
+    ASSERT_TRUE((ULONGLONG)prev == 0x0000000100000000ULL);
+    ASSERT_TRUE((ULONGLONG)dest == 0x0000000100000000ULL);
+    return true;
+}
+
 static const test_entry_t ex_interlocked_entries[] = {
     {"add_large_statistic", t_add_large_statistic},
+    {"compare_exchange64", t_compare_exchange64},
 };
 
 DEFINE_GROUP(ex_interlocked, "ex/interlocked");
