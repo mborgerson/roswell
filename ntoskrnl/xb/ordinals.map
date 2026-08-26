@@ -284,6 +284,14 @@
 324  XboxKrnlVersion               # 8-byte XBOX_KRNL_VERSION; titles gate on Major=1
 326  XeImageFileName               # ANSI_STRING -- the running image name
 
+# --- Buffered port I/O (rep ins/outs; single-value accessors inline) ----- #
+329  READ_PORT_BUFFER_UCHAR
+330  READ_PORT_BUFFER_USHORT
+331  READ_PORT_BUFFER_ULONG
+332  WRITE_PORT_BUFFER_UCHAR
+333  WRITE_PORT_BUFFER_USHORT
+334  WRITE_PORT_BUFFER_ULONG
+
 # --- Xe* / Xc* (xbe-side image + crypto -- stubbed, correct ABI) --------- #
 327  XeLoadSection
 328  XeUnloadSection

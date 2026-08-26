@@ -38,6 +38,7 @@ DECLARE_GROUP(mm_contig);
 DECLARE_GROUP(io_file);
 DECLARE_GROUP(io_dvd);
 DECLARE_GROUP(hal_data);
+DECLARE_GROUP(hal_portio);
 DECLARE_GROUP(ob_types);
 DECLARE_GROUP(ps_thread);
 DECLARE_GROUP(ke_wait_apc);
@@ -79,6 +80,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_file,
     &g_group_io_dvd,
     &g_group_hal_data,
+    &g_group_hal_portio,
     &g_group_ob_types,
     &g_group_ps_thread,
     &g_group_ke_wait_apc,

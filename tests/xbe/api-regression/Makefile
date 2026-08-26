@@ -17,6 +17,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/file.c \
        $(CURDIR)/io/dvd.c \
        $(CURDIR)/hal/data.c \
+       $(CURDIR)/hal/portio.c \
        $(CURDIR)/ob/types.c \
        $(CURDIR)/ps/thread.c \
        $(CURDIR)/ke/wait_apc.c \
