@@ -18,6 +18,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ex/pool.c \
        $(CURDIR)/ex/raise.c \
        $(CURDIR)/ex/rwlock.c \
+       $(CURDIR)/ex/interlocked.c \
        $(CURDIR)/mm/contig.c \
        $(CURDIR)/io/file.c \
        $(CURDIR)/io/dvd.c \

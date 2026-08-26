@@ -43,6 +43,7 @@
 16   ExEventObjectType  XeExEventObjectType  # 28-byte Xbox-shape struct (PoolTag at +0x18)
 17   ExFreePool                       # PVOID -> void; identical to NT
 18   ExInitializeReadWriteLock        # ERWLOCK init (xb/rwlock.c)
+20   ExInterlockedAddLargeStatistic  # FASTCALL 64-bit += ULONG (ex asm; matches Xbox @8)
 22   ExMutantObjectType  XeExMutantObjectType  # 28-byte Xbox-shape struct
 23   XeExQueryPoolBlockSize          # Xbox @4 -> NT @8 adapter
 24   ExQueryNonVolatileSetting     # EEPROM setting -- zeroed defaults
