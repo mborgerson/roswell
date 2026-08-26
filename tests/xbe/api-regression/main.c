@@ -34,6 +34,7 @@ DECLARE_GROUP(ke_event);
 DECLARE_GROUP(ke_semaphore);
 DECLARE_GROUP(ke_time);
 DECLARE_GROUP(ex_pool);
+DECLARE_GROUP(ex_raise);
 DECLARE_GROUP(ex_rwlock);
 DECLARE_GROUP(mm_contig);
 DECLARE_GROUP(io_file);
@@ -77,6 +78,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ke_semaphore,
     &g_group_ke_time,
     &g_group_ex_pool,
+    &g_group_ex_raise,
     &g_group_ex_rwlock,
     &g_group_mm_contig,
     &g_group_io_file,
