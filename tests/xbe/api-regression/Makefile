@@ -49,5 +49,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/fatx16.c \
        $(CURDIR)/ob/handles.c \
        $(CURDIR)/hal/av.c \
+       $(CURDIR)/kd/flags.c \
        $(CURDIR)/mm/pressure.c
 include $(NXDK_DIR)/Makefile

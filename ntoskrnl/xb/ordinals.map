@@ -95,6 +95,13 @@
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
 87   IofCompleteRequest               # fastcall ABI matches
 
+# --- DATA: Kd debugger-presence flags ------------------------------------ #
+# The retail kernel keeps debug output compiled in but runs no remote
+# debugger, so both read TRUE on a cold boot (verified on 1.0.4627).  The
+# default zeroed scaffold would read FALSE and flip titles' break-on-assert.
+88   =1                            # KdDebuggerEnabled -- debug output active
+89   =1                            # KdDebuggerNotPresent -- nothing attached
+
 # --- Ke* (direct ntoskrnl forwards + xbe adapters) ----------------------- #
 95   KeBugCheck
 97   KeCancelTimer                    # KTIMER layout matches; direct

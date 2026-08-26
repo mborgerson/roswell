@@ -68,6 +68,7 @@ DECLARE_GROUP(ob_symlink);
 DECLARE_GROUP(io_finfo);
 DECLARE_GROUP(io_rawfs);
 DECLARE_GROUP(hal_av);
+DECLARE_GROUP(kd_flags);
 DECLARE_GROUP(ke_exceptions);
 DECLARE_GROUP(io_fatx16);
 DECLARE_GROUP(ob_handles);
@@ -121,6 +122,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ob_handles,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
+    &g_group_kd_flags,
     &g_group_hal_av,
     /* Last: exhausts and recovers all of memory. */
     &g_group_mm_pressure,
