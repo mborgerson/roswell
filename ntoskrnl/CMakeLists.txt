@@ -140,6 +140,7 @@ list(APPEND PCH_SKIP_SOURCE
     ${REACTOS_SOURCE_DIR}/sdk/lib/cryptlib/sha1.c
     ${REACTOS_SOURCE_DIR}/sdk/lib/cryptlib/rc4.c
     xb/strace.c
+    xb/rwlock.c
     xb/xbe.c
     xb/object-types.c
     xb/devnode.c

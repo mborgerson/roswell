@@ -13,6 +13,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ke/semaphore.c \
        $(CURDIR)/ke/time.c \
        $(CURDIR)/ex/pool.c \
+       $(CURDIR)/ex/rwlock.c \
        $(CURDIR)/mm/contig.c \
        $(CURDIR)/io/file.c \
        $(CURDIR)/io/dvd.c \

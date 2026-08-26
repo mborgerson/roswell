@@ -36,13 +36,17 @@
 9    HalReadSMCTrayState              # tray state from SMC reg 0x03 + eject count
 
 # --- Ex* allocator (Xbox ABI: implicit NonPagedPool, no POOL_TYPE arg) ---- #
+12   ExAcquireReadWriteLockExclusive  # ERWLOCK writer acquire (xb/rwlock.c)
+13   ExAcquireReadWriteLockShared     # ERWLOCK reader acquire (xb/rwlock.c)
 14   XeExAllocatePool                # Xbox: implicit NonPagedPool
 15   XeExAllocatePoolWithTag
 16   ExEventObjectType  XeExEventObjectType  # 28-byte Xbox-shape struct (PoolTag at +0x18)
 17   ExFreePool                       # PVOID -> void; identical to NT
+18   ExInitializeReadWriteLock        # ERWLOCK init (xb/rwlock.c)
 22   ExMutantObjectType  XeExMutantObjectType  # 28-byte Xbox-shape struct
 23   XeExQueryPoolBlockSize          # Xbox @4 -> NT @8 adapter
 24   ExQueryNonVolatileSetting     # EEPROM setting -- zeroed defaults
+28   ExReleaseReadWriteLock           # ERWLOCK release (xb/rwlock.c)
 30   ExSemaphoreObjectType  XeExSemaphoreObjectType  # 28-byte Xbox-shape struct
 31                                    # no NT ExTimerObjectType; needs adapter
 
