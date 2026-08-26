@@ -233,6 +233,7 @@
 267  RtlCharToInteger
 268  RtlCompareMemory
 269  RtlCompareMemoryUlong
+270  RtlCompareString
 271  RtlCompareUnicodeString
 273  RtlCopyUnicodeString
 274  RtlCreateUnicodeString

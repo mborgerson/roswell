@@ -76,10 +76,33 @@ static bool t_integer_to_unicode_string(void)
     return true;
 }
 
+static bool t_compare_string(void)
+{
+    ANSI_STRING a, b;
+
+    RtlInitAnsiString(&a, "alpha");
+    RtlInitAnsiString(&b, "alpha");
+    ASSERT_EQ_U32(RtlCompareString(&a, &b, FALSE), 0);
+
+    RtlInitAnsiString(&b, "alphb");
+    ASSERT_TRUE(RtlCompareString(&a, &b, FALSE) < 0);
+
+    /* Case-insensitive compare folds case. */
+    RtlInitAnsiString(&b, "ALPHA");
+    ASSERT_TRUE(RtlCompareString(&a, &b, FALSE) != 0);
+    ASSERT_EQ_U32(RtlCompareString(&a, &b, TRUE), 0);
+
+    /* Equal prefix, differing length orders by length. */
+    RtlInitAnsiString(&b, "alp");
+    ASSERT_TRUE(RtlCompareString(&a, &b, FALSE) > 0);
+    return true;
+}
+
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
     {"integer_to_char", t_integer_to_char},
     {"integer_to_unicode_string", t_integer_to_unicode_string},
+    {"compare_string", t_compare_string},
 };
 
 DEFINE_GROUP(rtl_intconv, "rtl/intconv");
