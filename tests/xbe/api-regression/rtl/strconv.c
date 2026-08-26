@@ -141,6 +141,19 @@ static bool t_multibyte_to_unicode(void)
     return true;
 }
 
+static bool t_unicode_to_multibyte(void)
+{
+    char mb[16];
+    ULONG got = 0;
+
+    ASSERT_NTSTATUS(RtlUnicodeToMultiByteN(mb, sizeof(mb), &got,
+                                           L"ascii", 5 * sizeof(WCHAR)),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(got, 5);
+    ASSERT_TRUE(memcmp(mb, "ascii", 5) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
@@ -150,6 +163,7 @@ static const test_entry_t rtl_strconv_entries[] = {
     {"append_unicode_to_string", t_append_unicode_to_string},
     {"append_unicode_string_to_string", t_append_unicode_string_to_string},
     {"multibyte_to_unicode", t_multibyte_to_unicode},
+    {"unicode_to_multibyte", t_unicode_to_multibyte},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
