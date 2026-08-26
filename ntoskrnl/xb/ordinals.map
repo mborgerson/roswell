@@ -231,6 +231,7 @@
 268  RtlCompareMemory
 269  RtlCompareMemoryUlong
 271  RtlCompareUnicodeString
+273  RtlCopyUnicodeString
 277  XeRtlEnterCriticalSection       # xbe's own minimal recursive lock
 279  RtlEqualString
 284  RtlFillMemory

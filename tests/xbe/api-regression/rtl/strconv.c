@@ -20,8 +20,32 @@ static bool t_upper_char(void)
     return true;
 }
 
+static bool t_copy_unicode(void)
+{
+    UNICODE_STRING src, dst;
+    WCHAR dstbuf[16];
+
+    RtlInitUnicodeString(&src, L"payload");
+    dst.Length = 0;
+    dst.MaximumLength = sizeof(dstbuf);
+    dst.Buffer = dstbuf;
+
+    RtlCopyUnicodeString(&dst, &src);
+    ASSERT_EQ_U32(dst.Length, src.Length);            /* 7 * 2 */
+    ASSERT_TRUE(wcsncmp(dst.Buffer, L"payload", 7) == 0);
+
+    /* Copy truncates to the destination's MaximumLength. */
+    WCHAR smallbuf[4];
+    UNICODE_STRING small = { 0, sizeof(smallbuf), smallbuf };
+    RtlCopyUnicodeString(&small, &src);
+    ASSERT_EQ_U32(small.Length, sizeof(smallbuf));    /* 4 bytes = 2 chars */
+    ASSERT_TRUE(wcsncmp(small.Buffer, L"pa", 2) == 0);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
+    {"copy_unicode", t_copy_unicode},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
