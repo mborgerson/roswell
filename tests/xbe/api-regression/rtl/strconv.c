@@ -43,9 +43,43 @@ static bool t_copy_unicode(void)
     return true;
 }
 
+static bool t_upcase_unicode_inplace(void)
+{
+    UNICODE_STRING src, dst;
+    WCHAR srcbuf[] = L"MixedCase123";
+    WCHAR dstbuf[16];
+
+    RtlInitUnicodeString(&src, srcbuf);
+    dst.Length = 0;
+    dst.MaximumLength = sizeof(dstbuf);
+    dst.Buffer = dstbuf;
+
+    ASSERT_NTSTATUS(RtlUpcaseUnicodeString(&dst, &src, FALSE),
+                    STATUS_SUCCESS);
+    ASSERT_EQ_U32(dst.Length, src.Length);
+    ASSERT_TRUE(wcsncmp(dst.Buffer, L"MIXEDCASE123", 12) == 0);
+    return true;
+}
+
+static bool t_upcase_unicode_alloc(void)
+{
+    UNICODE_STRING src, dst;
+    RtlInitUnicodeString(&src, L"hello");
+
+    ASSERT_NTSTATUS(RtlUpcaseUnicodeString(&dst, &src, TRUE),
+                    STATUS_SUCCESS);
+    ASSERT_NOT_NULL(dst.Buffer);
+    ASSERT_EQ_U32(dst.Length, src.Length);
+    ASSERT_TRUE(wcsncmp(dst.Buffer, L"HELLO", 5) == 0);
+    RtlFreeUnicodeString(&dst);
+    return true;
+}
+
 static const test_entry_t rtl_strconv_entries[] = {
     {"upper_char", t_upper_char},
     {"copy_unicode", t_copy_unicode},
+    {"upcase_unicode_inplace", t_upcase_unicode_inplace},
+    {"upcase_unicode_alloc", t_upcase_unicode_alloc},
 };
 
 DEFINE_GROUP(rtl_strconv, "rtl/strconv");
