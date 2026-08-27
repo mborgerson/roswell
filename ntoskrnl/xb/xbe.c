@@ -991,6 +991,9 @@ extern NTSTATUS NTAPI ros_NtAllocateVirtualMemory(
 extern NTSTATUS NTAPI ros_NtFreeVirtualMemory(
     HANDLE, PVOID *, PSIZE_T, ULONG)
     __asm__("_NtFreeVirtualMemory@16");
+extern NTSTATUS NTAPI ros_NtProtectVirtualMemory(
+    HANDLE, PVOID *, PSIZE_T, ULONG, PULONG)
+    __asm__("_NtProtectVirtualMemory@20");
 extern NTSTATUS NTAPI ros_NtQueryVirtualMemory(
     HANDLE, PVOID, ULONG /* MEMORY_INFORMATION_CLASS */,
     PVOID, SIZE_T, PSIZE_T)
@@ -1295,6 +1298,18 @@ XeNtFreeVirtualMemory(PVOID *Base, PSIZE_T Size, ULONG FreeType)
     return NxVmFreeVirtualMemory(Base, Size, FreeType);
 #else
     return ros_NtFreeVirtualMemory(ZwCurrentProcess(), Base, Size, FreeType);
+#endif
+}
+/* Xbox drops NT's process handle: there is only one address space. */
+NTSTATUS NTAPI
+XeNtProtectVirtualMemory(PVOID *Base, PSIZE_T Size, ULONG NewProtect,
+                           PULONG OldProtect)
+{
+#ifdef NXK_MM_VM
+    return NxVmProtectVirtualMemory(Base, Size, NewProtect, OldProtect);
+#else
+    return ros_NtProtectVirtualMemory(ZwCurrentProcess(), Base, Size,
+                                      NewProtect, OldProtect);
 #endif
 }
 /* Xbox NtQueryVirtualMemory takes a base and returns

@@ -230,6 +230,7 @@
 201  XeNtOpenDirectoryObject
 202  XeNtOpenFile
 203  XeNtOpenSymbolicLinkObject
+204  XeNtProtectVirtualMemory        # Xbox drops the process handle
 205  XeNtPulseEvent                  # DPC-safe (Xbox semantics, cached handles)
 207  XeNtQueryDirectoryFile          # Xbox: no ReturnSingleEntry; ANSI mask + name
 208  XeNtQueryDirectoryObject
