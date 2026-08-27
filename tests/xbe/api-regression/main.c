@@ -83,6 +83,7 @@ DECLARE_GROUP(io_delete);
 DECLARE_GROUP(ob_refname);
 DECLARE_GROUP(ke_devqueue);
 DECLARE_GROUP(ke_queue);
+DECLARE_GROUP(io_irpalloc);
 DECLARE_GROUP(io_devlife);
 
 static const test_group_t *const GROUPS[] = {
@@ -143,6 +144,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ob_refname,
     &g_group_ke_devqueue,
     &g_group_ke_queue,
+    &g_group_io_irpalloc,
     &g_group_io_devlife,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */

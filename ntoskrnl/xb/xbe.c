@@ -780,6 +780,13 @@ XeIoStartNextPacket(_In_ PVOID DeviceObject)
     IoStartNextPacket((PDEVICE_OBJECT)DeviceObject, FALSE);
 }
 
+/* Xbox has no quota to charge; the packet always comes from the pool. */
+PVOID NTAPI
+XeIoAllocateIrp(_In_ CCHAR StackSize)
+{
+    return IoAllocateIrp(StackSize, FALSE);
+}
+
 /* Xbox dropped NT's cancel-routine arg; pass NULL. */
 VOID NTAPI
 XeIoStartPacket(_In_ PVOID DeviceObject, _In_ PVOID Irp,

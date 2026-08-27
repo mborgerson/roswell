@@ -83,6 +83,7 @@
 56   ExInterlockedFlushSList          # fastcall ABI matches
 57   XeInterlockedPopEntrySList      # thunks to RtlInterlockedPopEntrySList
 58   XeInterlockedPushEntrySList
+59   IoAllocateIrp       XeIoAllocateIrp   # Xbox @4 -> NT @8 adapter
 
 # --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
 61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
@@ -93,6 +94,8 @@
 69   XeIoDeleteSymbolicLink
 70   IoDeviceObjectType  XeIoDeviceObjectType  # 28-byte Xbox-shape struct
 71   IoFileObjectType    XeIoFileObjectType    # 28-byte Xbox-shape struct
+72   IoFreeIrp
+73   IoInitializeIrp
 74   IoInvalidDeviceRequest
 81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
