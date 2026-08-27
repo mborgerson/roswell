@@ -64,6 +64,7 @@ DECLARE_GROUP(mm_vmcontract);
 DECLARE_GROUP(mm_cache);
 DECLARE_GROUP(io_mdl);
 DECLARE_GROUP(io_fileobj);
+DECLARE_GROUP(io_shareaccess);
 DECLARE_GROUP(io_irplayout);
 DECLARE_GROUP(io_fsdreq);
 DECLARE_GROUP(io_syncreq);
@@ -130,6 +131,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_mm_cache,
     &g_group_io_mdl,
     &g_group_io_fileobj,
+    &g_group_io_shareaccess,
     &g_group_io_irplayout,
     &g_group_io_fsdreq,
     &g_group_io_syncreq,

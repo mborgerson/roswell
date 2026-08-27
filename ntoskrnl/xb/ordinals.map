@@ -91,6 +91,7 @@
 60   IoBuildAsynchronousFsdRequest   # signature matches NT's exactly
 61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
 62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
+63   IoCheckShareAccess              # signature matches NT's exactly
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
 67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
 68   IoDeleteDevice
@@ -100,6 +101,8 @@
 72   IoFreeIrp
 73   IoInitializeIrp
 74   IoInvalidDeviceRequest
+78   IoRemoveShareAccess             # signature matches NT's exactly
+80   IoSetShareAccess                # signature matches NT's exactly
 81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
 84   IoSynchronousDeviceIoControlRequest  XeIoSynchronousDeviceIoControlRequest
