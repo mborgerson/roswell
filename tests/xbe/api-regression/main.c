@@ -93,6 +93,7 @@ DECLARE_GROUP(io_iocomp);
 DECLARE_GROUP(mm_protect);
 DECLARE_GROUP(ob_query);
 DECLARE_GROUP(ke_apc);
+DECLARE_GROUP(io_dismount);
 DECLARE_GROUP(ke_threadstate);
 DECLARE_GROUP(ex_timer);
 
@@ -172,6 +173,8 @@ static const test_group_t *const GROUPS[] = {
     &g_group_hal_av,
     /* Last: exhausts and recovers all of memory. */
     &g_group_mm_pressure,
+    /* Last of all: takes the cache volume down and back up. */
+    &g_group_io_dismount,
 };
 
 #define NGROUPS (sizeof(GROUPS)/sizeof(GROUPS[0]))

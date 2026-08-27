@@ -113,6 +113,7 @@
 85   IoSynchronousFsdRequest          XeIoSynchronousFsdRequest
 86   IofCallDriver                    # fastcall ABI matches
 87   IofCompleteRequest               # fastcall ABI matches
+91   XeIoDismountVolumeByName         # Xbox ANSI device path
 
 # --- DATA: Kd debugger-presence flags ------------------------------------ #
 # The retail kernel keeps debug output compiled in but runs no remote

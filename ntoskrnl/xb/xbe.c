@@ -2180,6 +2180,46 @@ HalReadWritePCISpace(ULONG BusNumber, ULONG SlotNumber, ULONG RegisterNumber,
                               Buffer, RegisterNumber, Length);
 }
 
+extern NTSTATUS NTAPI ros_NtOpenFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                     PIO_STATUS_BLOCK, ULONG, ULONG)
+    __asm__("_NtOpenFile@24");
+
+/*
+ * The console takes the device path on its own and reports success for
+ * anything that resolves -- a raw partition with nothing mounted and a
+ * volume with handles still open included -- so the file system's own
+ * answer to the request is not the caller's business.  Only a name that
+ * resolves to nothing is reported, as STATUS_OBJECT_NAME_NOT_FOUND.
+ */
+NTSTATUS NTAPI
+XeIoDismountVolumeByName(PANSI_STRING DeviceName)
+{
+    OBJECT_ATTRIBUTES oa;
+    IO_STATUS_BLOCK iosb;
+    UNICODE_STRING name;
+    HANDLE handle;
+    NTSTATUS status;
+
+    status = RtlAnsiStringToUnicodeString(&name, DeviceName, TRUE);
+    if (!NT_SUCCESS(status)) return status;
+
+    InitializeObjectAttributes(&oa, &name,
+                               OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+                               NULL, NULL);
+    status = ros_NtOpenFile(&handle, SYNCHRONIZE | FILE_READ_ATTRIBUTES, &oa,
+                            &iosb,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE |
+                                FILE_SHARE_DELETE,
+                            FILE_SYNCHRONOUS_IO_NONALERT);
+    RtlFreeUnicodeString(&name);
+    if (!NT_SUCCESS(status)) return status;
+
+    ros_NtFsControlFile(handle, NULL, NULL, NULL, &iosb,
+                        FSCTL_DISMOUNT_VOLUME, NULL, 0, NULL, 0);
+    NtClose(handle);
+    return STATUS_SUCCESS;
+}
+
 extern NTSTATUS NTAPI NtQueryEvent(HANDLE, EVENT_INFORMATION_CLASS, PVOID,
                                    ULONG, PULONG);
 extern NTSTATUS NTAPI NtQueryMutant(HANDLE, MUTANT_INFORMATION_CLASS, PVOID,
