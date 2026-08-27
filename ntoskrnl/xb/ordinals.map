@@ -162,6 +162,7 @@
 139  KeRestoreFloatingPointState
 141  KeRundownQueue
 142  KeSaveFloatingPointState
+140  KeResumeThread                    # returns the pre-resume count
 143  KeSetBasePriorityThread
 145  KeSetEvent
 146  KeSetEventBoostPriority
@@ -170,7 +171,7 @@
 149  KeSetTimer                       # native KDPC/KTIMER; direct
 150  KeSetTimerEx                     # native KDPC/KTIMER; direct
 151  KeStallExecutionProcessor
-152                                   # Xbox returns ULONG, reactos sig differs
+152  KeSuspendThread                   # returns the pre-suspend count
 153  XeKeSynchronizeExecution        # title's KINTERRUPT has NULL ActualLock; route through the shadow
 154  KeSystemTime                     # live system-time counter; mirrors KeQuerySystemTime
 156  KeTickCount                      # ntoskrnl's tick counter (low dword aliases)
@@ -239,6 +240,7 @@
 226  XeNtSetInformationFile          # rename target: Xbox ANSI -> NT WCHAR
 228  NtSetSystemTime
 230  NtSignalAndWaitForSingleObjectEx
+231  NtSuspendThread
 232  NtUserIoApcDispatcher
 233  NtWaitForSingleObject
 234  NtWaitForSingleObjectEx       # the *Ex waits add a wait mode
