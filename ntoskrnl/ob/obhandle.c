@@ -16,6 +16,9 @@
 #include <ntoskrnl.h>
 #define NDEBUG
 #include <debug.h>
+#ifdef SARCH_XBOX
+#include <xb-event-cache.h>
+#endif
 
 PHANDLE_TABLE ObpKernelHandleTable = NULL;
 
@@ -1771,6 +1774,13 @@ ObpCloseHandle(IN HANDLE Handle,
 
     if (AccessMode == KernelMode && Handle == (HANDLE)-1)
         return STATUS_INVALID_HANDLE;
+
+#ifdef SARCH_XBOX
+    /* Every close path funnels through here, so this is where the
+     * NtPulseEvent handle cache drops the entry -- the handle value is
+     * about to become reusable. */
+    XeUntrackEvent(Handle);
+#endif
 
     /* Check if we're dealing with a kernel handle */
     if (ObpIsKernelHandle(Handle, AccessMode))

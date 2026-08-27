@@ -6,8 +6,9 @@
  * same name with OBJ_OPENIF must resolve to ONE object.
  *
  * Also pins NtPulseEvent against handle close/reuse: the kernel-side
- * pulse cache must not pulse a freed event after NtClose recycles the
- * handle value.
+ * pulse cache must not pulse a freed event after a handle value is
+ * recycled -- whether it was released by NtClose or by
+ * NtDuplicateObject(DUPLICATE_CLOSE_SOURCE).
  */
 
 #include "../harness.h"
@@ -15,6 +16,10 @@
 
 #ifndef OBJ_OPENIF
 #define OBJ_OPENIF 0x00000080L
+#endif
+
+#ifndef DUPLICATE_CLOSE_SOURCE
+#define DUPLICATE_CLOSE_SOURCE 0x00000001
 #endif
 
 static void init_named_oa(OBJECT_ATTRIBUTES *oa, ANSI_STRING *name,
@@ -132,10 +137,63 @@ static bool t_pulse_after_close_reuse(void)
     return true;
 }
 
+/* NtClose is not the only way a handle dies:
+ * NtDuplicateObject(DUPLICATE_CLOSE_SOURCE) closes the source too, so the
+ * pulse cache has to drop the entry on that path as well.  Release a few
+ * event handles that way, free the objects behind them, then create fresh
+ * events and pulse through the values that were released.
+ *
+ * A signaled notification event makes the pulse observable: pulsing it
+ * satisfies no waiter and leaves it NON-signaled, so a pulse that landed
+ * on some other object shows up as the probe still being signaled. */
+static bool t_pulse_after_duplicate_close_reuse(void)
+{
+    enum { PLANT = 4, PROBE = 8 };
+    HANDLE probes[PROBE];
+    NTSTATUS s;
+    int i;
+
+    for (i = 0; i < PLANT; i++) {
+        HANDLE src = NULL, dup = NULL;
+
+        s = NtCreateEvent(&src, NULL, SynchronizationEvent, FALSE);
+        ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+        s = NtDuplicateObject(src, &dup, DUPLICATE_CLOSE_SOURCE);
+        ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+        /* The source value is gone; only the duplicate is usable, and
+         * closing it drops the last reference to the event. */
+        s = NtClose(dup);
+        ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    }
+
+    for (i = 0; i < PROBE; i++) {
+        s = NtCreateEvent(&probes[i], NULL, NotificationEvent, TRUE);
+        ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    }
+
+    for (i = 0; i < PROBE; i++) {
+        LARGE_INTEGER timeout = { .QuadPart = 0 };
+        LONG previous = -1;
+
+        s = NtPulseEvent(probes[i], &previous);
+        ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+        ASSERT_EQ_U32(previous, 1);
+
+        s = NtWaitForSingleObject(probes[i], FALSE, &timeout);
+        ASSERT_NTSTATUS(s, STATUS_TIMEOUT);
+    }
+
+    for (i = 0; i < PROBE; i++)
+        NtClose(probes[i]);
+    return true;
+}
+
 static const test_entry_t ob_named_entries[] = {
     {"named_mutant_shared",     t_named_mutant_shared},
     {"named_event_shared",      t_named_event_shared},
     {"pulse_after_close_reuse", t_pulse_after_close_reuse},
+    {"pulse_after_duplicate_close_reuse",
+     t_pulse_after_duplicate_close_reuse},
 };
 
 DEFINE_GROUP(ob_named, "ob/named");

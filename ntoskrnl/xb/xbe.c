@@ -19,6 +19,7 @@
 #include <ntimage.h>
 #include <intrin.h>
 #include <xb-debug.h>
+#include <xb-event-cache.h>
 
 
 /* Need the full KTHREAD layout (XeXboxShadow / XeXboxFs4 sit at the end). */
@@ -1321,8 +1322,9 @@ XeNtQueryVirtualMemory(PVOID Base, PVOID /* PMEMORY_BASIC_INFORMATION */ Mbi)
  *
  * Cache (handle -> KEVENT) at PASSIVE inside XeNtCreateEvent.
  * XeNtPulseEvent skips the Ob/PAGED_CODE machinery and calls the DPC-safe
- * KePulseEvent directly.  The handle keeps the underlying object alive --
- * the cached pointer stays valid until NtClose.
+ * KePulseEvent directly.  The handle keeps the underlying object alive, so
+ * the cached pointer stays valid until the handle is closed -- eviction
+ * hangs off ObpCloseHandle, the point every close path funnels through.
  */
 typedef struct _XBE_EVENT_ENTRY
 {
@@ -1357,11 +1359,12 @@ XeTrackEvent(HANDLE Handle, PKEVENT Event)
               "DPC-unsafe NT path\n", Handle);
 }
 
-/* NtClose must evict the cache entry: the object dies with the last
- * handle, and NT reuses handle values, so a stale slot would hand
- * XeNtPulseEvent a freed (or unrelated) KEVENT. */
-static
-VOID
+/* Closing a handle must evict the cache entry: the object dies with the
+ * last handle, and handle values are recycled, so a stale slot would hand
+ * XeNtPulseEvent a freed (or unrelated) KEVENT.  Called from
+ * ObpCloseHandle, which every close funnels through -- NtClose is only one
+ * of them, NtDuplicateObject(DUPLICATE_CLOSE_SOURCE) is another. */
+VOID NTAPI
 XeUntrackEvent(HANDLE Handle)
 {
     KIRQL OldIrql;
@@ -1377,13 +1380,6 @@ XeUntrackEvent(HANDLE Handle)
         }
     }
     KeLowerIrql(OldIrql);
-}
-
-NTSTATUS NTAPI
-XeNtClose(HANDLE Handle)
-{
-    XeUntrackEvent(Handle);
-    return NtClose(Handle);
 }
 
 static

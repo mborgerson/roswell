@@ -205,7 +205,7 @@
 # --- Nt* (Xbox OBJECT_ATTRIBUTES, ANSI names, dropped process handle) ---- #
 184  XeNtAllocateVirtualMemory       # Xbox drops the process handle
 186  NtClearEvent                     # direct; Zw thunks are gone (Zw==Nt)
-187  XeNtClose                       # evicts the NtPulseEvent handle cache
+187  NtClose
 189  XeNtCreateEvent                 # Xbox OBJECT_ATTRIBUTES (ANSI name)
 190  XeNtCreateFile                  # Xbox OBJECT_ATTRIBUTES; no EA params
 192  XeNtCreateMutant
