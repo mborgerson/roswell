@@ -31,6 +31,9 @@
 /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
 #include <ndk/extypes.h>
 
+/* OBJECT_TO_OBJECT_HEADER. */
+#include <ndk/obtypes.h>
+
 /* HalReturnToFirmware. */
 #include <ndk/halfuncs.h>
 
@@ -1637,6 +1640,58 @@ XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
                                          ParseContext, Handle);
     if (name.Buffer != NULL)
         RtlFreeUnicodeString(&name);
+    return status;
+}
+/*
+ * Xbox ObReferenceObjectByName takes the path on its own -- there is no
+ * root-directory handle -- so only the name rewriting of the shared
+ * translator applies.  An unrooted name has nothing to resolve against
+ * and the object manager rejects it, matching NT.
+ */
+NTSTATUS NTAPI
+XeObReferenceObjectByName(PANSI_STRING ObjectName, ULONG Attributes,
+                            PVOID Type, PVOID ParseContext, PVOID *Object)
+{
+    XBE_OBJECT_ATTRIBUTES xoa;
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa;
+    POBJECT_TYPE Internal;
+    NTSTATUS status;
+
+    xoa.RootDirectory = NULL;
+    xoa.ObjectName = ObjectName;
+    xoa.Attributes = Attributes;
+
+    oa = XeTranslateOa(&xoa, &ntoa, &name);
+    if (oa == NULL || oa->ObjectName == NULL)
+        return STATUS_OBJECT_NAME_INVALID;
+
+    Internal = XeObjectTypeToInternal(Type);
+
+    /* The lookup reads its generic mapping straight out of the type it is
+     * handed, so it needs a real one even when the caller asked for any
+     * type at all.  Which type is immaterial: for a kernel-mode caller the
+     * lookup treats it as advisory, and the caller's actual request is
+     * enforced below. */
+    status = ObReferenceObjectByName(oa->ObjectName, Attributes, NULL,
+                                     GENERIC_ALL,
+                                     Internal != NULL ? Internal
+                                                      : ObpDirectoryObjectType,
+                                     KernelMode, ParseContext, Object);
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+
+    /* NT treats the requested type as advisory for kernel-mode callers;
+     * the console has no user mode, so the type argument is the caller's
+     * only guard and has to be enforced here. */
+    if (NT_SUCCESS(status) && Internal != NULL &&
+        OBJECT_TO_OBJECT_HEADER(*Object)->Type != Internal)
+    {
+        ObfDereferenceObject(*Object);
+        *Object = NULL;
+        status = STATUS_OBJECT_TYPE_MISMATCH;
+    }
     return status;
 }
 /*
