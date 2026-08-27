@@ -89,6 +89,7 @@
 62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
 67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
+68   IoDeleteDevice
 69   XeIoDeleteSymbolicLink
 70   IoDeviceObjectType  XeIoDeviceObjectType  # 28-byte Xbox-shape struct
 71   IoFileObjectType    XeIoFileObjectType    # 28-byte Xbox-shape struct

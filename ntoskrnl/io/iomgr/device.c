@@ -1359,6 +1359,12 @@ IoDeleteDevice(IN PDEVICE_OBJECT DeviceObject)
     /* Set the pending delete flag */
     IoGetDevObjExtension(DeviceObject)->ExtensionFlags |= DOE_DELETE_PENDING;
 
+#ifdef SARCH_XBOX
+    /* The console publishes the pending delete in the device object
+       itself, where a driver linked into the title reads it. */
+    DeviceObject->DeletePending = TRUE;
+#endif
+
 #ifndef SARCH_XBOX
     /* Unlink with the power manager */
     if (DeviceObject->Vpb) PoRemoveVolumeDevice(DeviceObject);
