@@ -52,7 +52,7 @@
 27   ExRaiseStatus     RtlRaiseStatus      # raise a bare NTSTATUS as an exception
 28   ExReleaseReadWriteLock           # ERWLOCK release (xb/rwlock.c)
 30   ExSemaphoreObjectType  XeExSemaphoreObjectType  # 28-byte Xbox-shape struct
-31                                    # no NT ExTimerObjectType; needs adapter
+31   ExTimerObjectType  XeExTimerObjectType   # 28-byte Xbox-shape struct
 32   ExfInterlockedInsertHeadList  XbExfInterlockedInsertHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
 33   ExfInterlockedInsertTailList  XbExfInterlockedInsertTailList  # FASTCALL splice, interrupts off (xb/exflist.c)
 34   ExfInterlockedRemoveHeadList  XbExfInterlockedRemoveHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
@@ -209,6 +209,7 @@
 
 # --- Nt* (Xbox OBJECT_ATTRIBUTES, ANSI names, dropped process handle) ---- #
 184  XeNtAllocateVirtualMemory       # Xbox drops the process handle
+185  NtCancelTimer
 186  NtClearEvent                     # direct; Zw thunks are gone (Zw==Nt)
 187  NtClose
 189  XeNtCreateEvent                 # Xbox OBJECT_ATTRIBUTES (ANSI name)
@@ -216,6 +217,7 @@
 192  XeNtCreateMutant
 193  XeNtCreateSemaphore             # Xbox: 4 args, no DesiredAccess
 222  NtReleaseSemaphore               # signature matches NT (HANDLE, LONG, PLONG)
+194  XeNtCreateTimer                  # no access mask; Xbox object attributes
 195  XeNtDeleteFile                  # Xbox OBJECT_ATTRIBUTES (ANSI name)
 196  NtDeviceIoControlFile
 197  XeNtDuplicateObject             # Xbox @12: current process, same access
@@ -231,6 +233,7 @@
 210  XeNtQueryFullAttributesFile
 211  NtQueryInformationFile
 215  XeNtQuerySymbolicLinkObject     # folds the UNICODE target to ANSI
+216  XeNtQueryTimer                  # basic information only
 217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
 218  NtQueryVolumeInformationFile
 219  XeNtReadFile
@@ -240,6 +243,7 @@
 225  NtSetEvent
 226  XeNtSetInformationFile          # rename target: Xbox ANSI -> NT WCHAR
 228  NtSetSystemTime
+229  XeNtSetTimerEx                  # NtSetTimer plus an explicit APC mode
 230  NtSignalAndWaitForSingleObjectEx
 231  NtSuspendThread
 232  NtUserIoApcDispatcher

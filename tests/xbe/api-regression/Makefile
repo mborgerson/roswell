@@ -68,5 +68,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/devlife.c \
        $(CURDIR)/io/asyncreq.c \
        $(CURDIR)/io/scatter.c \
-       $(CURDIR)/ke/threadstate.c
+       $(CURDIR)/ke/threadstate.c \
+       $(CURDIR)/ex/timer.c
 include $(NXDK_DIR)/Makefile

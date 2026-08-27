@@ -1632,6 +1632,7 @@ XeObjectTypeToInternal(PVOID Type)
     if (Type == &XeExEventObjectType)     return ExEventObjectType;
     if (Type == &XeExSemaphoreObjectType) return ExSemaphoreObjectType;
     if (Type == &XeExMutantObjectType)    return ExMutantObjectType;
+    if (Type == &XeExTimerObjectType)     return ExTimerType;
     if (Type == &XePsThreadObjectType)    return PsThreadType;
     if (Type == &XeIoFileObjectType)      return IoFileObjectType;
     if (Type == &XeIoDeviceObjectType)    return IoDeviceObjectType;
@@ -2160,6 +2161,58 @@ HalReadWritePCISpace(ULONG BusNumber, ULONG SlotNumber, ULONG RegisterNumber,
     else
         HalGetBusDataByOffset(PCIConfiguration, BusNumber, SlotNumber,
                               Buffer, RegisterNumber, Length);
+}
+
+extern NTSTATUS NTAPI NtCreateTimer(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                    TIMER_TYPE);
+extern NTSTATUS NTAPI NtQueryTimer(HANDLE, TIMER_INFORMATION_CLASS, PVOID,
+                                   ULONG, PULONG);
+extern NTSTATUS NTAPI NtSetTimer(HANDLE, PLARGE_INTEGER, PTIMER_APC_ROUTINE,
+                                 PVOID, BOOLEAN, LONG, PBOOLEAN);
+
+/*
+ * Executive timers.  The console's creator takes no access mask, its setter
+ * names the mode the APC is delivered in rather than inheriting the
+ * caller's, and its query answers exactly one information class.
+ * NtCancelTimer is NT's, unchanged, and is exported directly.
+ */
+NTSTATUS NTAPI
+XeNtCreateTimer(PHANDLE TimerHandle, PXBE_OBJECT_ATTRIBUTES XAttr,
+                  TIMER_TYPE TimerType)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = NtCreateTimer(TimerHandle, TIMER_ALL_ACCESS, oa,
+                                    TimerType);
+
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
+}
+
+/*
+ * ApcMode is accepted and cannot be honored: there is no ring 3 to return
+ * to, so a UserMode APC would be queued and never run.  Title APCs are
+ * delivered as kernel APCs throughout -- the async-IO completion path does
+ * the same -- which is what makes the routine run either way.
+ */
+NTSTATUS NTAPI
+XeNtSetTimerEx(HANDLE TimerHandle, PLARGE_INTEGER DueTime,
+                 PTIMER_APC_ROUTINE TimerApcRoutine, KPROCESSOR_MODE ApcMode,
+                 PVOID TimerContext, BOOLEAN WakeTimer, LONG Period,
+                 PBOOLEAN PreviousState)
+{
+    UNREFERENCED_PARAMETER(ApcMode);
+    return NtSetTimer(TimerHandle, DueTime, TimerApcRoutine, TimerContext,
+                      WakeTimer, Period, PreviousState);
+}
+
+NTSTATUS NTAPI
+XeNtQueryTimer(HANDLE TimerHandle, PVOID TimerInformation)
+{
+    return NtQueryTimer(TimerHandle, TimerBasicInformation, TimerInformation,
+                        sizeof(TIMER_BASIC_INFORMATION), NULL);
 }
 
 /* Xbox HalGetInterruptVector takes just an IRQ and yields the IDT vector

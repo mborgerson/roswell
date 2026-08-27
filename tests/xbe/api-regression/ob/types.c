@@ -38,6 +38,7 @@ static bool t_thread(void)    { return check_type("PsThreadObjectType",   &PsThr
 static bool t_event(void)     { return check_type("ExEventObjectType",    &ExEventObjectType); }
 static bool t_semaphore(void) { return check_type("ExSemaphoreObjectType",&ExSemaphoreObjectType); }
 static bool t_mutant(void)    { return check_type("ExMutantObjectType",   &ExMutantObjectType); }
+static bool t_timer(void)     { return check_type("ExTimerObjectType",    &ExTimerObjectType); }
 static bool t_file(void)      { return check_type("IoFileObjectType",     &IoFileObjectType); }
 static bool t_device(void)    { return check_type("IoDeviceObjectType",   &IoDeviceObjectType); }
 
@@ -46,6 +47,7 @@ static const test_entry_t ob_types_entries[] = {
     {"event",     t_event},
     {"semaphore", t_semaphore},
     {"mutant",    t_mutant},
+    {"timer",     t_timer},
     {"file",      t_file},
     {"device",    t_device},
 };

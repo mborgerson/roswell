@@ -22,6 +22,7 @@ XBOX_OBJECT_TYPE XePsThreadObjectType   = XB_OT('erhT');
 XBOX_OBJECT_TYPE XeExEventObjectType    = XB_OT('tnvE');
 XBOX_OBJECT_TYPE XeExSemaphoreObjectType = XB_OT('ameS');
 XBOX_OBJECT_TYPE XeExMutantObjectType   = XB_OT('atuM');
+XBOX_OBJECT_TYPE XeExTimerObjectType    = XB_OT('emiT');
 XBOX_OBJECT_TYPE XeIoFileObjectType     = XB_OT('eliF');
 XBOX_OBJECT_TYPE XeIoDeviceObjectType   = XB_OT('iveD');
 XBOX_OBJECT_TYPE XeObDirectoryObjectType = XB_OT('eriD');

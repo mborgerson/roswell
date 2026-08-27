@@ -23,6 +23,7 @@ extern XBOX_OBJECT_TYPE XePsThreadObjectType;
 extern XBOX_OBJECT_TYPE XeExEventObjectType;
 extern XBOX_OBJECT_TYPE XeExSemaphoreObjectType;
 extern XBOX_OBJECT_TYPE XeExMutantObjectType;
+extern XBOX_OBJECT_TYPE XeExTimerObjectType;
 extern XBOX_OBJECT_TYPE XeIoFileObjectType;
 extern XBOX_OBJECT_TYPE XeIoDeviceObjectType;
 extern XBOX_OBJECT_TYPE XeObDirectoryObjectType;
