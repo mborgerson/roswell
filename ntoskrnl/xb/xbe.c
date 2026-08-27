@@ -847,6 +847,13 @@ XeIoStartNextPacket(_In_ PVOID DeviceObject)
     IoStartNextPacket((PDEVICE_OBJECT)DeviceObject, FALSE);
 }
 
+/* Same drop of the cancelable flag, for the by-key form. */
+VOID NTAPI
+XeIoStartNextPacketByKey(_In_ PVOID DeviceObject, _In_ ULONG Key)
+{
+    IoStartNextPacketByKey((PDEVICE_OBJECT)DeviceObject, FALSE, Key);
+}
+
 /* Xbox has no quota to charge; the packet always comes from the pool. */
 PVOID NTAPI
 XeIoAllocateIrp(_In_ CCHAR StackSize)
