@@ -164,6 +164,7 @@
 142  KeSaveFloatingPointState
 140  KeResumeThread                    # returns the pre-resume count
 143  KeSetBasePriorityThread
+144  KeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
 145  KeSetEvent
 146  KeSetEventBoostPriority
 147                                   # Xbox-only, no NT equiv

@@ -1,5 +1,5 @@
 /*
- * Thread suspend and resume.
+ * Thread suspend / resume and the boost-disable flag.
  *
  * Both levels of the same counter are covered: the Nt pair works on a
  * handle and reports the count through a pointer, the Ke pair works on the
@@ -13,6 +13,10 @@
 #ifndef STATUS_THREAD_IS_TERMINATING
 #define STATUS_THREAD_IS_TERMINATING ((NTSTATUS)0xC000004BL)
 #endif
+
+/* nxdk declares KeSetDisableBoostThread as returning LOGICAL; the console
+ * returns a BOOLEAN, so only the low byte is meaningful. */
+typedef BOOLEAN (NTAPI *disable_boost_fn)(PKTHREAD, BOOLEAN);
 
 #define SPIN_SLICE_MS 2
 
@@ -228,6 +232,31 @@ static bool suspending_a_terminated_thread_is_refused(void)
     return true;
 }
 
+static bool disable_boost_returns_the_previous_setting(void)
+{
+    disable_boost_fn set_boost = (disable_boost_fn)KeSetDisableBoostThread;
+    HANDLE h;
+    PKTHREAD thread;
+    NTSTATUS s;
+    BOOLEAN a, b, c, d;
+
+    s = start_spinner(&h, &thread);
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("start spinner: 0x%08x", (unsigned)s);
+
+    a = set_boost(thread, TRUE);
+    b = set_boost(thread, TRUE);
+    c = set_boost(thread, FALSE);
+    d = set_boost(thread, FALSE);
+    stop_spinner(h, thread);
+
+    ASSERT_EQ_U32(a, FALSE);
+    ASSERT_EQ_U32(b, TRUE);
+    ASSERT_EQ_U32(c, TRUE);
+    ASSERT_EQ_U32(d, FALSE);
+    return true;
+}
+
 static const test_entry_t ke_threadstate_entries[] = {
     { "nt_suspend_and_resume_report_the_previous_count",
       nt_suspend_and_resume_report_the_previous_count, NULL },
@@ -237,6 +266,8 @@ static const test_entry_t ke_threadstate_entries[] = {
       ke_suspend_and_resume_return_the_previous_count, NULL },
     { "suspending_a_terminated_thread_is_refused",
       suspending_a_terminated_thread_is_refused, NULL },
+    { "disable_boost_returns_the_previous_setting",
+      disable_boost_returns_the_previous_setting, NULL },
 };
 
 DEFINE_GROUP(ke_threadstate, "ke/threadstate");
