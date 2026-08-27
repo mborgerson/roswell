@@ -166,6 +166,10 @@ NTSTATUS NTAPI NxVmAllocateVirtualMemory(IN OUT PVOID *BaseAddress,
 NTSTATUS NTAPI NxVmFreeVirtualMemory(IN OUT PVOID *BaseAddress,
                                      IN OUT PSIZE_T RegionSize,
                                      IN ULONG FreeType);
+NTSTATUS NTAPI NxVmProtectVirtualMemory(IN OUT PVOID *BaseAddress,
+                                        IN OUT PSIZE_T RegionSize,
+                                        IN ULONG NewProtect,
+                                        OUT PULONG OldProtect);
 NTSTATUS NTAPI NxVmQueryVirtualMemory(IN PVOID Address, OUT PVOID MbiOut);
 BOOLEAN NxVmOwnsAddress(IN PVOID Address);
 ULONG NxVmQueryAddressProtect(IN PVOID Address);

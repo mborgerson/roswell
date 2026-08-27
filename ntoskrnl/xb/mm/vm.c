@@ -769,6 +769,78 @@ NxVmSetAddressProtect(
     ExReleaseFastMutex(&NxvMutex);
 }
 
+/* PUBLIC: PROTECT **********************************************************/
+
+/*
+ * NtProtectVirtualMemory's worker.  Unlike NxVmSetAddressProtect -- the
+ * Mm-level hint, which refuses PAGE_NOACCESS and skips pages that are
+ * already inaccessible -- this one moves committed pages in and out of
+ * PAGE_NOACCESS in both directions, which is what the console does.
+ *
+ * The whole range is validated before any page changes, so a request
+ * that runs off the end of its reservation or covers an uncommitted
+ * page leaves both the protection and OldProtect untouched.
+ */
+NTSTATUS
+NTAPI
+NxVmProtectVirtualMemory(
+    IN OUT PVOID *BaseAddress,
+    IN OUT PSIZE_T RegionSize,
+    IN ULONG NewProtect,
+    OUT PULONG OldProtect)
+{
+    ULONG_PTR Start, End, Va;
+    NXV_REGION *Region;
+    ULONG PteBits, Old;
+    NTSTATUS Status = STATUS_SUCCESS;
+
+    NxvEnsureInit();
+
+    if (BaseAddress == NULL || RegionSize == NULL || OldProtect == NULL)
+        return STATUS_INVALID_PARAMETER;
+    if (!NxvProtectToPte(NewProtect, &PteBits))
+        return STATUS_INVALID_PAGE_PROTECTION;
+
+    Start = ROUND_DOWN((ULONG_PTR)*BaseAddress, PAGE_SIZE);
+    End = ROUND_UP((ULONG_PTR)*BaseAddress + *RegionSize, PAGE_SIZE);
+    if (End <= Start)
+        return STATUS_INVALID_PARAMETER;
+
+    ExAcquireFastMutex(&NxvMutex);
+
+    Region = NxvFindRegion(Start);
+    if (Region == NULL || End > Region->Base + Region->Size)
+    {
+        Status = STATUS_CONFLICTING_ADDRESSES;
+        goto out;
+    }
+
+    for (Va = Start; Va < End; Va += PAGE_SIZE)
+    {
+        if (!(NXV_PDE(Va) & NXV_PTE_P) || NXV_PTE(Va) == 0)
+        {
+            Status = STATUS_NOT_COMMITTED;
+            goto out;
+        }
+    }
+
+    Old = NxvPteToProtect(NXV_PTE(Start));
+
+    for (Va = Start; Va < End; Va += PAGE_SIZE)
+    {
+        NXV_PTE(Va) = (NXV_PTE(Va) & ~(ULONG)(PAGE_SIZE - 1)) | PteBits;
+        KeInvalidateTlbEntry((PVOID)Va);
+    }
+
+    *BaseAddress = (PVOID)Start;
+    *RegionSize = End - Start;
+    *OldProtect = Old;
+
+out:
+    ExReleaseFastMutex(&NxvMutex);
+    return Status;
+}
+
 /* PUBLIC: STATISTICS *******************************************************/
 
 SIZE_T
