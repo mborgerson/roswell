@@ -59,9 +59,17 @@ IopDeleteDevice(IN PVOID ObjectBody)
     if (DeviceNode)
         IopFreeDeviceNode(DeviceNode);
 
-    /* Dereference the driver object, referenced in IoCreateDevice */
+    /* Dereference the driver object, referenced in IoCreateDevice.  A
+     * driver object the title owns is a plain structure that was never
+     * referenced, and the header this would decrement is whatever
+     * precedes it in the title's image. */
+#ifdef SARCH_XBOX
+    if (DeviceObject->DriverObject && !DeviceObject->TitleOwnedDriver)
+        ObDereferenceObject(DeviceObject->DriverObject);
+#else
     if (DeviceObject->DriverObject)
         ObDereferenceObject(DeviceObject->DriverObject);
+#endif
 }
 
 static PDEVICE_OBJECT
