@@ -206,12 +206,111 @@ static bool t_duplicate_close_source(void)
     return true;
 }
 
+/* A symbolic link the IO manager creates is permanent: its name stays
+ * in the directory when the last handle to it closes.
+ * ObMakeTemporaryObject clears that bit, so the name is dropped on the
+ * close instead -- the step IoDeleteDevice takes on a named device
+ * object before releasing it.  Closing a handle is what triggers the
+ * check, so the link is opened rather than merely referenced. */
+static bool link_resolves(const char *link_name)
+{
+    OBJECT_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    HANDLE h = NULL;
+
+    init_str(&name, link_name);
+    oa.RootDirectory = NULL;
+    oa.ObjectName    = &name;
+    oa.Attributes    = OBJ_CASE_INSENSITIVE;
+    if (!NT_SUCCESS(NtOpenSymbolicLinkObject(&h, &oa)))
+        return false;
+    NtClose(h);
+    return true;
+}
+
+/* Create the link, open it, and hand back both the handle and the
+ * object behind it. */
+static NTSTATUS hold_link(const char *link_name, HANDLE *h, PVOID *object)
+{
+    OBJECT_STRING name, target;
+    OBJECT_ATTRIBUTES oa;
+    NTSTATUS s;
+
+    init_str(&name, link_name);
+    init_str(&target, LINK_TARGET);
+    *h = NULL;
+    *object = NULL;
+
+    s = IoCreateSymbolicLink(&name, &target);
+    if (!NT_SUCCESS(s))
+        return s;
+
+    oa.RootDirectory = NULL;
+    oa.ObjectName    = &name;
+    oa.Attributes    = OBJ_CASE_INSENSITIVE;
+    s = NtOpenSymbolicLinkObject(h, &oa);
+    if (!NT_SUCCESS(s)) {
+        IoDeleteSymbolicLink(&name);
+        return s;
+    }
+
+    s = ObReferenceObjectByHandle(*h, NULL, object);
+    if (!NT_SUCCESS(s)) {
+        NtClose(*h);
+        IoDeleteSymbolicLink(&name);
+    }
+    return s;
+}
+
+static bool t_make_temporary_unnames(void)
+{
+    static const char PERM_NAME[] = "\\??\\nxkrnlPermLink";
+    static const char TEMP_NAME[] = "\\??\\nxkrnlTempLink";
+    OBJECT_STRING perm;
+    HANDLE h;
+    PVOID object;
+    bool perm_named, temp_named_held, temp_named_closed;
+    NTSTATUS s;
+
+    /* Permanent: the name survives the close. */
+    s = hold_link(PERM_NAME, &h, &object);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    ObfDereferenceObject(object);
+    NtClose(h);
+    perm_named = link_resolves(PERM_NAME);
+    init_str(&perm, PERM_NAME);
+    IoDeleteSymbolicLink(&perm);
+
+    /* Temporary: the same link loses its name on the close, but not on
+     * the ObMakeTemporaryObject call itself. */
+    s = hold_link(TEMP_NAME, &h, &object);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    ObMakeTemporaryObject(object);
+    temp_named_held = link_resolves(TEMP_NAME);
+    ObfDereferenceObject(object);
+    NtClose(h);
+    temp_named_closed = link_resolves(TEMP_NAME);
+
+    if (!perm_named)
+        FAIL_AND_RETURN("permanent link lost its name on close");
+    if (!temp_named_held)
+        FAIL_AND_RETURN("temporary link unnamed while still open");
+    if (temp_named_closed) {
+        OBJECT_STRING temp;
+        init_str(&temp, TEMP_NAME);
+        IoDeleteSymbolicLink(&temp);
+        FAIL_AND_RETURN("temporary link kept its name past its last handle");
+    }
+    return true;
+}
+
 static const test_entry_t ob_symlink_entries[] = {
     {"create_open_query_delete", t_create_open_query_delete},
     {"query_short_buffer",       t_query_short_buffer},
     {"query_directory_object",   t_query_directory_object},
     {"duplicate_keeps_object_alive", t_duplicate_keeps_object_alive},
     {"duplicate_close_source",   t_duplicate_close_source},
+    {"make_temporary_unnames",   t_make_temporary_unnames},
 };
 
 DEFINE_GROUP(ob_symlink, "ob/symlink");
