@@ -120,13 +120,13 @@
 108  KeInitializeEvent
 109  XeKeInitializeInterrupt         # Xbox form: no spin lock, no SMP args; shadow buffer
 110  KeInitializeMutant
-111                                   # KQUEUE size mismatch risk -- revisit with adapter
+111  KeInitializeQueue                # KQUEUE layout matches; direct
 112  KeInitializeSemaphore
 113  KeInitializeTimerEx              # KTIMER layout matches; direct
 114  KeInsertByKeyDeviceQueue
 115  KeInsertDeviceQueue
-116                                   # depends on KQUEUE
-117                                   # depends on KQUEUE
+116  KeInsertHeadQueue
+117  KeInsertQueue
 118                                   # XXX sig differs from NT, needs adapter
 119  KeInsertQueueDpc                 # native 28-byte KDPC; direct
 120  KeInterruptTime                  # live interrupt-time counter; clock advances it
@@ -145,10 +145,11 @@
 133  KeRemoveByKeyDeviceQueue
 134  KeRemoveDeviceQueue
 135  KeRemoveEntryDeviceQueue
-136                                   # depends on KQUEUE
+136  KeRemoveQueue
 137  KeRemoveQueueDpc                 # native 28-byte KDPC; direct
 138  KeResetEvent
 139  KeRestoreFloatingPointState
+141  KeRundownQueue
 142  KeSaveFloatingPointState
 143  KeSetBasePriorityThread
 145  KeSetEvent
