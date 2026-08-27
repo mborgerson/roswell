@@ -2067,6 +2067,69 @@ $if (_WDMDDK_)
 
 #define IRP_MN_REGINFO_EX                 0x0b
 
+#ifdef SARCH_XBOX
+/* Titles carry block-device drivers of their own and the kernel
+ * dispatches into them, so title code reads the file object it is handed
+ * -- the head through 0x48 is the console's and is contract.  Note that
+ * CurrentByteOffset lands at 0x14: the console packs to 4 rather than
+ * aligning the LARGE_INTEGER.
+ *
+ * The console publishes its flags as a single UCHAR with a numbering of
+ * its own (FO_XBOX_* below).  Ours is a 24-value ULONG that a UCHAR would
+ * silently truncate, so Flags stays wide in the appended region and the
+ * published byte is a mirror written once the open has succeeded. */
+#include <pshpack4.h>
+typedef struct _FILE_OBJECT {
+  CSHORT Type;                                        /* 0x00 */
+  BOOLEAN DeletePending:1;                            /* 0x02 */
+  BOOLEAN ReadAccess:1;
+  BOOLEAN WriteAccess:1;
+  BOOLEAN DeleteAccess:1;
+  BOOLEAN SharedRead:1;
+  BOOLEAN SharedWrite:1;
+  BOOLEAN SharedDelete:1;
+  BOOLEAN Reserved:1;
+  UCHAR PublishedFlags;                               /* 0x03 */
+  PDEVICE_OBJECT DeviceObject;                        /* 0x04 */
+  PVOID FsContext;                                    /* 0x08 */
+  PVOID FsContext2;                                   /* 0x0c */
+  NTSTATUS FinalStatus;                               /* 0x10 */
+  LARGE_INTEGER CurrentByteOffset;                    /* 0x14 */
+  struct _FILE_OBJECT *RelatedFileObject;             /* 0x1c */
+  volatile PIO_COMPLETION_CONTEXT CompletionContext;  /* 0x20 */
+  LONG LockCount;                                     /* 0x24 */
+  KEVENT Lock;                                        /* 0x28 */
+  KEVENT Event;                                       /* 0x38 */
+  /* Past the title-visible prefix. */                /* 0x48 */
+  CSHORT Size;
+  PVPB Vpb;
+  PSECTION_OBJECT_POINTERS SectionObjectPointer;
+  PVOID PrivateCacheMap;
+  BOOLEAN LockOperation;
+  ULONG Flags;
+  UNICODE_STRING FileName;
+  volatile ULONG Waiters;
+  volatile ULONG Busy;
+  PVOID LastLock;
+  KSPIN_LOCK IrpListLock;
+  LIST_ENTRY IrpList;
+  volatile PVOID FileObjectExtension;
+} FILE_OBJECT, *PFILE_OBJECT;
+#include <poppack.h>
+
+/* Console values for the published flags byte, measured on retail.  Two
+ * bits of the byte were never seen set (0x10, 0x80) and three of our own
+ * flags -- write-through, delete-on-close and file-modified -- are not
+ * carried here at all; whatever tracks those, it is not this byte. */
+#define FO_XBOX_SYNCHRONOUS_IO            0x01
+#define FO_XBOX_ALERTABLE_IO              0x02
+#define FO_XBOX_NO_INTERMEDIATE_BUFFERING 0x04
+#define FO_XBOX_SEQUENTIAL_ONLY           0x08
+/* Set on every successful open -- file, directory, volume and raw device
+ * alike.  What it names on the console is not established. */
+#define FO_XBOX_OPENED                    0x20
+#define FO_XBOX_RANDOM_ACCESS             0x40
+#else
 typedef struct _FILE_OBJECT {
   CSHORT Type;
   CSHORT Size;
@@ -2099,6 +2162,7 @@ typedef struct _FILE_OBJECT {
   LIST_ENTRY IrpList;
   volatile PVOID FileObjectExtension;
 } FILE_OBJECT, *PFILE_OBJECT;
+#endif
 
 typedef struct _IO_ERROR_LOG_PACKET {
   UCHAR MajorFunctionCode;

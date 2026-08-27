@@ -316,6 +316,37 @@ IopCheckTopDeviceHint(IN OUT PDEVICE_OBJECT * DeviceObject,
     return STATUS_INVALID_DEVICE_OBJECT_PARAMETER;
 }
 
+#ifdef SARCH_XBOX
+/* The console publishes file-object flags as a UCHAR at offset 0x03 with a
+ * numbering of its own, while ours stays a wide ULONG in the appended
+ * region.  Mirror the console-visible bits onto the published byte once
+ * the open has succeeded -- that is where the whole set is decided, and
+ * nothing the console shows here changes afterwards. */
+static
+VOID
+IopPublishFileObjectFlags(IN PFILE_OBJECT FileObject)
+{
+    UCHAR Published = FO_XBOX_OPENED;
+    ULONG Flags = FileObject->Flags;
+
+    if (Flags & FO_SYNCHRONOUS_IO) Published |= FO_XBOX_SYNCHRONOUS_IO;
+    if (Flags & FO_ALERTABLE_IO) Published |= FO_XBOX_ALERTABLE_IO;
+    if (Flags & FO_SEQUENTIAL_ONLY) Published |= FO_XBOX_SEQUENTIAL_ONLY;
+    if (Flags & FO_RANDOM_ACCESS) Published |= FO_XBOX_RANDOM_ACCESS;
+
+    /* An open that bypasses a file system -- a raw device or a volume --
+     * reads as unbuffered on the console whether or not it asked to be. */
+    if (Flags & (FO_NO_INTERMEDIATE_BUFFERING |
+                 FO_DIRECT_DEVICE_OPEN |
+                 FO_VOLUME_OPEN))
+    {
+        Published |= FO_XBOX_NO_INTERMEDIATE_BUFFERING;
+    }
+
+    FileObject->PublishedFlags = Published;
+}
+#endif
+
 NTSTATUS
 NTAPI
 IopParseDevice(IN PVOID ParseObject,
@@ -881,6 +912,12 @@ IopParseDevice(IN PVOID ParseObject,
             /* Clear the file object */
             RtlZeroMemory(FileObject, ObjectSize);
 
+#ifdef SARCH_XBOX
+            /* The console publishes an unowned file lock as -1 and counts
+             * owners up from there. */
+            FileObject->LockCount = -1;
+#endif
+
             /* Check if this is Synch I/O */
             if (OpenPacket->CreateOptions &
                 (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT))
@@ -1273,6 +1310,9 @@ IopParseDevice(IN PVOID ParseObject,
         }
 
         /* Reference the object and set the parse check */
+#ifdef SARCH_XBOX
+        IopPublishFileObjectFlags(FileObject);
+#endif
         ObReferenceObject(FileObject);
         *Object = FileObject;
         OpenPacket->FinalStatus = IoStatusBlock.Status;

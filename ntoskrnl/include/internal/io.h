@@ -348,6 +348,27 @@ typedef struct _EXTENDED_IO_REMOVE_LOCK
     IO_REMOVE_LOCK_DBG_BLOCK Dbg;
 } EXTENDED_IO_REMOVE_LOCK, *PEXTENDED_IO_REMOVE_LOCK;
 
+#ifdef SARCH_XBOX
+//
+// A title reads the file object the kernel hands its dispatch routine, so
+// the console's head is contract.  CurrentByteOffset at 0x14 is the one
+// that bites: the console packs to 4 instead of aligning the
+// LARGE_INTEGER, and getting it wrong shifts the whole tail by four.
+//
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, PublishedFlags) == 0x03);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, DeviceObject) == 0x04);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, FsContext) == 0x08);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, FsContext2) == 0x0c);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, FinalStatus) == 0x10);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, CurrentByteOffset) == 0x14);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, RelatedFileObject) == 0x1c);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, CompletionContext) == 0x20);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, LockCount) == 0x24);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, Lock) == 0x28);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, Event) == 0x38);
+C_ASSERT(FIELD_OFFSET(FILE_OBJECT, Size) == 0x48);
+#endif
+
 //
 // Dummy File Object used inside the Open Packet so that OB knows how to
 // deal with the Object Pointer even though it's not a real file.
