@@ -23,11 +23,16 @@
 /* The console's compacted dispatch table. */
 #define XBOX_IRP_MJ_READ  2
 #define XBOX_IRP_MJ_WRITE 3
+#define XBOX_IRP_MJ_DEVICE_CONTROL 10
 
 #define FILE_DEVICE_UNKNOWN 0x00000022u
 
 #define READ_INFO  0x00001111u
 #define WRITE_INFO 0x00002222u
+#define IOCTL_INFO 0x00003333u
+
+/* METHOD_NEITHER, so the buffers reach the driver as the caller's. */
+#define TEST_IOCTL 0x00222007u
 
 #define XFER_LEN    0x200
 #define XFER_OFFSET 0x4000
@@ -41,21 +46,25 @@ typedef struct {
     ULONG off_low;        /* stack Parameters.Read.ByteOffset  (+0x0c) */
     ULONG off_high;       /*                                   (+0x10) */
     PVOID stack_device;   /* stack DeviceObject                (+0x14) */
+    ULONG raw[6];         /* stack header + parameters              */
 } obs_t;
 
-static obs_t g_read_obs, g_write_obs;
+static obs_t g_read_obs, g_write_obs, g_ioctl_obs;
 
 static DRIVER_OBJECT g_driver;
 static PDEVICE_OBJECT g_device;
 static UCHAR g_buf[XFER_LEN];
+static UCHAR g_in_buf[32];
+static UCHAR g_out_buf[64];
 
 static bool g_setup_done, g_setup_ok;
 static NTSTATUS g_create_dev_status = STATUS_UNSUCCESSFUL;
-static PIRP g_read_irp, g_write_irp;
+static PIRP g_read_irp, g_write_irp, g_ioctl_irp;
 static NTSTATUS g_read_call_status = STATUS_UNSUCCESSFUL;
 static NTSTATUS g_write_call_status = STATUS_UNSUCCESSFUL;
+static NTSTATUS g_ioctl_call_status = STATUS_UNSUCCESSFUL;
 static NTSTATUS g_read_wait_status = STATUS_UNSUCCESSFUL;
-static IO_STATUS_BLOCK g_read_iosb, g_write_iosb;
+static IO_STATUS_BLOCK g_read_iosb, g_write_iosb, g_ioctl_iosb;
 
 static const char DEVICE_NAME[] = "\\Device\\nxkrnlfsdreq";
 
@@ -75,6 +84,8 @@ static NTSTATUS NTAPI test_dispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             o = &g_read_obs;
         else if (major == XBOX_IRP_MJ_WRITE)
             o = &g_write_obs;
+        else if (major == XBOX_IRP_MJ_DEVICE_CONTROL)
+            o = &g_ioctl_obs;
 
         if (o != NULL) {
             o->calls++;
@@ -85,12 +96,17 @@ static NTSTATUS NTAPI test_dispatch(PDEVICE_OBJECT DeviceObject, PIRP Irp)
             o->off_low = sp[3];
             o->off_high = sp[4];
             o->stack_device = (PVOID)sp[5];
+            memcpy(o->raw, sp, sizeof(o->raw));
         }
     }
 
     Irp->IoStatus.Status = STATUS_SUCCESS;
-    Irp->IoStatus.Information =
-        (major == XBOX_IRP_MJ_WRITE) ? WRITE_INFO : READ_INFO;
+    if (major == XBOX_IRP_MJ_WRITE)
+        Irp->IoStatus.Information = WRITE_INFO;
+    else if (major == XBOX_IRP_MJ_DEVICE_CONTROL)
+        Irp->IoStatus.Information = IOCTL_INFO;
+    else
+        Irp->IoStatus.Information = READ_INFO;
 
     IofCompleteRequest(Irp, 0);
     return STATUS_SUCCESS;
@@ -145,6 +161,21 @@ static bool setup(void)
                                                &event, &g_write_iosb);
     if (g_write_irp != NULL) {
         g_write_call_status = IofCallDriver(g_device, g_write_irp);
+        KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, &timeout);
+    }
+
+    /* Control request: same build-then-dispatch shape, different
+     * builder and a parameter block of its own. */
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    memset(&g_ioctl_iosb, 0xEE, sizeof(g_ioctl_iosb));
+    memset(g_in_buf, 0x5C, sizeof(g_in_buf));
+    memset(g_out_buf, 0, sizeof(g_out_buf));
+    g_ioctl_irp = IoBuildDeviceIoControlRequest(TEST_IOCTL, g_device,
+                                                g_in_buf, sizeof(g_in_buf),
+                                                g_out_buf, sizeof(g_out_buf),
+                                                FALSE, &event, &g_ioctl_iosb);
+    if (g_ioctl_irp != NULL) {
+        g_ioctl_call_status = IofCallDriver(g_device, g_ioctl_irp);
         KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, &timeout);
     }
 
@@ -239,6 +270,39 @@ static bool t_completion_signals_and_reports(void)
     return true;
 }
 
+/* A control request is filed as major 10 on the console. */
+static bool t_ioctl_build_and_dispatch(void)
+{
+    if (!setup())
+        FAIL_SETUP();
+    ASSERT_NOT_NULL(g_ioctl_irp);
+    if (g_ioctl_obs.calls != 1)
+        FAIL_AND_RETURN("ioctl dispatched %u times, expected 1",
+                        (unsigned)g_ioctl_obs.calls);
+    ASSERT_EQ_U32(g_ioctl_obs.major, XBOX_IRP_MJ_DEVICE_CONTROL);
+    ASSERT_NTSTATUS(g_ioctl_call_status, STATUS_SUCCESS);
+    ASSERT_EQ_U32(g_ioctl_iosb.Information, IOCTL_INFO);
+    return true;
+}
+
+/* The builder fills the console's control arm: output length, then the
+ * input buffer itself, its length, and the code last. */
+static bool t_ioctl_build_parameters(void)
+{
+    if (!setup())
+        FAIL_SETUP();
+    if (g_ioctl_obs.calls == 0)
+        FAIL_AND_RETURN("ioctl was never dispatched");
+    ASSERT_EQ_U32(g_ioctl_obs.raw[1], sizeof(g_out_buf));
+    if ((PVOID)g_ioctl_obs.raw[2] != (PVOID)g_in_buf)
+        FAIL_AND_RETURN("InputBuffer at +0x08: got 0x%08x expected %p",
+                        (unsigned)g_ioctl_obs.raw[2], (void *)g_in_buf);
+    ASSERT_EQ_U32(g_ioctl_obs.raw[3], sizeof(g_in_buf));
+    ASSERT_EQ_U32(g_ioctl_obs.raw[4], TEST_IOCTL);
+    ASSERT_EQ_PTR(g_ioctl_obs.user_buffer, g_out_buf);
+    return true;
+}
+
 static const test_entry_t io_fsdreq_entries[] = {
     {"build_returns_irp", t_build_returns_irp},
     {"read_major_is_two", t_read_major_is_two},
@@ -247,6 +311,8 @@ static const test_entry_t io_fsdreq_entries[] = {
     {"buffer_passed_through", t_buffer_passed_through},
     {"call_driver_returns_status", t_call_driver_returns_status},
     {"completion_signals_and_reports", t_completion_signals_and_reports},
+    {"ioctl_build_and_dispatch", t_ioctl_build_and_dispatch},
+    {"ioctl_build_parameters", t_ioctl_build_parameters},
 };
 
 DEFINE_GROUP(io_fsdreq, "io/fsdreq");

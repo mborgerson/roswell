@@ -85,6 +85,7 @@
 58   XeInterlockedPushEntrySList
 
 # --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
+61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
 62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
 67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
