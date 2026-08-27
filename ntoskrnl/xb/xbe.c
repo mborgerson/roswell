@@ -2488,6 +2488,193 @@ XeKeInitializeApc(PXBE_KAPC Apc,
     }
 }
 
+/* Insertion is the other half, and it needs a real NT KAPC.  Shadow the
+ * title's structure with one allocated at insert time and released when
+ * the APC leaves the queue -- delivered or run down -- so an APC that is
+ * initialised and never inserted costs nothing.  Both callbacks go
+ * through a trampoline: the title's routines expect the pointer the
+ * title passed, not the shadow, and the rundown path in ps/kill.c frees
+ * the KAPC itself when no rundown routine is registered, which would be
+ * the wrong pointer here.
+ */
+
+/* KeInitializeApc / KeInsertQueueApc are NDK prototypes, not part of the
+ * DDK headers xbe.c includes -- declare them locally. */
+NTKERNELAPI
+VOID
+NTAPI
+KeInitializeApc(IN PKAPC Apc,
+                IN PKTHREAD Thread,
+                IN KAPC_ENVIRONMENT TargetEnvironment,
+                IN PKKERNEL_ROUTINE KernelRoutine,
+                IN PKRUNDOWN_ROUTINE RundownRoutine OPTIONAL,
+                IN PKNORMAL_ROUTINE NormalRoutine OPTIONAL,
+                IN KPROCESSOR_MODE Mode OPTIONAL,
+                IN PVOID Context OPTIONAL);
+
+NTKERNELAPI
+BOOLEAN
+NTAPI
+KeInsertQueueApc(IN PKAPC Apc,
+                 IN PVOID SystemArgument1,
+                 IN PVOID SystemArgument2,
+                 IN KPRIORITY PriorityBoost);
+
+typedef VOID (NTAPI *PXBE_APC_KERNEL_ROUTINE)(PVOID Apc,
+                                              PKNORMAL_ROUTINE *NormalRoutine,
+                                              PVOID *NormalContext,
+                                              PVOID *SystemArgument1,
+                                              PVOID *SystemArgument2);
+typedef VOID (NTAPI *PXBE_APC_RUNDOWN_ROUTINE)(PVOID Apc);
+
+typedef struct _XBE_APC_SHADOW
+{
+    PXBE_KAPC TitleApc;
+    KAPC      NtApc;
+} XBE_APC_SHADOW, *PXBE_APC_SHADOW;
+
+/* A title reaches a thread object either through KeGetCurrentThread, which
+ * hands back the Xbox-shaped shadow embedded in the KTHREAD, or through the
+ * object manager, which hands back the KTHREAD itself.  The shadow's first
+ * bytes are zeroed, so the dispatcher header tells the two apart. */
+static PKTHREAD
+XeResolveThread(_In_opt_ PVOID Thread)
+{
+    PKTHREAD Resolved;
+
+    if (Thread == NULL)
+        return NULL;
+
+    if (((PKTHREAD)Thread)->Header.Type == ThreadObject)
+        return (PKTHREAD)Thread;
+
+    Resolved = CONTAINING_RECORD(Thread, KTHREAD, XeXboxShadow);
+    if (Resolved->Header.Type != ThreadObject)
+    {
+        XbDbg("APC: %p is neither a thread nor a thread shadow\n", Thread);
+        return NULL;
+    }
+    return Resolved;
+}
+
+static VOID NTAPI
+XeApcKernelTrampoline(PKAPC Apc,
+                        PKNORMAL_ROUTINE *NormalRoutine,
+                        PVOID *NormalContext,
+                        PVOID *SystemArgument1,
+                        PVOID *SystemArgument2)
+{
+    PXBE_APC_SHADOW Shadow = CONTAINING_RECORD(Apc, XBE_APC_SHADOW, NtApc);
+    PXBE_KAPC Title = Shadow->TitleApc;
+    PXBE_APC_KERNEL_ROUTINE Routine =
+        (PXBE_APC_KERNEL_ROUTINE)Title->KernelRoutine;
+
+    /* The kernel has already dequeued it; mirror that, and the arguments
+     * it delivered, into the structure the title can see. */
+    Title->Inserted = FALSE;
+    Title->ApcListEntry.Flink = NULL;
+    Title->ApcListEntry.Blink = NULL;
+    Title->SystemArgument1 = *SystemArgument1;
+    Title->SystemArgument2 = *SystemArgument2;
+
+    /* Release the shadow before the callback: re-queueing the same KAPC
+     * from inside the kernel routine is a legitimate thing to do. */
+    ExFreePoolWithTag(Shadow, XBE_TAG);
+
+    if (Routine != NULL)
+        Routine(Title, NormalRoutine, NormalContext,
+                SystemArgument1, SystemArgument2);
+}
+
+static VOID NTAPI
+XeApcRundownTrampoline(PKAPC Apc)
+{
+    PXBE_APC_SHADOW Shadow = CONTAINING_RECORD(Apc, XBE_APC_SHADOW, NtApc);
+    PXBE_KAPC Title = Shadow->TitleApc;
+    PXBE_APC_RUNDOWN_ROUTINE Routine =
+        (PXBE_APC_RUNDOWN_ROUTINE)Title->RundownRoutine;
+
+    Title->Inserted = FALSE;
+    Title->ApcListEntry.Flink = NULL;
+    Title->ApcListEntry.Blink = NULL;
+    ExFreePoolWithTag(Shadow, XBE_TAG);
+
+    if (Routine != NULL)
+        Routine(Title);
+}
+
+/* An inserted KAPC carries its shadow in the list entry: that is the field
+ * retail uses for its own queue linkage while the APC is queued, and it is
+ * the only way back to the shadow from the title's structure. */
+#define XeApcShadow(Apc)  ((PXBE_APC_SHADOW)(Apc)->ApcListEntry.Flink)
+
+BOOLEAN NTAPI
+XeKeInsertQueueApc(PXBE_KAPC Apc,
+                     PVOID SystemArgument1,
+                     PVOID SystemArgument2,
+                     KPRIORITY Increment)
+{
+    PXBE_APC_SHADOW Shadow;
+    PKTHREAD Thread;
+
+    if (Apc == NULL)
+        return FALSE;
+
+    /* The console stamps the arguments before it decides, so a refused
+     * insert re-arms an APC that is already queued.  Keep the shadow in
+     * step with it; at DISPATCH_LEVEL the target thread cannot be running,
+     * so the shadow cannot be delivered out from under this. */
+    if (Apc->Inserted)
+    {
+        KIRQL OldIrql;
+
+        KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
+        Apc->SystemArgument1 = SystemArgument1;
+        Apc->SystemArgument2 = SystemArgument2;
+        if (Apc->Inserted && XeApcShadow(Apc) != NULL)
+        {
+            XeApcShadow(Apc)->NtApc.SystemArgument1 = SystemArgument1;
+            XeApcShadow(Apc)->NtApc.SystemArgument2 = SystemArgument2;
+        }
+        KeLowerIrql(OldIrql);
+        return FALSE;
+    }
+
+    Apc->SystemArgument1 = SystemArgument1;
+    Apc->SystemArgument2 = SystemArgument2;
+
+    Thread = XeResolveThread(Apc->Thread);
+    if (Thread == NULL)
+        return FALSE;
+
+    Shadow = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Shadow), XBE_TAG);
+    if (Shadow == NULL)
+        return FALSE;
+
+    Shadow->TitleApc = Apc;
+    KeInitializeApc(&Shadow->NtApc, Thread, CurrentApcEnvironment,
+                    XeApcKernelTrampoline, XeApcRundownTrampoline,
+                    (PKNORMAL_ROUTINE)Apc->NormalRoutine,
+                    (KPROCESSOR_MODE)Apc->ApcMode, Apc->NormalContext);
+
+    /* Both marks have to be in place before the insert: a kernel APC on
+     * the running thread is delivered before it returns. */
+    Apc->ApcListEntry.Flink = (PLIST_ENTRY)Shadow;
+    Apc->ApcListEntry.Blink = (PLIST_ENTRY)Shadow;
+    Apc->Inserted = TRUE;
+
+    if (!KeInsertQueueApc(&Shadow->NtApc, SystemArgument1, SystemArgument2,
+                          Increment))
+    {
+        Apc->Inserted = FALSE;
+        Apc->ApcListEntry.Flink = NULL;
+        Apc->ApcListEntry.Blink = NULL;
+        ExFreePoolWithTag(Shadow, XBE_TAG);
+        return FALSE;
+    }
+    return TRUE;
+}
+
 /* KeInitializeInterrupt / Connect / Disconnect are NDK (ndk/kefuncs.h)
  * prototypes, not part of the DDK headers xbe.c includes -- declare them
  * locally. */

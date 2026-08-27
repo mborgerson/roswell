@@ -96,6 +96,7 @@ DECLARE_GROUP(ke_apc);
 DECLARE_GROUP(io_dismount);
 DECLARE_GROUP(ke_threadstate);
 DECLARE_GROUP(ke_apcinit);
+DECLARE_GROUP(ke_apcqueue);
 DECLARE_GROUP(ex_timer);
 
 static const test_group_t *const GROUPS[] = {
@@ -168,6 +169,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ke_apc,
     &g_group_ke_threadstate,
     &g_group_ke_apcinit,
+    &g_group_ke_apcqueue,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */

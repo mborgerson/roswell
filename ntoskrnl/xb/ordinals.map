@@ -146,7 +146,7 @@
 115  KeInsertDeviceQueue
 116  KeInsertHeadQueue
 117  KeInsertQueue
-118                                   # XXX sig differs from NT, needs adapter
+118  XeKeInsertQueueApc               # console KAPC shadowed by an NT one
 119  KeInsertQueueDpc                 # native 28-byte KDPC; direct
 120  KeInterruptTime                  # live interrupt-time counter; clock advances it
 121  KeIsExecutingDpc
