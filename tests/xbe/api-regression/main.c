@@ -88,6 +88,7 @@ DECLARE_GROUP(ke_queue);
 DECLARE_GROUP(io_irpalloc);
 DECLARE_GROUP(io_devlife);
 DECLARE_GROUP(io_asyncreq);
+DECLARE_GROUP(io_scatter);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -152,6 +153,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_irpalloc,
     &g_group_io_devlife,
     &g_group_io_asyncreq,
+    &g_group_io_scatter,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
     &g_group_kd_flags,

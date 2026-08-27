@@ -232,6 +232,7 @@
 217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
 218  NtQueryVolumeInformationFile
 219  XeNtReadFile
+220  XeNtReadFileScatter              # per-page IO, unbuffered handles only
 221  XeNtReleaseMutant
 224  NtResumeThread
 225  NtSetEvent
@@ -243,6 +244,7 @@
 234  NtWaitForSingleObjectEx       # the *Ex waits add a wait mode
 235  NtWaitForMultipleObjectsEx
 236  XeNtWriteFile
+237  XeNtWriteFileGather              # per-page IO, unbuffered handles only
 238  NtYieldExecution                 # direct; Zw thunks are gone (Zw==Nt)
 
 # --- Ob* (object manager) ------------------------------------------------ #
