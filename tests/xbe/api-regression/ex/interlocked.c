@@ -1,8 +1,12 @@
 /*
- * ExInterlockedAddLargeStatistic -- atomically add a ULONG increment to a
- * 64-bit statistic counter.  The ordinal was an unmapped bugcheck stub; the
- * routine is already in the kernel (ex asm), matches the Xbox FASTCALL @8
- * ABI exactly, and only needed an export to reference it.
+ * The interlocked ordinals a title can reach: the 64-bit statistic add
+ * and compare-exchange, and the plain 32-bit compare-exchange and
+ * exchange-add.
+ *
+ * All of them are __fastcall on the console, which is the detail worth
+ * covering -- the first two arguments arrive in ECX/EDX and any further
+ * one on the stack, so a wrapper declared with the wrong convention
+ * reads garbage for the tail arguments rather than failing to link.
  */
 
 #include "../harness.h"
@@ -73,9 +77,79 @@ static bool t_compare_exchange64(void)
     return true;
 }
 
+/* The plain fastcall InterlockedCompareExchange / InterlockedExchangeAdd
+ * at ordinals 51 and 55.  Argument ORDER is the thing worth pinning:
+ * both of CompareExchange's value arguments are plain LONGs, so swapping
+ * Exchange and Comparand still compiles, still links, and fails only on
+ * the values -- silently, and only when a comparison happens to match. */
+static bool t_compare_exchange(void)
+{
+    LONG dest, prev;
+
+    /* Comparand matches: the exchange happens and the OLD value comes
+     * back.  A swapped Exchange/Comparand pair would store 0x1111 here
+     * instead of 0x2222. */
+    dest = 0x1111;
+    prev = InterlockedCompareExchange(&dest, 0x2222, 0x1111);
+    ASSERT_EQ_U32(prev, 0x1111);
+    ASSERT_EQ_U32(dest, 0x2222);
+
+    /* Comparand does not match: the destination is left alone and the
+     * current value is still what comes back. */
+    dest = 0x1111;
+    prev = InterlockedCompareExchange(&dest, 0x2222, 0x3333);
+    ASSERT_EQ_U32(prev, 0x1111);
+    ASSERT_EQ_U32(dest, 0x1111);
+
+    /* Zero is a legitimate comparand, not an "unset" sentinel. */
+    dest = 0;
+    prev = InterlockedCompareExchange(&dest, 0x4444, 0);
+    ASSERT_EQ_U32(prev, 0);
+    ASSERT_EQ_U32(dest, 0x4444);
+
+    /* The sign bit survives the round trip in both arguments. */
+    dest = -1;
+    prev = InterlockedCompareExchange(&dest, 0x7FFFFFFF, -1);
+    ASSERT_EQ_U32(prev, 0xFFFFFFFFu);
+    ASSERT_EQ_U32(dest, 0x7FFFFFFF);
+    return true;
+}
+
+static bool t_exchange_add(void)
+{
+    LONG addend, prev;
+
+    /* Returns the value from BEFORE the add. */
+    addend = 100;
+    prev = InterlockedExchangeAdd(&addend, 23);
+    ASSERT_EQ_U32(prev, 100);
+    ASSERT_EQ_U32(addend, 123);
+
+    /* A negative increment subtracts. */
+    addend = 50;
+    prev = InterlockedExchangeAdd(&addend, -20);
+    ASSERT_EQ_U32(prev, 50);
+    ASSERT_EQ_U32(addend, 30);
+
+    /* Adding zero reports the current value and changes nothing. */
+    addend = 0x12345678;
+    prev = InterlockedExchangeAdd(&addend, 0);
+    ASSERT_EQ_U32(prev, 0x12345678);
+    ASSERT_EQ_U32(addend, 0x12345678);
+
+    /* Wraps rather than saturating. */
+    addend = (LONG)0x7FFFFFFF;
+    prev = InterlockedExchangeAdd(&addend, 1);
+    ASSERT_EQ_U32(prev, 0x7FFFFFFFu);
+    ASSERT_EQ_U32(addend, 0x80000000u);
+    return true;
+}
+
 static const test_entry_t ex_interlocked_entries[] = {
     {"add_large_statistic", t_add_large_statistic},
     {"compare_exchange64", t_compare_exchange64},
+    {"compare_exchange",   t_compare_exchange},
+    {"exchange_add",       t_exchange_add},
 };
 
 DEFINE_GROUP(ex_interlocked, "ex/interlocked");
