@@ -26,6 +26,7 @@
 
 # --- Dbg* ----------------------------------------------------------------- #
 5    DbgBreakPoint                    # int3; only reachable through SEH here
+6    DbgBreakPointWithStatus          # the status reaches a debugger in EAX
 8    DbgPrint
 
 # --- Fsc* file-system cache ------------------------------------------------ #

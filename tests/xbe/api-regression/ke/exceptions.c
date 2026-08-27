@@ -417,15 +417,27 @@ static bool t_breakpoint(void)
 
 /* The exported breakpoints are the same int3 with the same recovery;
  * with nothing attached they are only reachable through SEH.  The
- * with nothing attached it is only reachable through SEH. */
+ * status DbgBreakPointWithStatus carries is handed to a debugger in
+ * EAX and is invisible from here -- what the test pins is that the
+ * argument leaves the stack balanced. */
 static void provoke_dbg_break(void)
 {
     DbgBreakPoint();
 }
 
+static void provoke_dbg_break_with_status(void)
+{
+    DbgBreakPointWithStatus(0x80000007 /* DBG_STATUS_CONTROL_C */);
+}
+
 static bool t_dbg_break_point(void)
 {
     return expect_exception(provoke_dbg_break, STATUS_BREAKPOINT);
+}
+
+static bool t_dbg_break_point_with_status(void)
+{
+    return expect_exception(provoke_dbg_break_with_status, STATUS_BREAKPOINT);
 }
 
 /* ContinueExecution with the fault repaired in memory: the write
@@ -653,6 +665,7 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"integer_overflow",          t_integer_overflow},
     {"bound_range",               t_bound_range},
     {"dbg_break_point",             t_dbg_break_point},
+    {"dbg_break_point_with_status", t_dbg_break_point_with_status},
     {"breakpoint",                t_breakpoint},
     {"continue_after_commit",     t_continue_after_commit},
     {"search_order_and_unwind",   t_search_order_and_unwind},
