@@ -572,6 +572,7 @@ NtQueueApcThreadEx(IN HANDLE ThreadHandle,
                                        NULL);
     if (!NT_SUCCESS(Status)) return Status;
 
+#ifndef SARCH_XBOX
     /* Check if this is a System Thread */
     if (Thread->SystemThread)
     {
@@ -579,6 +580,8 @@ NtQueueApcThreadEx(IN HANDLE ThreadHandle,
         Status = STATUS_INVALID_HANDLE;
         goto Quit;
     }
+#endif /* !SARCH_XBOX -- every title thread is a system thread here, and
+        * the console queues APCs to them all the same. */
 
     /* Allocate an APC */
     Apc = ExAllocatePoolWithQuotaTag(NonPagedPool |
