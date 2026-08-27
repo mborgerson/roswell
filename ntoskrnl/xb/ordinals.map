@@ -243,6 +243,7 @@
 246  XeObReferenceObjectByHandle
 247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
 250  ObfDereferenceObject
+251  ObfReferenceObject
 
 # --- Ethernet PHY -------------------------------------------------------- #
 # MII-bus access via the MCPX NIC at PA 0xFEF00000.

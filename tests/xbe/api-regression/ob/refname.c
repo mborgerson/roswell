@@ -121,12 +121,41 @@ static bool t_reference_is_counted(void)
     return true;
 }
 
+/* ObfReferenceObject is the fast-call counterpart of the ObfDereference
+ * every case here already uses.  A reference it takes has to be
+ * cancellable by exactly one dereference: the object stays resolvable
+ * and identical across the pair, and the count it leaves behind is the
+ * one the caller started with, so the final release below is the last
+ * one rather than an over-release. */
+static bool t_fast_reference_pairs(void)
+{
+    PVOID a, again;
+    NTSTATUS s = ref_device_dir(&ObDirectoryObjectType, &a);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    ObfReferenceObject(a);
+    ObfDereferenceObject(a);
+
+    s = ref_device_dir(&ObDirectoryObjectType, &again);
+    if (!NT_SUCCESS(s)) {
+        ObfDereferenceObject(a);
+        FAIL_AND_RETURN("lookup after a reference pair -> 0x%08x",
+                        (unsigned)s);
+    }
+    ASSERT_EQ_PTR(again, a);
+
+    ObfDereferenceObject(again);
+    ObfDereferenceObject(a);
+    return true;
+}
+
 static const test_entry_t ob_refname_entries[] = {
     {"directory_by_name",    t_directory_by_name},
     {"null_type_accepts_any",t_null_type_accepts_any},
     {"type_mismatch",        t_type_mismatch},
     {"missing_name",         t_missing_name},
     {"reference_is_counted", t_reference_is_counted},
+    {"fast_reference_pairs",  t_fast_reference_pairs},
 };
 
 DEFINE_GROUP(ob_refname, "ob/refname");
