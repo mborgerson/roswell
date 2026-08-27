@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+#
+# title-import-sweep -- cross-check what real titles import against what we map.
+#
+# An ordinal that a title imports but ordinals.map leaves unmapped resolves to
+# a bugcheck stub: if the title ever calls it, the box resets.  That makes the
+# import sweep the strongest priority signal available for which ordinal to
+# implement next -- but only as strong as its corpus is wide.  Narrowing it to
+# two titles once let fourteen reachable stubs sit unnoticed for four batches,
+# so point this at every XBE and ISO you can reach.
+#
+# An import is not a call: a title can import an ordinal its code paths never
+# touch.  A hit here is reachable, not proven-reached.
+#
+# usage: title-import-sweep [-v] TARGET...
+#   TARGET is an .xbe, an .iso (every XBE inside it is swept), or a directory
+#   (scanned recursively for both).  With no TARGET, reads a corpus list from
+#   the NXKRNL_TITLES environment variable (colon-separated).
+#
+# Exits 1 if any title imports an unmapped function ordinal.
+#
+import argparse
+import importlib.util
+import os
+import struct
+import sys
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEF = os.path.join(REPO, "ntoskrnl/xb/xboxkrnl.exe.def")
+MAP = os.path.join(REPO, "ntoskrnl/xb/ordinals.map")
+
+
+def _load(path, name):
+    """Import a module from a path (our tool filenames are hyphenated)."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+xbe = _load(os.path.join(REPO, "tools/dump-xbe.py"), "dump_xbe")
+# The generator is the authority on what counts as mapped: a bare `<ord>` line
+# with only a comment reserves a slot and still stubs out.
+gen = _load(os.path.join(REPO, "ntoskrnl/xb/gen-exports.py"), "gen_exports")
+
+SECTOR = 2048
+XISO_MAGIC = b"MICROSOFT*XBOX*MEDIA"
+XISO_BASES = (0, 0x18300000, 0xFD90000)   # raw xiso, XGD video/game partition
+ATTR_DIR = 0x10
+
+
+def xiso_xbes(path):
+    """Return [(name, bytes)] for every XBE in an Xbox ISO."""
+    with open(path, "rb") as f:
+        for base in XISO_BASES:
+            f.seek(base + 32 * SECTOR)
+            vd = f.read(SECTOR)
+            if vd[:20] == XISO_MAGIC:
+                break
+        else:
+            return []
+        root_sector, root_size = struct.unpack_from("<II", vd, 20)
+
+        out = []
+        walk(f, base, root_sector, root_size, "", out)
+        return out
+
+
+def walk(f, base, sector, size, prefix, out):
+    """Depth-first walk of one XISO directory table, collecting XBEs."""
+    if not size:
+        return
+    f.seek(base + sector * SECTOR)
+    table = f.read(size)
+    seen, todo = set(), [0]
+    while todo:
+        off = todo.pop() * 4
+        if off in seen or off + 14 > len(table):
+            continue
+        seen.add(off)
+        left, right, start, length, attr, nlen = \
+            struct.unpack_from("<HHIIBB", table, off)
+        for nxt in (left, right):
+            if nxt not in (0, 0xFFFF):
+                todo.append(nxt)
+        name = prefix + table[off + 14:off + 14 + nlen].decode("latin-1")
+        if attr & ATTR_DIR:
+            walk(f, base, start, length, name + "/", out)
+        elif name.lower().endswith(".xbe"):
+            f.seek(base + start * SECTOR)
+            out.append((name, f.read(length)))
+
+
+def collect(targets):
+    """Expand the corpus into [(label, ordinals)], skipping unreadable images."""
+    corpus = []
+    for t in targets:
+        if os.path.isdir(t):
+            files = []
+            for root, _, names in os.walk(t):
+                files += [os.path.join(root, n) for n in sorted(names)
+                          if n.lower().endswith((".xbe", ".iso"))]
+            corpus += collect(files)
+        elif t.lower().endswith(".iso"):
+            members = list(xiso_xbes(t))
+            if not members:
+                print("warning: %s: no XBE found (not an Xbox ISO?)" % t,
+                      file=sys.stderr)
+            for name, data in members:
+                corpus += _one("%s:%s" % (os.path.basename(t), name), data)
+        else:
+            corpus += _one(t, open(t, "rb").read())
+    return corpus
+
+
+def _one(label, data):
+    if not xbe.is_xbe(data):
+        print("warning: %s: not an XBE (bad magic)" % label, file=sys.stderr)
+        return []
+    ords = xbe.kernel_ordinals(data)
+    if ords is None:
+        print("warning: %s: thunk table VA not resolvable" % label,
+              file=sys.stderr)
+        return []
+    return [(label, ords)]
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="cross-check title kernel imports against ordinals.map")
+    ap.add_argument("targets", nargs="*", metavar="TARGET")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="also list the mapped ordinals each title imports")
+    ap.add_argument("--def", dest="defp", default=DEF, help="xboxkrnl.exe.def")
+    ap.add_argument("--map", dest="mapp", default=MAP, help="ordinals.map")
+    args = ap.parse_args()
+
+    targets = args.targets or \
+        [p for p in os.environ.get("NXKRNL_TITLES", "").split(":") if p]
+    if not targets:
+        ap.error("no targets given and NXKRNL_TITLES is unset")
+
+    exports = {o: (name, is_data)
+               for o, name, _, _, is_data in gen.parse_def(args.defp)}
+    mapping = gen.parse_map(args.mapp)
+    mapped = {o for o, e in mapping.items()
+              if e["symbol"] or e["dataval"] is not None}
+    unmapped = set(exports) - mapped
+
+    corpus = collect(targets)
+    if not corpus:
+        sys.exit("title-import-sweep: no readable XBE in the corpus")
+
+    width = max(len(label) for label, _ in corpus)
+    print("== corpus (%d title%s) ==" % (len(corpus), "s" * (len(corpus) != 1)))
+    for label, ords in corpus:
+        print("  %-*s %4d import(s)" % (width, label, len(ords)))
+
+    stubs = sum(1 for o in unmapped if not exports[o][1])
+    print("\n== inventory ==")
+    print("  exported by the retail kernel  %4d" % len(exports))
+    print("  mapped                         %4d" % len(mapped & set(exports)))
+    print("  unmapped                       %4d   (%d function -> bugcheck "
+          "stub, %d DATA -> zeroed scaffold)"
+          % (len(unmapped), stubs, len(unmapped) - stubs))
+
+    importers = {}
+    for label, ords in corpus:
+        for o in ords:
+            importers.setdefault(o, []).append(label)
+
+    alien = sorted(o for o in importers if o not in exports)
+    if alien:
+        print("\n== imported but NOT exported by the retail kernel ==")
+        for o in alien:
+            print("  %4d   %s" % (o, ", ".join(importers[o])))
+
+    hits = sorted(o for o in importers if o in unmapped)
+    print("\n== unmapped ordinals a title imports (%d) ==" % len(hits))
+    for o in hits:
+        name, is_data = exports[o]
+        print("  %4d  %-30s %-14s %s"
+              % (o, name, "DATA scaffold" if is_data else "bugcheck stub",
+                 ", ".join(sorted(set(importers[o])))))
+    if not hits:
+        print("  (none)")
+
+    if args.verbose:
+        print("\n== mapped ordinals in use (%d) ==" %
+              len([o for o in importers if o in mapped]))
+        for o in sorted(o for o in importers if o in mapped):
+            print("  %4d  %-30s %s"
+                  % (o, exports[o][0], ", ".join(sorted(set(importers[o])))))
+
+    live = [o for o in hits if not exports[o][1]]
+    print("\n%d unmapped ordinal(s) imported; %d %s a bugcheck stub -- a live "
+          "reset if called." % (len(hits), len(live),
+                                "is" if len(live) == 1 else "are"))
+    return 1 if live else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
