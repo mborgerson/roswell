@@ -85,6 +85,7 @@
 58   XeInterlockedPushEntrySList
 
 # --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
+62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
 67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
 69   XeIoDeleteSymbolicLink
@@ -93,6 +94,7 @@
 74   IoInvalidDeviceRequest
 81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
+86   IofCallDriver                    # fastcall ABI matches
 87   IofCompleteRequest               # fastcall ABI matches
 
 # --- DATA: Kd debugger-presence flags ------------------------------------ #
