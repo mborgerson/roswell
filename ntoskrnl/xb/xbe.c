@@ -723,6 +723,45 @@ NTSTATUS NTAPI XeUnloadSection(_Inout_ PXBE_SECTION Section)
 }
 
 /* --- Io* adapters: Xbox sigs differ from NT (ANSI names, fewer args) ---- */
+
+/*
+ * The console's file query is a much narrower routine than NT's: it
+ * answers three classes and refuses everything else -- classes the file
+ * system handles perfectly well through NtQueryInformationFile included
+ * -- and it takes the length from the class rather than from the caller,
+ * so a caller's Length is neither checked nor honoured.
+ */
+NTSTATUS NTAPI
+XeIoQueryFileInformation(PFILE_OBJECT FileObject,
+                           FILE_INFORMATION_CLASS FileInformationClass,
+                           ULONG Length,
+                           PVOID FileInformation,
+                           PULONG ReturnedLength)
+{
+    ULONG ClassLength;
+
+    UNREFERENCED_PARAMETER(Length);
+
+    switch (FileInformationClass)
+    {
+        case FileInternalInformation:
+            ClassLength = sizeof(FILE_INTERNAL_INFORMATION);
+            break;
+        case FilePositionInformation:
+            ClassLength = sizeof(FILE_POSITION_INFORMATION);
+            break;
+        case FileNetworkOpenInformation:
+            ClassLength = sizeof(FILE_NETWORK_OPEN_INFORMATION);
+            break;
+        default:
+            return STATUS_INVALID_PARAMETER;
+    }
+
+    return IoQueryFileInformation(FileObject, FileInformationClass,
+                                  ClassLength, FileInformation,
+                                  ReturnedLength);
+}
+
 /* IoCreateDevice, plus the provenance of the driver object. */
 extern NTSTATUS NTAPI IopCreateDevice(
     _In_ PDRIVER_OBJECT DriverObject,
