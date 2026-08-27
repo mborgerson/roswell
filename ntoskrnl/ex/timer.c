@@ -103,9 +103,6 @@ ExTimerRundown(VOID)
     KeReleaseSpinLock(&Thread->ActiveTimerListLock, OldIrql);
 }
 
-/* Executive timer objects can never be instantiated (NtCreateTimer and
- * friends are not built), so the Timer type needs no delete procedure. */
-#ifndef SARCH_XBOX
 VOID
 NTAPI
 ExpDeleteTimer(IN PVOID ObjectBody)
@@ -135,7 +132,6 @@ ExpDeleteTimer(IN PVOID ObjectBody)
     KeCancelTimer(&Timer->KeTimer);
     KeFlushQueuedDpcs();
 }
-#endif /* !SARCH_XBOX */
 
 _Function_class_(KDEFERRED_ROUTINE)
 VOID
@@ -239,9 +235,7 @@ ExpInitializeTimerImplementation(VOID)
     ObjectTypeInitializer.GenericMapping = ExpTimerMapping;
     ObjectTypeInitializer.PoolType = NonPagedPool;
     ObjectTypeInitializer.ValidAccessMask = TIMER_ALL_ACCESS;
-#ifndef SARCH_XBOX
     ObjectTypeInitializer.DeleteProcedure = ExpDeleteTimer;
-#endif
     Status = ObCreateObjectType(&Name, &ObjectTypeInitializer, NULL, &ExTimerType);
     if (!NT_SUCCESS(Status)) return FALSE;
 
