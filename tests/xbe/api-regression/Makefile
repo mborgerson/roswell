@@ -44,6 +44,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/mdl.c \
        $(CURDIR)/io/irplayout.c \
        $(CURDIR)/io/fsdreq.c \
+       $(CURDIR)/io/syncreq.c \
        $(CURDIR)/ke/waitmulti.c \
        $(CURDIR)/ob/symlink.c \
        $(CURDIR)/io/finfo.c \

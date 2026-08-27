@@ -95,6 +95,8 @@
 74   IoInvalidDeviceRequest
 81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
+84   IoSynchronousDeviceIoControlRequest  XeIoSynchronousDeviceIoControlRequest
+85   IoSynchronousFsdRequest          XeIoSynchronousFsdRequest
 86   IofCallDriver                    # fastcall ABI matches
 87   IofCompleteRequest               # fastcall ABI matches
 

@@ -785,6 +785,80 @@ XeIoStartPacket(_In_ PVOID DeviceObject, _In_ PVOID Irp,
     IoStartPacket((PDEVICE_OBJECT)DeviceObject, (PIRP)Irp, Key, NULL);
 }
 
+/* The console offers a request builder paired with its own dispatch and
+ * wait, so a caller that just wants the result never handles the packet
+ * itself.  Both forms own the event and the status block, and both
+ * report the completion status rather than the dispatch return. */
+static NTSTATUS
+XbIoAwaitRequest(_In_ PDEVICE_OBJECT DeviceObject,
+                 _In_ PIRP Irp,
+                 _In_ PKEVENT Event,
+                 _In_ PIO_STATUS_BLOCK IoStatusBlock)
+{
+    NTSTATUS s = IofCallDriver(DeviceObject, Irp);
+
+    if (s == STATUS_PENDING)
+    {
+        KeWaitForSingleObject(Event, Executive, KernelMode, FALSE, NULL);
+        s = IoStatusBlock->Status;
+    }
+    return s;
+}
+
+NTSTATUS NTAPI
+XeIoSynchronousFsdRequest(_In_ ULONG MajorFunction,
+                          _In_ PVOID DeviceObject,
+                          _Inout_opt_ PVOID Buffer,
+                          _In_ ULONG Length,
+                          _In_opt_ PLARGE_INTEGER StartingOffset)
+{
+    PDEVICE_OBJECT dev = (PDEVICE_OBJECT)DeviceObject;
+    IO_STATUS_BLOCK iosb;
+    KEVENT event;
+    PIRP irp;
+
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    irp = IoBuildSynchronousFsdRequest(MajorFunction, dev, Buffer, Length,
+                                       StartingOffset, &event, &iosb);
+    if (irp == NULL)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    return XbIoAwaitRequest(dev, irp, &event, &iosb);
+}
+
+NTSTATUS NTAPI
+XeIoSynchronousDeviceIoControlRequest(_In_ ULONG IoControlCode,
+                                      _In_ PVOID DeviceObject,
+                                      _In_opt_ PVOID InputBuffer,
+                                      _In_ ULONG InputBufferLength,
+                                      _Out_opt_ PVOID OutputBuffer,
+                                      _In_ ULONG OutputBufferLength,
+                                      _Out_opt_ PULONG ReturnedOutputBufferLength,
+                                      _In_ BOOLEAN InternalDeviceIoControl)
+{
+    PDEVICE_OBJECT dev = (PDEVICE_OBJECT)DeviceObject;
+    IO_STATUS_BLOCK iosb;
+    KEVENT event;
+    PIRP irp;
+    NTSTATUS s;
+
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    irp = IoBuildDeviceIoControlRequest(IoControlCode, dev, InputBuffer,
+                                        InputBufferLength, OutputBuffer,
+                                        OutputBufferLength,
+                                        InternalDeviceIoControl,
+                                        &event, &iosb);
+    if (irp == NULL)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    s = XbIoAwaitRequest(dev, irp, &event, &iosb);
+
+    /* The transferred length is reported separately from the status. */
+    if (ReturnedOutputBufferLength != NULL)
+        *ReturnedOutputBufferLength = (ULONG)iosb.Information;
+    return s;
+}
+
 /* --- KeQueryInterruptTime / Performance counter -- ULONGLONG returns ---- */
 ULONGLONG NTAPI XeKeQueryInterruptTime(VOID)
 {
