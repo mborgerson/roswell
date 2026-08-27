@@ -78,6 +78,7 @@ DECLARE_GROUP(io_fatx16);
 DECLARE_GROUP(ob_handles);
 DECLARE_GROUP(xc_parity);
 DECLARE_GROUP(xc_crypto);
+DECLARE_GROUP(io_delete);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -132,6 +133,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ob_handles,
     &g_group_xc_parity,
     &g_group_xc_crypto,
+    &g_group_io_delete,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
     &g_group_kd_flags,

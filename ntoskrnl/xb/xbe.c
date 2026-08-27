@@ -1023,6 +1023,8 @@ extern NTSTATUS NTAPI ros_NtQueryDirectoryObject(
 extern NTSTATUS NTAPI ros_NtQueryFullAttributesFile(
     POBJECT_ATTRIBUTES, PVOID)
     __asm__("_NtQueryFullAttributesFile@8");
+extern NTSTATUS NTAPI ros_NtDeleteFile(POBJECT_ATTRIBUTES)
+    __asm__("_NtDeleteFile@4");
 
 /* --- object attributes ---------------------------------------------------- *
  * The Xbox OBJECT_ATTRIBUTES is a different struct from NT's: three fields,
@@ -1499,6 +1501,19 @@ XeNtQueryFullAttributesFile(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Info)
     UNICODE_STRING name;
     POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
     NTSTATUS status = ros_NtQueryFullAttributesFile(oa, Info);
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
+}
+NTSTATUS NTAPI
+XeNtDeleteFile(PXBE_OBJECT_ATTRIBUTES XAttr)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = ros_NtDeleteFile(oa);
+    XbStraceDbg("NtDeleteFile(\"%wZ\") -> %08lx\n",
+                oa ? oa->ObjectName : &name, status);
     if (name.Buffer != NULL)
         RtlFreeUnicodeString(&name);
     return status;

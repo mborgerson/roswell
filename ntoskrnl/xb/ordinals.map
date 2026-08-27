@@ -201,6 +201,7 @@
 192  XeNtCreateMutant
 193  XeNtCreateSemaphore             # Xbox: 4 args, no DesiredAccess
 222  NtReleaseSemaphore               # signature matches NT (HANDLE, LONG, PLONG)
+195  XeNtDeleteFile                  # Xbox OBJECT_ATTRIBUTES (ANSI name)
 196  NtDeviceIoControlFile
 197  XeNtDuplicateObject             # Xbox @12: current process, same access
 198  NtFlushBuffersFile

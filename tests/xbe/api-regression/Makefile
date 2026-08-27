@@ -54,6 +54,7 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ob/handles.c \
        $(CURDIR)/xc/parity.c \
        $(CURDIR)/xc/crypto.c \
+       $(CURDIR)/io/delete.c \
        $(CURDIR)/hal/av.c \
        $(CURDIR)/kd/flags.c \
        $(CURDIR)/mm/pressure.c
