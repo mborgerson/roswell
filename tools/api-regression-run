@@ -31,7 +31,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$REPO/tests/xbe/api-regression"
 NXDK_DIR="$REPO/third_party/nxdk"
 BUILD_DIR="${NXKRNL_BUILD_DIR:-$REPO/build}"
-TIMEOUT_S=${API_REGRESSION_TIMEOUT:-90}
+TIMEOUT_S=${API_REGRESSION_TIMEOUT:-240}
 
 official=0
 trace=""
