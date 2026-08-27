@@ -24,7 +24,8 @@
 3    AvSetDisplayMode                 # point the NV2A CRTC at the framebuffer
 4    AvSetSavedDataAddress
 
-# --- DbgPrint ------------------------------------------------------------- #
+# --- Dbg* ----------------------------------------------------------------- #
+5    DbgBreakPoint                    # int3; only reachable through SEH here
 8    DbgPrint
 
 # --- Fsc* file-system cache ------------------------------------------------ #

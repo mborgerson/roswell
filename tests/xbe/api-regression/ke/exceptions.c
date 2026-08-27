@@ -415,6 +415,19 @@ static bool t_breakpoint(void)
     return expect_exception(provoke_int3, STATUS_BREAKPOINT);
 }
 
+/* The exported breakpoints are the same int3 with the same recovery;
+ * with nothing attached they are only reachable through SEH.  The
+ * with nothing attached it is only reachable through SEH. */
+static void provoke_dbg_break(void)
+{
+    DbgBreakPoint();
+}
+
+static bool t_dbg_break_point(void)
+{
+    return expect_exception(provoke_dbg_break, STATUS_BREAKPOINT);
+}
+
 /* ContinueExecution with the fault repaired in memory: the write
  * faults on an uncommitted page, the handler commits it, and the
  * retried instruction succeeds. */
@@ -639,6 +652,7 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"single_step",               t_single_step},
     {"integer_overflow",          t_integer_overflow},
     {"bound_range",               t_bound_range},
+    {"dbg_break_point",             t_dbg_break_point},
     {"breakpoint",                t_breakpoint},
     {"continue_after_commit",     t_continue_after_commit},
     {"search_order_and_unwind",   t_search_order_and_unwind},
