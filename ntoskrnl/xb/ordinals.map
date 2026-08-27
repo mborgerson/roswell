@@ -92,6 +92,7 @@
 61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
 62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
 63   IoCheckShareAccess              # signature matches NT's exactly
+64   IoCompletionObjectType  XeIoCompletionObjectType  # 28-byte Xbox-shape struct
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
 67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
 68   IoDeleteDevice
@@ -102,6 +103,7 @@
 73   IoInitializeIrp
 74   IoInvalidDeviceRequest
 78   IoRemoveShareAccess             # signature matches NT's exactly
+79   XeIoSetIoCompletion             # Xbox @20 -> NT @24: no quota charge
 80   IoSetShareAccess                # signature matches NT's exactly
 81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
 83   XeIoStartPacket                 # Xbox @12 -> NT @16
@@ -214,6 +216,7 @@
 187  NtClose
 189  XeNtCreateEvent                 # Xbox OBJECT_ATTRIBUTES (ANSI name)
 190  XeNtCreateFile                  # Xbox OBJECT_ATTRIBUTES; no EA params
+191  XeNtCreateIoCompletion          # Xbox object attributes
 192  XeNtCreateMutant
 193  XeNtCreateSemaphore             # Xbox: 4 args, no DesiredAccess
 222  NtReleaseSemaphore               # signature matches NT (HANDLE, LONG, PLONG)
@@ -232,6 +235,7 @@
 208  XeNtQueryDirectoryObject
 210  XeNtQueryFullAttributesFile
 211  NtQueryInformationFile
+212  XeNtQueryIoCompletion           # basic information only
 215  XeNtQuerySymbolicLinkObject     # folds the UNICODE target to ANSI
 216  XeNtQueryTimer                  # basic information only
 217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
@@ -239,9 +243,11 @@
 219  XeNtReadFile
 220  XeNtReadFileScatter              # per-page IO, unbuffered handles only
 221  XeNtReleaseMutant
+223  NtRemoveIoCompletion             # signature matches NT's exactly
 224  NtResumeThread
 225  NtSetEvent
 226  XeNtSetInformationFile          # rename target: Xbox ANSI -> NT WCHAR
+227  NtSetIoCompletion                # signature matches NT's exactly
 228  NtSetSystemTime
 229  XeNtSetTimerEx                  # NtSetTimer plus an explicit APC mode
 230  NtSignalAndWaitForSingleObjectEx

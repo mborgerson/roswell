@@ -25,4 +25,5 @@ XBOX_OBJECT_TYPE XeExMutantObjectType   = XB_OT('atuM');
 XBOX_OBJECT_TYPE XeExTimerObjectType    = XB_OT('emiT');
 XBOX_OBJECT_TYPE XeIoFileObjectType     = XB_OT('eliF');
 XBOX_OBJECT_TYPE XeIoDeviceObjectType   = XB_OT('iveD');
+XBOX_OBJECT_TYPE XeIoCompletionObjectType = XB_OT('pmoC');
 XBOX_OBJECT_TYPE XeObDirectoryObjectType = XB_OT('eriD');

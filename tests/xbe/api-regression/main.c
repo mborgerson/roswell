@@ -89,6 +89,7 @@ DECLARE_GROUP(io_irpalloc);
 DECLARE_GROUP(io_devlife);
 DECLARE_GROUP(io_asyncreq);
 DECLARE_GROUP(io_scatter);
+DECLARE_GROUP(io_iocomp);
 DECLARE_GROUP(ke_threadstate);
 DECLARE_GROUP(ex_timer);
 
@@ -156,6 +157,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_devlife,
     &g_group_io_asyncreq,
     &g_group_io_scatter,
+    &g_group_io_iocomp,
     &g_group_ke_threadstate,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO

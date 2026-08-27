@@ -1016,6 +1016,7 @@ extern NTSTATUS NTAPI ros_NtDuplicateObject(
     __asm__("_NtDuplicateObject@28");
 /* Internal object-directory type (ob/obdir.c). */
 extern POBJECT_TYPE ObpDirectoryObjectType;
+extern POBJECT_TYPE IoCompletionType;
 extern NTSTATUS NTAPI ObOpenObjectByName(
     POBJECT_ATTRIBUTES, POBJECT_TYPE, KPROCESSOR_MODE, PACCESS_STATE,
     ACCESS_MASK, PVOID, PHANDLE);
@@ -1636,6 +1637,7 @@ XeObjectTypeToInternal(PVOID Type)
     if (Type == &XePsThreadObjectType)    return PsThreadType;
     if (Type == &XeIoFileObjectType)      return IoFileObjectType;
     if (Type == &XeIoDeviceObjectType)    return IoDeviceObjectType;
+    if (Type == &XeIoCompletionObjectType) return IoCompletionType;
     if (Type == &XeObDirectoryObjectType) return ObpDirectoryObjectType;
     return (POBJECT_TYPE)Type;
 }
@@ -2213,6 +2215,58 @@ XeNtQueryTimer(HANDLE TimerHandle, PVOID TimerInformation)
 {
     return NtQueryTimer(TimerHandle, TimerBasicInformation, TimerInformation,
                         sizeof(TIMER_BASIC_INFORMATION), NULL);
+}
+
+extern NTSTATUS NTAPI IoSetIoCompletion(PVOID, PVOID, PVOID, NTSTATUS,
+                                        ULONG_PTR, BOOLEAN);
+extern NTSTATUS NTAPI NtCreateIoCompletion(PHANDLE, ACCESS_MASK,
+                                           POBJECT_ATTRIBUTES, ULONG);
+extern NTSTATUS NTAPI NtQueryIoCompletion(HANDLE,
+                                          IO_COMPLETION_INFORMATION_CLASS,
+                                          PVOID, ULONG, PULONG);
+
+/*
+ * I/O completion ports.  The creator's argument list is NT's, but the
+ * attributes are the console's; the query answers exactly one
+ * information class.  The setters and the remover are NT's, unchanged,
+ * and are exported directly.
+ *
+ * The access mask is passed through and nothing consults it: titles run
+ * in kernel mode, where the object manager skips the access check, which
+ * is what makes a port created with no access at all fully usable here
+ * exactly as it is on the console.
+ */
+NTSTATUS NTAPI
+XeNtCreateIoCompletion(PHANDLE IoCompletionHandle, ACCESS_MASK DesiredAccess,
+                         PXBE_OBJECT_ATTRIBUTES XAttr, ULONG Count)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = NtCreateIoCompletion(IoCompletionHandle, DesiredAccess,
+                                           oa, Count);
+
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
+}
+
+NTSTATUS NTAPI
+XeNtQueryIoCompletion(HANDLE IoCompletionHandle, PVOID IoCompletionInformation)
+{
+    return NtQueryIoCompletion(IoCompletionHandle, IoCompletionBasicInformation,
+                               IoCompletionInformation,
+                               sizeof(IO_COMPLETION_BASIC_INFORMATION), NULL);
+}
+
+/* The console's setter has no quota argument: a packet is never charged
+ * to anyone, so the queue is the only thing that limits it. */
+NTSTATUS NTAPI
+XeIoSetIoCompletion(PVOID IoCompletion, PVOID KeyContext, PVOID ApcContext,
+                      NTSTATUS IoStatus, ULONG_PTR IoStatusInformation)
+{
+    return IoSetIoCompletion(IoCompletion, KeyContext, ApcContext, IoStatus,
+                             IoStatusInformation, FALSE);
 }
 
 /* Xbox HalGetInterruptVector takes just an IRQ and yields the IDT vector
