@@ -582,6 +582,19 @@ typedef VOID
   _In_ PIO_WORKITEM IoWorkItem);
 typedef IO_WORKITEM_ROUTINE_EX *PIO_WORKITEM_ROUTINE_EX;
 
+#ifdef SARCH_XBOX
+/* A title driver allocates this itself and hands it to IoSetShareAccess,
+ * so the width is ABI: the console counts in bytes, not dwords. */
+typedef struct _SHARE_ACCESS {
+  UCHAR OpenCount;
+  UCHAR Readers;
+  UCHAR Writers;
+  UCHAR Deleters;
+  UCHAR SharedRead;
+  UCHAR SharedWrite;
+  UCHAR SharedDelete;
+} SHARE_ACCESS, *PSHARE_ACCESS;
+#else
 typedef struct _SHARE_ACCESS {
   ULONG OpenCount;
   ULONG Readers;
@@ -591,6 +604,7 @@ typedef struct _SHARE_ACCESS {
   ULONG SharedWrite;
   ULONG SharedDelete;
 } SHARE_ACCESS, *PSHARE_ACCESS;
+#endif
 
 typedef enum _CREATE_FILE_TYPE {
   CreateFileTypeNone,
