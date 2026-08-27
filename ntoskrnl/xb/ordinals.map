@@ -86,6 +86,7 @@
 59   IoAllocateIrp       XeIoAllocateIrp   # Xbox @4 -> NT @8 adapter
 
 # --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
+60   IoBuildAsynchronousFsdRequest   # signature matches NT's exactly
 61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
 62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE

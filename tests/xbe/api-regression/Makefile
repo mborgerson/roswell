@@ -63,5 +63,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ke/devqueue.c \
        $(CURDIR)/ke/queue.c \
        $(CURDIR)/io/irpalloc.c \
-       $(CURDIR)/io/devlife.c
+       $(CURDIR)/io/devlife.c \
+       $(CURDIR)/io/asyncreq.c
 include $(NXDK_DIR)/Makefile
