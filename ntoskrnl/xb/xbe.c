@@ -2180,6 +2180,41 @@ HalReadWritePCISpace(ULONG BusNumber, ULONG SlotNumber, ULONG RegisterNumber,
                               Buffer, RegisterNumber, Length);
 }
 
+extern NTSTATUS NTAPI NtQueryEvent(HANDLE, EVENT_INFORMATION_CLASS, PVOID,
+                                   ULONG, PULONG);
+extern NTSTATUS NTAPI NtQueryMutant(HANDLE, MUTANT_INFORMATION_CLASS, PVOID,
+                                    ULONG, PULONG);
+extern NTSTATUS NTAPI NtQuerySemaphore(HANDLE, SEMAPHORE_INFORMATION_CLASS,
+                                       PVOID, ULONG, PULONG);
+
+/*
+ * Object-state queries.  Each answers exactly one information class --
+ * the console has none to choose from -- so the class, the buffer
+ * length and the returned length all collapse away.
+ */
+NTSTATUS NTAPI
+XeNtQueryEvent(HANDLE EventHandle, PVOID EventInformation)
+{
+    return NtQueryEvent(EventHandle, EventBasicInformation, EventInformation,
+                        sizeof(EVENT_BASIC_INFORMATION), NULL);
+}
+
+NTSTATUS NTAPI
+XeNtQueryMutant(HANDLE MutantHandle, PVOID MutantInformation)
+{
+    return NtQueryMutant(MutantHandle, MutantBasicInformation,
+                         MutantInformation,
+                         sizeof(MUTANT_BASIC_INFORMATION), NULL);
+}
+
+NTSTATUS NTAPI
+XeNtQuerySemaphore(HANDLE SemaphoreHandle, PVOID SemaphoreInformation)
+{
+    return NtQuerySemaphore(SemaphoreHandle, SemaphoreBasicInformation,
+                            SemaphoreInformation,
+                            sizeof(SEMAPHORE_BASIC_INFORMATION), NULL);
+}
+
 extern NTSTATUS NTAPI NtCreateTimer(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
                                     TIMER_TYPE);
 extern NTSTATUS NTAPI NtQueryTimer(HANDLE, TIMER_INFORMATION_CLASS, PVOID,

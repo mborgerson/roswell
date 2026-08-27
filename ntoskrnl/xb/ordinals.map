@@ -236,9 +236,12 @@
 205  XeNtPulseEvent                  # DPC-safe (Xbox semantics, cached handles)
 207  XeNtQueryDirectoryFile          # Xbox: no ReturnSingleEntry; ANSI mask + name
 208  XeNtQueryDirectoryObject
+209  XeNtQueryEvent                  # basic information only
 210  XeNtQueryFullAttributesFile
 211  NtQueryInformationFile
 212  XeNtQueryIoCompletion           # basic information only
+213  XeNtQueryMutant                 # basic information only
+214  XeNtQuerySemaphore              # basic information only
 215  XeNtQuerySymbolicLinkObject     # folds the UNICODE target to ANSI
 216  XeNtQueryTimer                  # basic information only
 217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
