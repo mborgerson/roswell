@@ -16,6 +16,16 @@
 /* PRIVATE FUNCTIONS *********************************************************/
 
 #ifdef SARCH_XBOX
+/* Xbox: a user APC has no ring 3 to be dispatched into, so an alertable
+ * wait that breaks with STATUS_USER_APC runs the queued routines itself
+ * before it returns -- see KiDeliverUserApcs. */
+#define KiDeliverXboxUserApcs(status) \
+    do { if ((status) == STATUS_USER_APC) KiDeliverUserApcs(); } while (0)
+#else
+#define KiDeliverXboxUserApcs(status)
+#endif
+
+#ifdef SARCH_XBOX
 /* Stack swap is gated by WaitMode != KernelMode; on Xbox the stack
  * swapper machinery never runs, so the candidate-list insert is dead
  * weight in every inlined wait-block setup.
@@ -404,6 +414,7 @@ WaitStart:
 
     /* We're done! */
     KiReleaseDispatcherLock(Thread->WaitIrql);
+    KiDeliverXboxUserApcs(WaitStatus);
     return WaitStatus;
 
 NoWait:
@@ -579,6 +590,7 @@ WaitStart:
 
     /* Wait complete */
     KiReleaseDispatcherLock(Thread->WaitIrql);
+    KiDeliverXboxUserApcs(WaitStatus);
     return WaitStatus;
 
 DontWait:
@@ -872,6 +884,7 @@ WaitStart:
 
     /* We are done */
     KiReleaseDispatcherLock(Thread->WaitIrql);
+    KiDeliverXboxUserApcs(WaitStatus);
     return WaitStatus;
 
 DontWait:

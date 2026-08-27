@@ -650,6 +650,16 @@ VOID
 NTAPI
 KiCheckForKernelApcDelivery(VOID);
 
+#ifdef SARCH_XBOX
+VOID
+NTAPI
+KiDeliverUserApcs(VOID);
+
+VOID
+NTAPI
+KiSetCurrentThreadUserApcPending(VOID);
+#endif
+
 LONG
 NTAPI
 KiInsertQueue(

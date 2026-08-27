@@ -517,6 +517,61 @@ Quickie:
 }
 
 /*
+ * Xbox user-APC delivery.  Titles run in ring 0, so there is no user
+ * return trap to dispatch through and KiInitializeUserApc has no ring 3
+ * to build a frame for.  A queued user APC is instead run here, in the
+ * target thread's own context, at the point an alertable wait breaks
+ * with STATUS_USER_APC.  Retail-pinned: one such wait drains every
+ * queued user APC in FIFO order and reports STATUS_USER_APC once.
+ */
+VOID
+NTAPI
+KiDeliverUserApcs(VOID)
+{
+    PKTHREAD Thread = KeGetCurrentThread();
+    KLOCK_QUEUE_HANDLE ApcLock;
+
+    for (;;)
+    {
+        PKNORMAL_ROUTINE NormalRoutine;
+        PKKERNEL_ROUTINE KernelRoutine;
+        PVOID NormalContext, SystemArgument1, SystemArgument2;
+        PLIST_ENTRY ApcListEntry;
+        PKAPC Apc;
+
+        KiAcquireApcLockRaiseToDpc(Thread, &ApcLock);
+        Thread->ApcState.UserApcPending = FALSE;
+        if (IsListEmpty(&Thread->ApcState.ApcListHead[UserMode]))
+        {
+            KiReleaseApcLock(&ApcLock);
+            return;
+        }
+
+        ApcListEntry = Thread->ApcState.ApcListHead[UserMode].Flink;
+        Apc = CONTAINING_RECORD(ApcListEntry, KAPC, ApcListEntry);
+
+        /* Save the parameters: the kernel routine may free the APC. */
+        NormalRoutine = Apc->NormalRoutine;
+        KernelRoutine = Apc->KernelRoutine;
+        NormalContext = Apc->NormalContext;
+        SystemArgument1 = Apc->SystemArgument1;
+        SystemArgument2 = Apc->SystemArgument2;
+
+        RemoveEntryList(ApcListEntry);
+        Apc->Inserted = FALSE;
+        KiReleaseApcLock(&ApcLock);
+
+        KernelRoutine(Apc,
+                      &NormalRoutine,
+                      &NormalContext,
+                      &SystemArgument1,
+                      &SystemArgument2);
+        if (NormalRoutine != NULL)
+            NormalRoutine(NormalContext, SystemArgument1, SystemArgument2);
+    }
+}
+
+/*
  * Xbox: flag a user APC as pending on the current thread.  Titles run in ring 0,
  * so async-IO completion routines are delivered as in-kernel (kernel-mode) APCs
  * (see ntoskrnl/xbe NtUserIoApcDispatcher) rather than real user APCs -- the
