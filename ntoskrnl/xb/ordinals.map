@@ -337,6 +337,7 @@
 339  XcRC4Crypt
 340  XcHMAC
 343  XcPKGetKeyLen                   # the blob's own length field, verbatim
+344  XcVerifyPKCS1Signature          # RSASSA-PKCS1-v1_5 over SHA-1
 345  XcModExp
 346  XcDESKeyParity
 347  XcKeyTable

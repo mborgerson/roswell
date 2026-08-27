@@ -336,6 +336,10 @@ XcModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
  */
 
 #define PK_BLOB_LENGTH(k)   (((const ULONG *)(k))[1])
+#define PK_MODULUS_TOP(k)   (((const ULONG *)(k))[3])
+#define PK_EXPONENT(k)      ((const ULONG *)(k) + 4)
+#define PK_MODULUS(k)       ((const ULONG *)(k) + 5)
+
 ULONG NTAPI
 XcPKGetKeyLen(_In_ PVOID PubKey)
 {
@@ -343,10 +347,93 @@ XcPKGetKeyLen(_In_ PVOID PubKey)
 }
 
 /*
+ * The DigestInfo that prefixes a SHA-1 hash inside a PKCS#1 v1.5 block,
+ * stored the way the decrypted block reads out: least significant byte
+ * first, so these run backwards compared to the ASN.1 encoding.  Both the
+ * form carrying explicit NULL algorithm parameters and the form omitting
+ * them are accepted.
+ */
+static const struct { UCHAR Length; UCHAR Bytes[15]; } XcPkcs1Prefix[] = {
+    { 15, { 0x14, 0x04, 0x00, 0x05, 0x1a, 0x02, 0x03, 0x0e,
+            0x2b, 0x05, 0x06, 0x09, 0x30, 0x21, 0x30 } },
+    { 13, { 0x14, 0x04, 0x1a, 0x02, 0x03, 0x0e, 0x2b, 0x05,
+            0x06, 0x07, 0x30, 0x1f, 0x30 } },
+};
+
+BOOLEAN NTAPI
+XcVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
+                       _In_ PVOID Digest)
+{
+    const UCHAR *Hash = (const UCHAR *)Digest;
+    ULONG Top = PK_MODULUS_TOP(PubKey);
+    ULONG Bytes = Top + 1;
+    ULONG Words = Bytes / 4;
+    PULONG Pool, Sig, Exp, Mod, Block;
+    const UCHAR *Plain;
+    ULONG Zero, i;
+    BOOLEAN Ok = FALSE;
+
+    /* The block has to hold the hash, a prefix and at least some padding. */
+    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS || Bytes < 64)
+        return FALSE;
+
+    Pool = ExAllocatePoolWithTag(NonPagedPool, 4 * Bytes, 'sXcX');
+    if (Pool == NULL)
+        return FALSE;
+    Sig = Pool;
+    Exp = Sig + Words;
+    Mod = Exp + Words;
+    Block = Mod + Words;
+
+    RtlCopyMemory(Sig, Signature, Bytes);
+    RtlZeroMemory(Exp, Bytes);
+    Exp[0] = *PK_EXPONENT(PubKey);
+    RtlCopyMemory(Mod, PK_MODULUS(PubKey), Bytes);
+
+    if (XcModExp(Block, Sig, Exp, Mod, Words) == 0)
+        goto Done;
+
+    /* The block reads out least significant byte first, so the hash sits
+     * at the bottom, reversed, and the padding runs up to the top. */
+    Plain = (const UCHAR *)Block;
+    for (i = 0; i < 20; i++)
+        if (Plain[i] != Hash[19 - i])
+            goto Done;
+
+    Zero = 0;
+    for (i = 0; i < RTL_NUMBER_OF(XcPkcs1Prefix); i++)
+    {
+        if (RtlCompareMemory(Plain + 20, XcPkcs1Prefix[i].Bytes,
+                             XcPkcs1Prefix[i].Length) ==
+            XcPkcs1Prefix[i].Length)
+        {
+            Zero = 20 + XcPkcs1Prefix[i].Length;
+            break;
+        }
+    }
+    if (Zero == 0)
+        goto Done;
+
+    /* A separating zero below the padding, and 00 01 capping the top. */
+    if (Plain[Zero] != 0x00 || Plain[Top] != 0x00 || Plain[Top - 1] != 0x01)
+        goto Done;
+    for (i = Zero + 1; i < Top - 1; i++)
+        if (Plain[i] != 0xff)
+            goto Done;
+
+    Ok = TRUE;
+
+Done:
+    ExFreePool(Pool);
+    return Ok;
+}
+
+/*
  * Cipher framework -- ABI-correct stubs.  Real implementations belong on
  * top of the same primitives once a title exercises them; this lets the
  * thunk-table call land on a balanced function and the title continue.
  */
+
 /*
  * Force odd parity on every key byte: the low bit is the parity bit, set
  * so each byte carries an odd number of 1s.  The upper seven bits are the

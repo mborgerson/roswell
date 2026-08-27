@@ -71,7 +71,6 @@ static const UCHAR DIGEST[20] = {
     0x6c, 0x81, 0x2c, 0xaf, 0x2a, 0xf6, 0x5d, 0x96, 0x14, 0xc0, 0xfd, 0xcf,
     0x50, 0xde, 0xbd, 0x12, 0x85, 0x5d, 0x41, 0x0e,
 };
-
 static const UCHAR PUBKEY_1K[156] = {
     0x52, 0x53, 0x41, 0x31, 0x88, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
     0x7f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0xff, 0x63, 0x08, 0x8b,
@@ -88,6 +87,19 @@ static const UCHAR PUBKEY_1K[156] = {
     0x8c, 0x14, 0xcf, 0xe2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+static const UCHAR SIGNATURE_1K[128] = {
+    0xfc, 0xed, 0x15, 0xe0, 0x33, 0x2d, 0x8b, 0xb5, 0x2d, 0xe1, 0xd3, 0xf1,
+    0x9c, 0xbd, 0xed, 0x0b, 0x30, 0xe8, 0x5e, 0xa2, 0x32, 0x8e, 0xd6, 0xa3,
+    0xfa, 0x44, 0xa7, 0xfd, 0x65, 0x7b, 0x43, 0x61, 0x32, 0xa7, 0x58, 0xa8,
+    0x26, 0x4a, 0x7b, 0x94, 0xaf, 0x3e, 0x2f, 0x81, 0xae, 0xd8, 0x09, 0xab,
+    0x62, 0x5f, 0x03, 0x37, 0xab, 0x0c, 0x8b, 0x9b, 0x5a, 0x8e, 0xbc, 0x92,
+    0x76, 0x74, 0xda, 0x6f, 0xab, 0x61, 0x5b, 0xbe, 0x28, 0xa3, 0x0f, 0x24,
+    0x05, 0xec, 0xce, 0xe4, 0x28, 0x5b, 0x07, 0x0c, 0xfb, 0x44, 0xe7, 0x2f,
+    0x2d, 0x86, 0x6f, 0xba, 0x37, 0xe1, 0xca, 0x6e, 0xbd, 0x29, 0xb1, 0xfd,
+    0xf3, 0xf2, 0xd8, 0x86, 0x41, 0x98, 0x2a, 0xb8, 0xc3, 0xfb, 0xd5, 0xd7,
+    0x44, 0x99, 0x5b, 0xcf, 0x10, 0x83, 0x58, 0xd1, 0x07, 0xe1, 0xfb, 0x17,
+    0x91, 0x24, 0x22, 0x8d, 0x75, 0xf3, 0x7a, 0x22,
+};
 
 #define MODULUS_BYTES 256
 #define MODULUS_WORDS (MODULUS_BYTES / 4)
@@ -218,6 +230,59 @@ static bool t_keylen_is_not_derived(void)
     return true;
 }
 
+static bool t_verify_signature(void)
+{
+    ASSERT_TRUE(XcVerifyPKCS1Signature((PUCHAR)SIGNATURE, (PUCHAR)PUBKEY,
+                                       (PUCHAR)DIGEST));
+    return true;
+}
+
+static bool t_verify_rejects_wrong_digest(void)
+{
+    UCHAR bad[20];
+
+    memcpy(bad, DIGEST, sizeof(bad));
+    bad[0] ^= 0xff;
+    if (XcVerifyPKCS1Signature((PUCHAR)SIGNATURE, (PUCHAR)PUBKEY, bad))
+        FAIL_AND_RETURN("a corrupted digest verified");
+
+    memcpy(bad, DIGEST, sizeof(bad));
+    bad[19] ^= 0x01;
+    if (XcVerifyPKCS1Signature((PUCHAR)SIGNATURE, (PUCHAR)PUBKEY, bad))
+        FAIL_AND_RETURN("a corrupted digest verified");
+    return true;
+}
+
+static bool t_verify_rejects_wrong_signature(void)
+{
+    static UCHAR bad[MODULUS_BYTES];
+
+    memcpy(bad, SIGNATURE, sizeof(bad));
+    bad[0] ^= 0xff;
+    if (XcVerifyPKCS1Signature(bad, (PUCHAR)PUBKEY, (PUCHAR)DIGEST))
+        FAIL_AND_RETURN("a corrupted signature verified");
+
+    memcpy(bad, SIGNATURE, sizeof(bad));
+    bad[MODULUS_BYTES - 1] ^= 0x80;
+    if (XcVerifyPKCS1Signature(bad, (PUCHAR)PUBKEY, (PUCHAR)DIGEST))
+        FAIL_AND_RETURN("a corrupted signature verified");
+    return true;
+}
+
+static bool t_verify_smaller_key(void)
+{
+    /* The modulus size comes out of the blob, so a shorter key works the
+     * same way. */
+    ASSERT_TRUE(XcVerifyPKCS1Signature((PUCHAR)SIGNATURE_1K,
+                                       (PUCHAR)PUBKEY_1K, (PUCHAR)DIGEST));
+
+    /* ...and the two keys' signatures do not cross over. */
+    if (XcVerifyPKCS1Signature((PUCHAR)SIGNATURE_1K, (PUCHAR)PUBKEY,
+                               (PUCHAR)DIGEST))
+        FAIL_AND_RETURN("a signature from another key verified");
+    return true;
+}
+
 static const test_entry_t xc_rsa_entries[] = {
     {"modexp_small",             t_modexp_small},
     {"modexp_reduces_base",      t_modexp_reduces_base},
@@ -226,6 +291,10 @@ static const test_entry_t xc_rsa_entries[] = {
     {"modexp_rsa_block",         t_modexp_rsa_block},
     {"keylen",                   t_keylen},
     {"keylen_is_not_derived",    t_keylen_is_not_derived},
+    {"verify_signature",         t_verify_signature},
+    {"verify_wrong_digest",      t_verify_rejects_wrong_digest},
+    {"verify_wrong_signature",   t_verify_rejects_wrong_signature},
+    {"verify_smaller_key",       t_verify_smaller_key},
 };
 
 DEFINE_GROUP(xc_rsa, "xc/rsa");
