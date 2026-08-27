@@ -167,6 +167,55 @@ static bool t_sleep_zero_usermode(void)
     return true;
 }
 
+/* KeEnterCriticalRegion suppresses normal kernel-APC delivery until the
+ * matching leave.  Nothing a title can queue is a kernel APC, so what is
+ * observable from here is the balance: an unbalanced or missing enter
+ * leaves the thread's disable count wrong, and the completion-APC round
+ * trip above is the machinery that notices.  Nesting is safe for the
+ * plain pair -- unlike the AndRegion form, it keeps no recursion count
+ * of its own and simply counts down. */
+static bool t_critical_region_pairs_are_balanced(void)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK open_iosb, write_iosb;
+    static char buf[512];
+    NTSTATUS s;
+
+    KeEnterCriticalRegion();
+    KeEnterCriticalRegion();
+    KeLeaveCriticalRegion();
+    KeLeaveCriticalRegion();
+
+    g_apc_ran = 0;
+    memset(buf, 0x33, sizeof(buf));
+    memset(&write_iosb, 0, sizeof(write_iosb));
+
+    s = open_apc_scratch(&h, &open_iosb);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    {
+        LARGE_INTEGER off = { .QuadPart = 0 };
+        s = NtWriteFile(h, NULL, io_apc, (PVOID)&g_apc_ran, &write_iosb,
+                        buf, sizeof(buf), &off);
+    }
+    if (!NT_SUCCESS(s) && s != STATUS_PENDING) {
+        NtClose(h);
+        FAIL_AND_RETURN("NtWriteFile -> 0x%08x", (unsigned)s);
+    }
+
+    {
+        LARGE_INTEGER timeout = { .QuadPart = -((LONGLONG)2 * 1000 * 10000) };
+        s = KeDelayExecutionThread(UserMode, TRUE, &timeout);
+    }
+    NtClose(h);
+
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    if (g_apc_ran != 1)
+        FAIL_AND_RETURN("APC never ran after a nested region pair "
+                        "(wait=0x%08x)", (unsigned)s);
+    return true;
+}
+
 static const test_entry_t ke_wait_apc_entries[] = {
     /* sleep_zero runs first: the APC tests below intentionally leave a
      * queued-but-undeliverable APC behind while delivery is a TODO. */
@@ -175,6 +224,8 @@ static const test_entry_t ke_wait_apc_entries[] = {
      t_io_apc_breaks_alertable_userwait},
     {"apc_delivered_after_nonalertable_userwait",
      t_nonalertable_userwait_ignores_apc},
+    {"critical_region_pairs_are_balanced",
+     t_critical_region_pairs_are_balanced},
 };
 
 DEFINE_GROUP(ke_wait_apc, "ke/wait-apc");

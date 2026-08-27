@@ -118,6 +118,7 @@
 98   XeKeConnectInterrupt            # routes through the KINTERRUPT shadow
 99   KeDelayExecutionThread
 100  XeKeDisconnectInterrupt         # routes through the KINTERRUPT shadow
+101  KeEnterCriticalRegion
 103  KeGetCurrentIrql
 104  XeKeGetCurrentThread            # returns the Xbox-shaped thread shadow
 106  KeInitializeDeviceQueue          # 12-byte console KDEVICE_QUEUE; direct
