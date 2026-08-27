@@ -37,31 +37,23 @@ def load_ordinal_names():
     return names
 
 
-def main():
-    if len(sys.argv) != 2:
-        sys.exit("usage: dump-xbe.py FILE.xbe")
-    data = open(sys.argv[1], "rb").read()
+def is_xbe(data):
+    """True if `data` looks like an XBE image."""
+    return len(data) >= 0x178 and data[:4] == b"XBEH"
+
+
+def va_mapper(data):
+    """Build the VA -> file-offset map for an XBE.
+
+    An XBE is non-relocatable: every *Addr in the header is an absolute VA
+    in the image mapped at `base`.  Map one back via the section that
+    contains it (or the headers region for low VAs).  Returns the section
+    table alongside the mapper, since callers want both.
+    """
     u32 = lambda off: struct.unpack_from("<I", data, off)[0]
+    base, hdr_size = u32(0x104), u32(0x108)
+    nsections, sec_hdrs = u32(0x11C), u32(0x120)
 
-    if len(data) < 0x178 or data[:4] != b"XBEH":
-        sys.exit("dump-xbe.py: not an XBE (bad magic)")
-
-    base      = u32(0x104)
-    img_size  = u32(0x10C)
-    hdr_size  = u32(0x108)
-    cert_addr = u32(0x118)
-    nsections = u32(0x11C)
-    sec_hdrs  = u32(0x120)
-    initflags = u32(0x124)
-    enc_entry = u32(0x128)
-    tls_addr  = u32(0x12C)
-    enc_thunk = u32(0x158)
-    nlibs     = u32(0x160)
-    libs_addr = u32(0x164)
-
-    # An XBE is non-relocatable: every *Addr in the header is an absolute VA
-    # in the image mapped at `base`.  Map a VA back to a file offset via the
-    # section that contains it (or the headers region for low VAs).
     sections = []
     for i in range(nsections):
         s = sec_hdrs - base + i * 0x38
@@ -78,6 +70,64 @@ def main():
                 return s["raw"] + d if d < s["rsize"] else None
         return None
 
+    return sections, va_to_off
+
+
+def decode(data, enc, keys):
+    """Pick the retail/debug key whose result lands inside the image."""
+    u32 = lambda off: struct.unpack_from("<I", data, off)[0]
+    base, img_size = u32(0x104), u32(0x10C)
+    for k in keys:
+        if base <= (enc ^ k) < base + img_size:
+            return enc ^ k
+    return enc ^ keys[0]
+
+
+def kernel_ordinals(data):
+    """The xboxkrnl ordinals an XBE imports, in thunk-table order.
+
+    None if the thunk table VA does not resolve to image bytes.
+    """
+    _, va_to_off = va_mapper(data)
+    thunk = decode(data, struct.unpack_from("<I", data, 0x158)[0], XOR_KT)
+    off = va_to_off(thunk)
+    if off is None:
+        return None
+    ords = []
+    while len(ords) <= 4096:
+        v = struct.unpack_from("<I", data, off)[0]
+        off += 4
+        if v == 0:
+            break
+        if v & THUNK_ORDINAL:
+            ords.append(v & ~THUNK_ORDINAL)
+    return ords
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit("usage: dump-xbe.py FILE.xbe")
+    data = open(sys.argv[1], "rb").read()
+    u32 = lambda off: struct.unpack_from("<I", data, off)[0]
+
+    if not is_xbe(data):
+        sys.exit("dump-xbe.py: not an XBE (bad magic)")
+
+    base      = u32(0x104)
+    img_size  = u32(0x10C)
+    hdr_size  = u32(0x108)
+    cert_addr = u32(0x118)
+    nsections = u32(0x11C)
+    sec_hdrs  = u32(0x120)
+    initflags = u32(0x124)
+    enc_entry = u32(0x128)
+    tls_addr  = u32(0x12C)
+    enc_thunk = u32(0x158)
+    nlibs     = u32(0x160)
+    libs_addr = u32(0x164)
+
+    sections, va_to_off = va_mapper(data)
+
     def cstr(va):
         off = va_to_off(va)
         if off is None:
@@ -85,15 +135,8 @@ def main():
         end = data.index(b"\0", off)
         return data[off:end].decode("latin-1")
 
-    def decode(enc, keys):
-        """Pick the retail/debug key whose result lands inside the image."""
-        for k in keys:
-            if base <= (enc ^ k) < base + img_size:
-                return enc ^ k
-        return enc ^ keys[0]
-
-    entry = decode(enc_entry, XOR_EP)
-    thunk = decode(enc_thunk, XOR_KT)
+    entry = decode(data, enc_entry, XOR_EP)
+    thunk = decode(data, enc_thunk, XOR_KT)
 
     print("== %s (%d bytes) ==" % (os.path.basename(sys.argv[1]), len(data)))
     print("  base            %#010x" % base)
@@ -145,20 +188,10 @@ def main():
     # --- kernel imports (the thunk table) ---
     names = load_ordinal_names()
     print("\n-- kernel imports (xboxkrnl ordinals) --")
-    to = va_to_off(thunk)
-    if to is None:
+    ords = kernel_ordinals(data)
+    if ords is None:
         print("  (thunk table VA not resolvable)")
         return
-    ords = []
-    while True:
-        v = struct.unpack_from("<I", data, to)[0]
-        to += 4
-        if v == 0:
-            break
-        if v & THUNK_ORDINAL:
-            ords.append(v & ~THUNK_ORDINAL)
-        if len(ords) > 4096:
-            break
     for o in ords:
         nm, is_data = names.get(o, ("?", False))
         print("  %4d  %s%s" % (o, nm, "   [DATA]" if is_data else ""))
