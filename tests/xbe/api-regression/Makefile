@@ -74,5 +74,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ke/apc.c \
        $(CURDIR)/io/dismount.c \
        $(CURDIR)/ke/threadstate.c \
-       $(CURDIR)/ex/timer.c
+       $(CURDIR)/ex/timer.c \
+       $(CURDIR)/ke/apcinit.c
 include $(NXDK_DIR)/Makefile

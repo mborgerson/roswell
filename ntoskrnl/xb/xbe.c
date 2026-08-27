@@ -2430,6 +2430,64 @@ HalWriteSMBusValue(UCHAR Address, UCHAR Command, BOOLEAN WriteWord,
  * exports -- no shadow table, no Dpc substitution.
  */
 
+/* --- APCs ------------------------------------------------------------------ *
+ *
+ * The console's KAPC is 40 bytes and the caller owns the storage: no
+ * Size/Spare pair up front, the mode flags packed into the header instead
+ * of the tail.  NT's is 48, so nothing NT-shaped may be initialised into a
+ * title's buffer.  Initialisation touches no kernel state at all -- it is
+ * a pure structure write -- so it is done here against the console layout;
+ * the list entry and both system arguments are left as the caller left
+ * them, exactly as retail does.
+ */
+
+typedef struct _XBE_KAPC
+{
+    SHORT      Type;
+    CHAR       ApcMode;
+    UCHAR      Inserted;
+    PVOID      Thread;
+    LIST_ENTRY ApcListEntry;
+    PVOID      KernelRoutine;
+    PVOID      RundownRoutine;
+    PVOID      NormalRoutine;
+    PVOID      NormalContext;
+    PVOID      SystemArgument1;
+    PVOID      SystemArgument2;
+} XBE_KAPC, *PXBE_KAPC;
+
+C_ASSERT(sizeof(XBE_KAPC) == 40);
+
+VOID NTAPI
+XeKeInitializeApc(PXBE_KAPC Apc,
+                    PVOID Thread,
+                    PVOID KernelRoutine,
+                    PVOID RundownRoutine,
+                    PVOID NormalRoutine,
+                    CHAR ApcMode,
+                    PVOID NormalContext)
+{
+    Apc->Type = ApcObject;
+    Apc->Inserted = FALSE;
+    Apc->Thread = Thread;
+    Apc->KernelRoutine = KernelRoutine;
+    Apc->RundownRoutine = RundownRoutine;
+    Apc->NormalRoutine = NormalRoutine;
+
+    /* No normal routine means nothing to run in user mode: the requested
+     * mode is overridden and the context it would have received dropped. */
+    if (NormalRoutine != NULL)
+    {
+        Apc->NormalContext = NormalContext;
+        Apc->ApcMode = ApcMode;
+    }
+    else
+    {
+        Apc->NormalContext = NULL;
+        Apc->ApcMode = KernelMode;
+    }
+}
+
 /* KeInitializeInterrupt / Connect / Disconnect are NDK (ndk/kefuncs.h)
  * prototypes, not part of the DDK headers xbe.c includes -- declare them
  * locally. */

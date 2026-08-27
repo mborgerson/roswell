@@ -133,6 +133,7 @@
 101  KeEnterCriticalRegion
 103  KeGetCurrentIrql
 104  XeKeGetCurrentThread            # returns the Xbox-shaped thread shadow
+105  XeKeInitializeApc               # 40-byte console KAPC; pure structure write
 106  KeInitializeDeviceQueue          # 12-byte console KDEVICE_QUEUE; direct
 107  KeInitializeDpc                  # native 28-byte KDPC; direct
 108  KeInitializeEvent
