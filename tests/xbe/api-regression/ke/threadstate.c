@@ -257,6 +257,99 @@ static bool disable_boost_returns_the_previous_setting(void)
     return true;
 }
 
+/* --- alerts --------------------------------------------------------------
+ *
+ * An alert is the flag an alertable wait consults; setting it on a
+ * thread that never waits alertably is inert, which is what lets these
+ * cases use the spinner without disturbing it.
+ */
+
+static bool alerting_reports_the_previous_state(void)
+{
+    HANDLE h;
+    PKTHREAD thread;
+    NTSTATUS s;
+    BOOLEAN first, second;
+
+    s = start_spinner(&h, &thread);
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("start spinner: 0x%08x", (unsigned)s);
+
+    first = KeAlertThread(thread, KernelMode);
+    second = KeAlertThread(thread, KernelMode);
+    stop_spinner(h, thread);
+
+    ASSERT_EQ_U32(first, FALSE);
+    ASSERT_EQ_U32(second, TRUE);
+    return true;
+}
+
+/* An alerting resume is a resume: it returns the previous suspend count
+ * and the thread runs again. */
+static bool an_alerting_resume_returns_the_suspend_count(void)
+{
+    HANDLE h;
+    PKTHREAD thread;
+    NTSTATUS s;
+    LONG stalled;
+    ULONG prev;
+
+    s = start_spinner(&h, &thread);
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("start spinner: 0x%08x", (unsigned)s);
+
+    s = NtSuspendThread(h, NULL);
+    if (!NT_SUCCESS(s)) {
+        stop_spinner(h, thread);
+        FAIL_AND_RETURN("suspend: 0x%08x", (unsigned)s);
+    }
+    sleep_ms(SPIN_SLICE_MS * 8);
+    stalled = InterlockedCompareExchange(&g_ticks, 0, 0);
+
+    prev = KeAlertResumeThread(thread);
+    if (prev != 1) {
+        NtResumeThread(h, NULL);
+        stop_spinner(h, thread);
+        FAIL_AND_RETURN("previous suspend count = %lu", (unsigned long)prev);
+    }
+
+    sleep_ms(SPIN_SLICE_MS * 8);
+    {
+        LONG resumed = InterlockedCompareExchange(&g_ticks, 0, 0);
+        stop_spinner(h, thread);
+        if (resumed <= stalled)
+            FAIL_AND_RETURN("no progress after the alerting resume (%ld)",
+                            (long)resumed);
+    }
+    return true;
+}
+
+/* Testing the alert reports it and consumes it.  The caller reaches its
+ * own thread object through the current-thread pseudo handle, which the
+ * object manager resolves without going near the Xbox-shaped shadow. */
+static bool testing_an_alert_consumes_it(void)
+{
+    PKTHREAD self = NULL;
+    NTSTATUS s;
+    BOOLEAN before, first, second;
+
+    s = ObReferenceObjectByHandle((HANDLE)(LONG_PTR)-2 /* current thread */,
+                                  &PsThreadObjectType, (PVOID *)&self);
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("reference the current thread: 0x%08x", (unsigned)s);
+    ASSERT_NOT_NULL(self);
+
+    before = KeAlertThread(self, KernelMode);
+    first = KeTestAlertThread(KernelMode);
+    second = KeTestAlertThread(KernelMode);
+    ObfDereferenceObject(self);
+
+    ASSERT_EQ_U32(before, FALSE);
+    ASSERT_EQ_U32(first, TRUE);
+    ASSERT_EQ_U32(second, FALSE);
+    return true;
+}
+
 static const test_entry_t ke_threadstate_entries[] = {
     { "nt_suspend_and_resume_report_the_previous_count",
       nt_suspend_and_resume_report_the_previous_count, NULL },
@@ -268,6 +361,11 @@ static const test_entry_t ke_threadstate_entries[] = {
       suspending_a_terminated_thread_is_refused, NULL },
     { "disable_boost_returns_the_previous_setting",
       disable_boost_returns_the_previous_setting, NULL },
+    { "alerting_reports_the_previous_state",
+      alerting_reports_the_previous_state, NULL },
+    { "an_alerting_resume_returns_the_suspend_count",
+      an_alerting_resume_returns_the_suspend_count, NULL },
+    { "testing_an_alert_consumes_it", testing_an_alert_consumes_it, NULL },
 };
 
 DEFINE_GROUP(ke_threadstate, "ke/threadstate");
