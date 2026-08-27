@@ -1336,12 +1336,17 @@ typedef struct _XBE_EVENT_ENTRY
 
 static XBE_EVENT_ENTRY XeEventTable[XBE_EVENT_SLOTS];
 
+/* Reported once per fill so a title holding more than XBE_EVENT_SLOTS
+ * events at a time doesn't bury the log; cleared again when a slot frees. */
+static BOOLEAN XeEventTableFullReported;
+
 static
 VOID
 XeTrackEvent(HANDLE Handle, PKEVENT Event)
 {
     KIRQL OldIrql;
     ULONG i;
+    BOOLEAN Report = FALSE;
 
     KeRaiseIrql(HIGH_LEVEL, &OldIrql);
     for (i = 0; i < XBE_EVENT_SLOTS; i++)
@@ -1353,10 +1358,17 @@ XeTrackEvent(HANDLE Handle, PKEVENT Event)
             break;
         }
     }
+    if (i == XBE_EVENT_SLOTS && !XeEventTableFullReported)
+    {
+        XeEventTableFullReported = TRUE;
+        Report = TRUE;
+    }
     KeLowerIrql(OldIrql);
-    if (i == XBE_EVENT_SLOTS)
-        XbDbg("event table full; NtPulseEvent on %p falls back to the "
-              "DPC-unsafe NT path\n", Handle);
+    if (Report)
+        XbDbg("all %u pulse-cache slots are in use; events created from "
+              "now on are not cached, so a later NtPulseEvent on one takes "
+              "the NT path and is unsafe above APC_LEVEL\n",
+              XBE_EVENT_SLOTS);
 }
 
 /* Closing a handle must evict the cache entry: the object dies with the
@@ -1377,6 +1389,7 @@ XeUntrackEvent(HANDLE Handle)
         {
             XeEventTable[i].Handle = NULL;
             XeEventTable[i].Event = NULL;
+            XeEventTableFullReported = FALSE;
         }
     }
     KeLowerIrql(OldIrql);
