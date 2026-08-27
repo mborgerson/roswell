@@ -319,6 +319,29 @@ XcModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
     return 1;
 }
 
+/* --- RSA public-key operations -------------------------------------------- *
+ * The console's public-key blob is a small header followed by the modulus,
+ * everything little-endian:
+ *
+ *   +0x00  "RSA1"
+ *   +0x04  blob length
+ *   +0x08  modulus bits
+ *   +0x0c  index of the modulus' top byte (its length less one)
+ *   +0x10  public exponent
+ *   +0x14  modulus
+ *
+ * Layout and semantics per xbedump's xboxlib.c, confirmed against the
+ * retail kernel: the length ordinal hands back the header's own length
+ * field untouched -- it neither validates the magic nor derives anything.
+ */
+
+#define PK_BLOB_LENGTH(k)   (((const ULONG *)(k))[1])
+ULONG NTAPI
+XcPKGetKeyLen(_In_ PVOID PubKey)
+{
+    return PK_BLOB_LENGTH(PubKey);
+}
+
 /*
  * Cipher framework -- ABI-correct stubs.  Real implementations belong on
  * top of the same primitives once a title exercises them; this lets the

@@ -336,6 +336,7 @@
 338  XcRC4Key
 339  XcRC4Crypt
 340  XcHMAC
+343  XcPKGetKeyLen                   # the blob's own length field, verbatim
 345  XcModExp
 346  XcDESKeyParity
 347  XcKeyTable
