@@ -104,7 +104,8 @@
 72   IoFreeIrp
 73   IoInitializeIrp
 74   IoInvalidDeviceRequest
-75   XeIoQueryFileInformation         # three classes only; length comes from the class
+75   XeIoQueryFileInformation         # three classes only; the class fixes the length
+76   XeIoQueryVolumeInformation       # four classes only
 78   IoRemoveShareAccess             # signature matches NT's exactly
 79   XeIoSetIoCompletion             # Xbox @20 -> NT @24: no quota charge
 80   IoSetShareAccess                # signature matches NT's exactly

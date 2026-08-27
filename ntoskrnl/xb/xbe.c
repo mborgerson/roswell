@@ -727,9 +727,11 @@ NTSTATUS NTAPI XeUnloadSection(_Inout_ PXBE_SECTION Section)
 /*
  * The console's file query is a much narrower routine than NT's: it
  * answers three classes and refuses everything else -- classes the file
- * system handles perfectly well through NtQueryInformationFile included
- * -- and it takes the length from the class rather than from the caller,
- * so a caller's Length is neither checked nor honoured.
+ * system handles perfectly well through NtQueryInformationFile included.
+ * The answer is always the class's own length, whatever the caller
+ * claimed, so the class length is what goes to the file system: passing
+ * a short one on would have a file system that checks refuse a request
+ * the console completes.
  */
 NTSTATUS NTAPI
 XeIoQueryFileInformation(PFILE_OBJECT FileObject,
@@ -760,6 +762,31 @@ XeIoQueryFileInformation(PFILE_OBJECT FileObject,
     return IoQueryFileInformation(FileObject, FileInformationClass,
                                   ClassLength, FileInformation,
                                   ReturnedLength);
+}
+
+/* The volume query is the same shape with a set of its own.  The length
+ * does reach the file system here -- the attribute class truncates
+ * against it -- so it is passed on untouched. */
+NTSTATUS NTAPI
+XeIoQueryVolumeInformation(PFILE_OBJECT FileObject,
+                             FS_INFORMATION_CLASS FsInformationClass,
+                             ULONG Length,
+                             PVOID FsInformation,
+                             PULONG ReturnedLength)
+{
+    switch (FsInformationClass)
+    {
+        case FileFsVolumeInformation:
+        case FileFsSizeInformation:
+        case FileFsDeviceInformation:
+        case FileFsAttributeInformation:
+            break;
+        default:
+            return STATUS_INVALID_PARAMETER;
+    }
+
+    return IoQueryVolumeInformation(FileObject, FsInformationClass, Length,
+                                    FsInformation, ReturnedLength);
 }
 
 /* IoCreateDevice, plus the provenance of the driver object. */

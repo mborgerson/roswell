@@ -77,5 +77,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ex/timer.c \
        $(CURDIR)/ke/apcinit.c \
        $(CURDIR)/ke/apcqueue.c \
-       $(CURDIR)/io/ioquery.c
+       $(CURDIR)/io/ioquery.c \
+       $(CURDIR)/io/volquery.c
 include $(NXDK_DIR)/Makefile
