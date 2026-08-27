@@ -115,6 +115,7 @@
 100  XeKeDisconnectInterrupt         # routes through the KINTERRUPT shadow
 103  KeGetCurrentIrql
 104  XeKeGetCurrentThread            # returns the Xbox-shaped thread shadow
+106  KeInitializeDeviceQueue          # 12-byte console KDEVICE_QUEUE; direct
 107  KeInitializeDpc                  # native 28-byte KDPC; direct
 108  KeInitializeEvent
 109  XeKeInitializeInterrupt         # Xbox form: no spin lock, no SMP args; shadow buffer

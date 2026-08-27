@@ -434,7 +434,9 @@ HEADER("KDEVICE_QUEUE"),
 OFFSET(DvType, KDEVICE_QUEUE, Type),
 OFFSET(DvSize, KDEVICE_QUEUE, Size),
 OFFSET(DvDeviceListHead, KDEVICE_QUEUE, DeviceListHead),
+#ifndef SARCH_XBOX
 OFFSET(DvSpinLock, KDEVICE_QUEUE, Lock),
+#endif
 OFFSET(DvBusy, KDEVICE_QUEUE, Busy),
 SIZE(DeviceQueueObjectLength, KDEVICE_QUEUE),
 

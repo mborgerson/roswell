@@ -27,7 +27,9 @@ KeInitializeDeviceQueue(IN PKDEVICE_QUEUE DeviceQueue)
 
     /* Initialize the Listhead and Spinlock */
     InitializeListHead(&DeviceQueue->DeviceListHead);
+#ifndef SARCH_XBOX
     KeInitializeSpinLock(&DeviceQueue->Lock);
+#endif
 
     /* Set it as busy */
     DeviceQueue->Busy=FALSE;

@@ -684,6 +684,19 @@ VOID
 KiAcquireDeviceQueueLock(IN PKDEVICE_QUEUE DeviceQueue,
                          IN PKLOCK_QUEUE_HANDLE DeviceLock)
 {
+#ifdef SARCH_XBOX
+    /* The queue carries no lock: raising to dispatch level is the whole
+       exclusion on a uniprocessor machine. */
+    UNREFERENCED_PARAMETER(DeviceQueue);
+    if (KeGetCurrentPrcb()->DpcThreadActive)
+    {
+        KeRaiseIrql(DISPATCH_LEVEL, &DeviceLock->OldIrql);
+    }
+    else
+    {
+        ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
+    }
+#else
     /* Check if we were called from a threaded DPC */
     if (KeGetCurrentPrcb()->DpcThreadActive)
     {
@@ -697,12 +710,23 @@ KiAcquireDeviceQueueLock(IN PKDEVICE_QUEUE DeviceQueue,
         KeAcquireInStackQueuedSpinLockAtDpcLevel(&DeviceQueue->Lock,
                                                  DeviceLock);
     }
+#endif
 }
 
 FORCEINLINE
 VOID
 KiReleaseDeviceQueueLock(IN PKLOCK_QUEUE_HANDLE DeviceLock)
 {
+#ifdef SARCH_XBOX
+    if (KeGetCurrentPrcb()->DpcThreadActive)
+    {
+        KeLowerIrql(DeviceLock->OldIrql);
+    }
+    else
+    {
+        ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
+    }
+#else
     /* Check if we were called from a threaded DPC */
     if (KeGetCurrentPrcb()->DpcThreadActive)
     {
@@ -715,6 +739,7 @@ KiReleaseDeviceQueueLock(IN PKLOCK_QUEUE_HANDLE DeviceLock)
         ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
         KeReleaseInStackQueuedSpinLockFromDpcLevel(DeviceLock);
     }
+#endif
 }
 
 //

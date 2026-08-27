@@ -81,6 +81,7 @@ DECLARE_GROUP(xc_crypto);
 DECLARE_GROUP(xc_rsa);
 DECLARE_GROUP(io_delete);
 DECLARE_GROUP(ob_refname);
+DECLARE_GROUP(ke_devqueue);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -138,6 +139,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_xc_rsa,
     &g_group_io_delete,
     &g_group_ob_refname,
+    &g_group_ke_devqueue,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
     &g_group_kd_flags,

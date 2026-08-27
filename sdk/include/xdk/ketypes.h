@@ -784,6 +784,18 @@ typedef struct _KDPC_WATCHDOG_INFORMATION {
   ULONG Reserved;
 } KDPC_WATCHDOG_INFORMATION, *PKDPC_WATCHDOG_INFORMATION;
 
+#ifdef SARCH_XBOX
+/* Retail KDEVICE_QUEUE: 12 bytes, Busy packed into the header and no
+   trailing spin lock -- the console is uniprocessor and dispatch level
+   is the whole exclusion.  Titles embed one in every device object they
+   create, so both the field order and the 12-byte size are ABI. */
+typedef struct _KDEVICE_QUEUE {
+  CSHORT Type;
+  UCHAR Size;
+  BOOLEAN Busy;
+  LIST_ENTRY DeviceListHead;
+} KDEVICE_QUEUE, *PKDEVICE_QUEUE, *RESTRICTED_POINTER PRKDEVICE_QUEUE;
+#else
 typedef struct _KDEVICE_QUEUE {
   CSHORT Type;
   CSHORT Size;
@@ -801,6 +813,7 @@ typedef struct _KDEVICE_QUEUE {
   BOOLEAN Busy;
 # endif
 } KDEVICE_QUEUE, *PKDEVICE_QUEUE, *RESTRICTED_POINTER PRKDEVICE_QUEUE;
+#endif
 
 #define TIMER_EXPIRED_INDEX_BITS        6
 #define TIMER_PROCESSOR_INDEX_BITS      5
