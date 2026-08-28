@@ -131,6 +131,7 @@
 # --- Ke* (direct ntoskrnl forwards + xbe adapters) ----------------------- #
 92   KeAlertResumeThread              # an alerting resume; signature matches NT
 93   KeAlertThread                    # signature matches NT
+94   KeBoostPriorityThread            # base-relative, capped below the real-time range
 95   KeBugCheck
 97   KeCancelTimer                    # KTIMER layout matches; direct
 98   XeKeConnectInterrupt            # routes through the KINTERRUPT shadow
