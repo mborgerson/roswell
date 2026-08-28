@@ -1551,6 +1551,30 @@ XeNtPulseEvent(HANDLE Handle, PLONG PreviousState)
         *PreviousState = Prev;
     return STATUS_SUCCESS;
 }
+/* The Xbox form of NT's IoCreateFile: no EA buffer and no create-file
+ * type, but the trailing Options word survives -- it is the only way a
+ * caller can ask for the create-parameter validation that NtCreateFile,
+ * passing zero, always skips. */
+NTSTATUS NTAPI
+XeIoCreateFile(PHANDLE Handle, ACCESS_MASK Access, PXBE_OBJECT_ATTRIBUTES XAttr,
+                 PIO_STATUS_BLOCK Iosb, PLARGE_INTEGER AllocSize,
+                 ULONG Attributes, ULONG Share, ULONG Disposition,
+                 ULONG CreateOptions, ULONG Options)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = IoCreateFile(Handle, Access, oa, Iosb, AllocSize,
+                                   Attributes, Share, Disposition,
+                                   CreateOptions, NULL, 0, CreateFileTypeNone,
+                                   NULL, Options);
+    XbStraceDbg("IoCreateFile(\"%wZ\", access=%08lx, disp=%lx, options=%lx) -> %08lx\n",
+                oa ? oa->ObjectName : &name, Access, Disposition, Options,
+                status);
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
+}
 NTSTATUS NTAPI
 XeNtCreateFile(PHANDLE Handle, ACCESS_MASK Access, PXBE_OBJECT_ATTRIBUTES XAttr,
                  PIO_STATUS_BLOCK Iosb, PLARGE_INTEGER AllocSize,
