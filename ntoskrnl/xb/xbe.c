@@ -2399,6 +2399,21 @@ ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type, PVOID Value,
 }
 
 /*
+ * The SMC's scratch byte, which survives a warm reboot and is how the
+ * dashboard is told why it was launched.  Only the low byte of the
+ * caller's word reaches the SMC.
+ */
+#define XB_SMC_SLAVE_ADDRESS 0x20
+#define XB_SMC_SCRATCH       0x1B
+
+NTSTATUS NTAPI
+HalWriteSMCScratchRegister(ULONG ScratchRegister)
+{
+    return HalpXboxSmBusWriteByte(XB_SMC_SLAVE_ADDRESS >> 1, XB_SMC_SCRATCH,
+                                  (UCHAR)ScratchRegister);
+}
+
+/*
  * The console masks and unmasks an interrupt by its bus-relative level
  * and carries no IRQL, where NT's HAL takes the IDT vector the level
  * was mapped to.  Both ends keep the mask in the HAL's software IDR

@@ -422,6 +422,7 @@
 358  HalIsResetOrShutdownPending
 359  IoMarkIrpMustComplete
 360  HalInitiateShutdown
+366  HalWriteSMCScratchRegister    # the SMC's low byte only, over SMBus
 
 # --- Rtl printf family (xb/rtlprintf.c -> runtime _vsnprintf) ------------- #
 361  RtlSnprintf
