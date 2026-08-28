@@ -104,6 +104,7 @@ DECLARE_GROUP(io_volquery);
 DECLARE_GROUP(io_startio);
 DECLARE_GROUP(io_createfile);
 DECLARE_GROUP(io_threadirp);
+DECLARE_GROUP(xc_align);
 DECLARE_GROUP(ex_timer);
 
 static const test_group_t *const GROUPS[] = {
@@ -193,6 +194,8 @@ static const test_group_t *const GROUPS[] = {
     &g_group_mm_pressure,
     /* Last of all: takes the cache volume down and back up. */
     &g_group_io_dismount,
+    /* After that: a call the console can be made to fault on. */
+    &g_group_xc_align,
 };
 
 #define NGROUPS (sizeof(GROUPS)/sizeof(GROUPS[0]))
