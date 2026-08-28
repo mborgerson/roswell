@@ -295,6 +295,18 @@ static bool t_block_triple(void)
     return bytes_eq(back, PLAIN, sizeof(back), "3des ecb back");
 }
 
+/* The framework's service entry answers zero, whatever it is asked. */
+static bool t_crypt_service(void)
+{
+    ULONG args[8];
+    ULONG op;
+
+    memset(args, 0, sizeof(args));
+    for (op = 0; op < 16; op++)
+        ASSERT_EQ_U32(XcCryptService(op, args), 0);
+    return true;
+}
+
 static const test_entry_t xc_cipher_entries[] = {
     {"des_key_table", t_des_table},
     {"des_key_table_extent", t_des_table_extent},
@@ -309,6 +321,7 @@ static const test_entry_t xc_cipher_entries[] = {
     {"block_ecb", t_block_ecb},
     {"block_operation_codes", t_block_op_codes},
     {"block_triple", t_block_triple},
+    {"crypt_service", t_crypt_service},
 };
 
 DEFINE_GROUP(xc_cipher, "xc/cipher");

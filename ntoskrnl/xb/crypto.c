@@ -757,6 +757,19 @@ XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
                     (const UCHAR *)Key + i * 8);
 }
 
+/*
+ * The service entry the console answers with zero, whatever operation
+ * number it is handed: probed across the first sixteen, none of which
+ * touches the argument block.
+ */
+ULONG NTAPI
+XcCryptService(_In_ ULONG Op, _In_ PVOID Args)
+{
+    UNREFERENCED_PARAMETER(Op);
+    UNREFERENCED_PARAMETER(Args);
+    return 0;
+}
+
 /* One block, no chaining: the operation code decrypts only when zero. */
 VOID NTAPI
 XcBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,

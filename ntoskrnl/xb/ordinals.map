@@ -388,6 +388,7 @@
 347  XcKeyTable
 348  XcBlockCrypt
 349  XcBlockCryptCBC
+350  XcCryptService                  # answers zero to every operation
 
 # --- HAL boot / shutdown ------------------------------------------------- #
 356  HalBootSMCVideoMode           # = 1 (HDTV)
