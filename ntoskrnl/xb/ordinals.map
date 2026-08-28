@@ -301,6 +301,7 @@
 246  XeObReferenceObjectByHandle
 247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
 248  XeObReferenceObjectByPointer    # Xbox @8: the type is the only guard
+249  ObSymbolicLinkObjectType  XeObSymbolicLinkObjectType  # 28-byte Xbox-shape struct
 250  XeObfDereferenceObject          # a title object counts its own references
 251  XeObfReferenceObject
 

@@ -28,3 +28,4 @@ extern XBOX_OBJECT_TYPE XeIoFileObjectType;
 extern XBOX_OBJECT_TYPE XeIoDeviceObjectType;
 extern XBOX_OBJECT_TYPE XeIoCompletionObjectType;
 extern XBOX_OBJECT_TYPE XeObDirectoryObjectType;
+extern XBOX_OBJECT_TYPE XeObSymbolicLinkObjectType;

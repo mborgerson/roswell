@@ -1094,8 +1094,10 @@ extern NTSTATUS NTAPI ros_NtQuerySymbolicLinkObject(
 extern NTSTATUS NTAPI ros_NtDuplicateObject(
     HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG)
     __asm__("_NtDuplicateObject@28");
-/* Internal object-directory type (ob/obdir.c). */
+/* Internal object-directory and symbolic-link types (ob/obdir.c,
+ * ob/oblink.c). */
 extern POBJECT_TYPE ObpDirectoryObjectType;
+extern POBJECT_TYPE ObpSymbolicLinkObjectType;
 extern POBJECT_TYPE IoCompletionType;
 extern NTSTATUS NTAPI ObOpenObjectByName(
     POBJECT_ATTRIBUTES, POBJECT_TYPE, KPROCESSOR_MODE, PACCESS_STATE,
@@ -1766,6 +1768,7 @@ XeObjectTypeToInternal(PVOID Type)
     if (Type == &XeIoDeviceObjectType)    return IoDeviceObjectType;
     if (Type == &XeIoCompletionObjectType) return IoCompletionType;
     if (Type == &XeObDirectoryObjectType) return ObpDirectoryObjectType;
+    if (Type == &XeObSymbolicLinkObjectType) return ObpSymbolicLinkObjectType;
     return (POBJECT_TYPE)Type;
 }
 NTSTATUS NTAPI
