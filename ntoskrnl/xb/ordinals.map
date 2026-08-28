@@ -203,6 +203,7 @@
 159  KeWaitForSingleObject
 160  KfRaiseIrql
 161  KfLowerIrql
+162  KiBugCheckData                   # the live five-word record, zero until a bugcheck
 163  KiUnlockDispatcherDatabase  KiExitDispatcher  # holding the lock is holding DISPATCH_LEVEL
 
 # --- LaunchDataPage / Mm contiguous-memory family ------------------------ #
