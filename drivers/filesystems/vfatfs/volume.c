@@ -33,7 +33,10 @@ FsdGetFsVolumeInformation(
     DPRINT("LabelLength %hu\n", DeviceObject->Vpb->VolumeLabelLength);
     DPRINT("Label %.*S\n", DeviceObject->Vpb->VolumeLabelLength / sizeof(WCHAR), DeviceObject->Vpb->VolumeLabel);
 
-    ASSERT(*BufferLength >= sizeof(FILE_FS_VOLUME_INFORMATION));
+    /* The trailing name is truncatable -- a query with only the fixed head
+       reaches this FSD and is answered with STATUS_BUFFER_OVERFLOW below, so
+       the head is the precondition, not the whole struct. */
+    ASSERT(*BufferLength >= FIELD_OFFSET(FILE_FS_VOLUME_INFORMATION, VolumeLabel));
     *BufferLength -= FIELD_OFFSET(FILE_FS_VOLUME_INFORMATION, VolumeLabel);
 
     DeviceExt = DeviceObject->DeviceExtension;
@@ -96,7 +99,8 @@ FsdGetFsAttributeInformation(
     DPRINT("FsAttributeInfo = %p\n", FsAttributeInfo);
     DPRINT("BufferLength %lu\n", *BufferLength);
 
-    ASSERT(*BufferLength >= sizeof(FILE_FS_ATTRIBUTE_INFORMATION));
+    /* As in FsdGetFsVolumeInformation: the name truncates, the head does not. */
+    ASSERT(*BufferLength >= FIELD_OFFSET(FILE_FS_ATTRIBUTE_INFORMATION, FileSystemName));
     *BufferLength -= FIELD_OFFSET(FILE_FS_ATTRIBUTE_INFORMATION, FileSystemName);
 
     switch (DeviceExt->FatInfo.FatType)
