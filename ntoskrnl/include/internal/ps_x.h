@@ -50,7 +50,13 @@ PspRunCreateThreadNotifyRoutines(IN PETHREAD CurrentThread,
         {
             /* Do the callback */
             ExDoCallBack(&PspThreadNotifyRoutine[i],
+#ifdef SARCH_XBOX
+                         /* The console hands the callback the thread
+                          * itself where NT passes the owning process. */
+                         CurrentThread,
+#else
                          CurrentThread->Cid.UniqueProcess,
+#endif
                          CurrentThread->Cid.UniqueThread,
                          (PVOID)(ULONG_PTR)Create);
         }
