@@ -273,8 +273,7 @@ static bool t_attribute_information_truncates(void)
 static const test_entry_t io_volquery_entries[] = {
     { "only_four_classes_are_answered", t_only_four_classes_are_answered,
       NULL },
-    { "volume_information", t_volume_information,
-      "vfat starts the volume label at 18; the console starts it at 17" },
+    { "volume_information", t_volume_information, NULL },
     { "size_information", t_size_information, NULL },
     { "device_information", t_device_information, NULL },
     { "attribute_information_truncates",

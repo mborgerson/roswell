@@ -5706,6 +5706,12 @@ typedef struct _FILE_FS_LABEL_INFORMATION {
   WCHAR VolumeLabel[1];
 } FILE_FS_LABEL_INFORMATION, *PFILE_FS_LABEL_INFORMATION;
 
+#ifdef SARCH_XBOX
+/* The console packs this one: the label starts at 17, right behind the
+   BOOLEAN, where NT pads out to the WCHAR's own alignment first.  Every
+   caller reads the label at the offset the structure declares, so the
+   packing is the whole difference. */
+#include <pshpack1.h>
 typedef struct _FILE_FS_VOLUME_INFORMATION {
   LARGE_INTEGER VolumeCreationTime;
   ULONG VolumeSerialNumber;
@@ -5713,6 +5719,16 @@ typedef struct _FILE_FS_VOLUME_INFORMATION {
   BOOLEAN SupportsObjects;
   WCHAR VolumeLabel[1];
 } FILE_FS_VOLUME_INFORMATION, *PFILE_FS_VOLUME_INFORMATION;
+#include <poppack.h>
+#else
+typedef struct _FILE_FS_VOLUME_INFORMATION {
+  LARGE_INTEGER VolumeCreationTime;
+  ULONG VolumeSerialNumber;
+  ULONG VolumeLabelLength;
+  BOOLEAN SupportsObjects;
+  WCHAR VolumeLabel[1];
+} FILE_FS_VOLUME_INFORMATION, *PFILE_FS_VOLUME_INFORMATION;
+#endif
 
 typedef struct _FILE_FS_SIZE_INFORMATION {
   LARGE_INTEGER TotalAllocationUnits;
