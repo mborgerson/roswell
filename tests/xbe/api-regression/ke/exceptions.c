@@ -440,6 +440,32 @@ static bool t_dbg_break_point_with_status(void)
     return expect_exception(provoke_dbg_break_with_status, STATUS_BREAKPOINT);
 }
 
+/* The two failure reporters end in the same breakpoint.  Both print
+ * what they were given first, so with nothing attached the only thing
+ * left of them is the break -- and the fact that neither eats the
+ * caller's stack on the way there. */
+static void provoke_rtl_assert(void)
+{
+    RtlAssert((PVOID)"apireg == 0", (PVOID)"apireg.c", 1,
+              (PCHAR)"deliberate");
+}
+
+static void provoke_rtl_rip(void)
+{
+    RtlRip((PVOID)"ApiRegression", (PVOID)"apireg == 0",
+           (PVOID)"deliberate");
+}
+
+static bool t_rtl_assert(void)
+{
+    return expect_exception(provoke_rtl_assert, STATUS_BREAKPOINT);
+}
+
+static bool t_rtl_rip(void)
+{
+    return expect_exception(provoke_rtl_rip, STATUS_BREAKPOINT);
+}
+
 /* ContinueExecution with the fault repaired in memory: the write
  * faults on an uncommitted page, the handler commits it, and the
  * retried instruction succeeds. */
@@ -666,6 +692,8 @@ static const test_entry_t ke_exceptions_entries[] = {
     {"bound_range",               t_bound_range},
     {"dbg_break_point",             t_dbg_break_point},
     {"dbg_break_point_with_status", t_dbg_break_point_with_status},
+    {"rtl_assert",                  t_rtl_assert},
+    {"rtl_rip",                     t_rtl_rip},
     {"breakpoint",                t_breakpoint},
     {"continue_after_commit",     t_continue_after_commit},
     {"search_order_and_unwind",   t_search_order_and_unwind},

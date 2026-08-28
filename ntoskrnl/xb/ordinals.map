@@ -317,6 +317,7 @@
 261  RtlAppendStringToString
 262  RtlAppendUnicodeStringToString
 263  RtlAppendUnicodeToString
+264  XeRtlAssert                     # prints and breaks; ntoskrnl's own prompts forever
 265  XeRtlCaptureContext             # fills the Xbox CONTEXT layout
 266  RtlCaptureStackBackTrace        # kernel frame walk (flat ring-0; no user gate)
 267  RtlCharToInteger
@@ -405,6 +406,9 @@
 349  XcBlockCryptCBC
 350  XcCryptService                  # answers zero to every operation
 351  XcUpdateCrypto                  # replaces the vector every Xc entry dispatches through
+
+# --- Rtl failure reporting ------------------------------------------------ #
+352  XeRtlRip                        # prints and breaks, as RtlAssert does
 
 # --- HAL boot / shutdown ------------------------------------------------- #
 356  HalBootSMCVideoMode           # = 1 (HDTV)

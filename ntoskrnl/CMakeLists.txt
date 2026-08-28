@@ -145,6 +145,7 @@ list(APPEND PCH_SKIP_SOURCE
     xb/exflist.c
     xb/rtlprintf.c
     xb/rtlbyteswap.c
+    xb/rtlassert.c
     xb/xbe.c
     xb/object-types.c
     xb/obcreate.c
