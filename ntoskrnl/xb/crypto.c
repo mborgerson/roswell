@@ -429,10 +429,300 @@ Done:
 }
 
 /*
- * Cipher framework -- ABI-correct stubs.  Real implementations belong on
- * top of the same primitives once a title exercises them; this lets the
- * thunk-table call land on a balanced function and the title continue.
+ * Cipher framework -- DES and triple-DES, the two the console offers.
+ *
+ * The key table is opaque to the caller but its layout is not free: a
+ * title allocates it, so the sizes are fixed at 128 bytes for DES and
+ * 384 (one schedule per key) for triple-DES, and the bytes themselves
+ * are laid out the way the console lays them out.  Confirmed against
+ * the retail kernel, which builds the schedules the same way for every
+ * cipher number it is given: zero selects DES, anything else triple.
  */
+
+#define DES_TABLE_BYTES     128
+#define DES3_TABLE_BYTES    (3 * DES_TABLE_BYTES)
+#define DES_BLOCK_BYTES     8
+
+/* FIPS 46-3, one-based bit numbers, most significant bit first. */
+static const UCHAR DesIp[64] = {
+    58,50,42,34,26,18,10, 2, 60,52,44,36,28,20,12, 4,
+    62,54,46,38,30,22,14, 6, 64,56,48,40,32,24,16, 8,
+    57,49,41,33,25,17, 9, 1, 59,51,43,35,27,19,11, 3,
+    61,53,45,37,29,21,13, 5, 63,55,47,39,31,23,15, 7,
+};
+
+static const UCHAR DesFp[64] = {
+    40, 8,48,16,56,24,64,32, 39, 7,47,15,55,23,63,31,
+    38, 6,46,14,54,22,62,30, 37, 5,45,13,53,21,61,29,
+    36, 4,44,12,52,20,60,28, 35, 3,43,11,51,19,59,27,
+    34, 2,42,10,50,18,58,26, 33, 1,41, 9,49,17,57,25,
+};
+
+static const UCHAR DesE[48] = {
+    32, 1, 2, 3, 4, 5,  4, 5, 6, 7, 8, 9,
+     8, 9,10,11,12,13, 12,13,14,15,16,17,
+    16,17,18,19,20,21, 20,21,22,23,24,25,
+    24,25,26,27,28,29, 28,29,30,31,32, 1,
+};
+
+static const UCHAR DesP[32] = {
+    16, 7,20,21,29,12,28,17,  1,15,23,26, 5,18,31,10,
+     2, 8,24,14,32,27, 3, 9, 19,13,30, 6,22,11, 4,25,
+};
+
+static const UCHAR DesPc1[56] = {
+    57,49,41,33,25,17, 9,  1,58,50,42,34,26,18,
+    10, 2,59,51,43,35,27, 19,11, 3,60,52,44,36,
+    63,55,47,39,31,23,15,  7,62,54,46,38,30,22,
+    14, 6,61,53,45,37,29, 21,13, 5,28,20,12, 4,
+};
+
+static const UCHAR DesPc2[48] = {
+    14,17,11,24, 1, 5,  3,28,15, 6,21,10,
+    23,19,12, 4,26, 8, 16, 7,27,20,13, 2,
+    41,52,31,37,47,55, 30,40,51,45,33,48,
+    44,49,39,56,34,53, 46,42,50,36,29,32,
+};
+
+static const UCHAR DesShifts[16] = {
+    1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1
+};
+
+static const UCHAR DesSBox[8][64] = {
+    {14, 4,13, 1, 2,15,11, 8, 3,10, 6,12, 5, 9, 0, 7,
+      0,15, 7, 4,14, 2,13, 1,10, 6,12,11, 9, 5, 3, 8,
+      4, 1,14, 8,13, 6, 2,11,15,12, 9, 7, 3,10, 5, 0,
+     15,12, 8, 2, 4, 9, 1, 7, 5,11, 3,14,10, 0, 6,13},
+    {15, 1, 8,14, 6,11, 3, 4, 9, 7, 2,13,12, 0, 5,10,
+      3,13, 4, 7,15, 2, 8,14,12, 0, 1,10, 6, 9,11, 5,
+      0,14, 7,11,10, 4,13, 1, 5, 8,12, 6, 9, 3, 2,15,
+     13, 8,10, 1, 3,15, 4, 2,11, 6, 7,12, 0, 5,14, 9},
+    {10, 0, 9,14, 6, 3,15, 5, 1,13,12, 7,11, 4, 2, 8,
+     13, 7, 0, 9, 3, 4, 6,10, 2, 8, 5,14,12,11,15, 1,
+     13, 6, 4, 9, 8,15, 3, 0,11, 1, 2,12, 5,10,14, 7,
+      1,10,13, 0, 6, 9, 8, 7, 4,15,14, 3,11, 5, 2,12},
+    { 7,13,14, 3, 0, 6, 9,10, 1, 2, 8, 5,11,12, 4,15,
+     13, 8,11, 5, 6,15, 0, 3, 4, 7, 2,12, 1,10,14, 9,
+     10, 6, 9, 0,12,11, 7,13,15, 1, 3,14, 5, 2, 8, 4,
+      3,15, 0, 6,10, 1,13, 8, 9, 4, 5,11,12, 7, 2,14},
+    { 2,12, 4, 1, 7,10,11, 6, 8, 5, 3,15,13, 0,14, 9,
+     14,11, 2,12, 4, 7,13, 1, 5, 0,15,10, 3, 9, 8, 6,
+      4, 2, 1,11,10,13, 7, 8,15, 9,12, 5, 6, 3, 0,14,
+     11, 8,12, 7, 1,14, 2,13, 6,15, 0, 9,10, 4, 5, 3},
+    {12, 1,10,15, 9, 2, 6, 8, 0,13, 3, 4,14, 7, 5,11,
+     10,15, 4, 2, 7,12, 9, 5, 6, 1,13,14, 0,11, 3, 8,
+      9,14,15, 5, 2, 8,12, 3, 7, 0, 4,10, 1,13,11, 6,
+      4, 3, 2,12, 9, 5,15,10,11,14, 1, 7, 6, 0, 8,13},
+    { 4,11, 2,14,15, 0, 8,13, 3,12, 9, 7, 5,10, 6, 1,
+     13, 0,11, 7, 4, 9, 1,10,14, 3, 5,12, 2,15, 8, 6,
+      1, 4,11,13,12, 3, 7,14,10,15, 6, 8, 0, 5, 9, 2,
+      6,11,13, 8, 1, 4,10, 7, 9, 5, 0,15,14, 2, 3,12},
+    {13, 2, 8, 4, 6,15,11, 1,10, 9, 3,14, 5, 0,12, 7,
+      1,15,13, 8,10, 3, 7, 4,12, 5, 6,11, 0,14, 9, 2,
+      7,11, 4, 1, 9,12,14, 2, 0, 6,10,13,15, 3, 5, 8,
+      2, 1,14, 7, 4,10, 8,13,15,12, 9, 0, 3, 5, 6,11},
+};
+
+/* The sixteen round keys, six bits per S-box, ready to XOR. */
+typedef struct _DES_KEY
+{
+    UCHAR Round[16][8];
+} DES_KEY;
+
+static ULONG
+DesBit(const UCHAR *Bytes, ULONG Position)
+{
+    return (Bytes[(Position - 1) >> 3] >> (7 - ((Position - 1) & 7))) & 1;
+}
+
+static VOID
+DesPermute(PUCHAR Out, const UCHAR *In, const UCHAR *Table, ULONG Bits)
+{
+    ULONG i;
+
+    RtlZeroMemory(Out, (Bits + 7) / 8);
+    for (i = 0; i < Bits; i++)
+        Out[i >> 3] |= (UCHAR)(DesBit(In, Table[i]) << (7 - (i & 7)));
+}
+
+/*
+ * A round key occupies two little-endian words: the first carries the
+ * inputs to S1, S3, S5 and S7, the second those to S2, S4, S6 and S8,
+ * six bits apiece at an eight-bit stride, least significant bit first,
+ * starting two bits into the first word and six into the second -- where
+ * the eighth wraps around the top.
+ */
+#define DES_KEY_SHIFT(k)    ((((k) >> 1) * 8 + (((k) & 1) ? 6 : 2)) & 31)
+
+static VOID
+DesStoreRound(PUCHAR Table, const UCHAR *Subkey)
+{
+    ULONG Word[2] = {0, 0};
+    ULONG k, b, Shift, Six;
+
+    for (k = 0; k < 8; k++)
+    {
+        Six = 0;
+        for (b = 0; b < 6; b++)
+            Six |= (ULONG)Subkey[k * 6 + b] << b;
+        Shift = DES_KEY_SHIFT(k);
+        Word[k & 1] |= (Six << Shift) | (Shift > 26 ? (Six >> (32 - Shift)) : 0);
+    }
+
+    for (k = 0; k < 2; k++)
+    {
+        Table[k * 4 + 0] = (UCHAR)Word[k];
+        Table[k * 4 + 1] = (UCHAR)(Word[k] >> 8);
+        Table[k * 4 + 2] = (UCHAR)(Word[k] >> 16);
+        Table[k * 4 + 3] = (UCHAR)(Word[k] >> 24);
+    }
+}
+
+static VOID
+DesLoadKey(DES_KEY *Key, const UCHAR *Table)
+{
+    ULONG r, k, b, Shift, Six;
+    ULONG Word[2];
+
+    for (r = 0; r < 16; r++)
+    {
+        for (k = 0; k < 2; k++)
+            Word[k] = (ULONG)Table[r * 8 + k * 4] |
+                      ((ULONG)Table[r * 8 + k * 4 + 1] << 8) |
+                      ((ULONG)Table[r * 8 + k * 4 + 2] << 16) |
+                      ((ULONG)Table[r * 8 + k * 4 + 3] << 24);
+
+        for (k = 0; k < 8; k++)
+        {
+            UCHAR Value = 0;
+
+            Shift = DES_KEY_SHIFT(k);
+            Six = (Word[k & 1] >> Shift) |
+                  (Shift > 26 ? (Word[k & 1] << (32 - Shift)) : 0);
+            for (b = 0; b < 6; b++)
+                Value |= (UCHAR)(((Six >> b) & 1) << (5 - b));
+            Key->Round[r][k] = Value;
+        }
+    }
+}
+
+/* Key -> the console's key table: PC-1, the round rotations, PC-2. */
+static VOID
+DesSchedule(PUCHAR Table, const UCHAR *KeyBytes)
+{
+    ULONG Left = 0, Right = 0;
+    UCHAR Subkey[48];
+    ULONG i, j;
+
+    for (i = 0; i < 28; i++)
+    {
+        Left |= DesBit(KeyBytes, DesPc1[i]) << (27 - i);
+        Right |= DesBit(KeyBytes, DesPc1[i + 28]) << (27 - i);
+    }
+
+    for (i = 0; i < 16; i++)
+    {
+        Left = ((Left << DesShifts[i]) |
+                (Left >> (28 - DesShifts[i]))) & 0x0FFFFFFF;
+        Right = ((Right << DesShifts[i]) |
+                 (Right >> (28 - DesShifts[i]))) & 0x0FFFFFFF;
+
+        for (j = 0; j < 48; j++)
+        {
+            ULONG Bit = DesPc2[j];
+
+            Subkey[j] = (UCHAR)(Bit <= 28 ? (Left >> (28 - Bit)) & 1
+                                          : (Right >> (56 - Bit)) & 1);
+        }
+        DesStoreRound(Table + i * 8, Subkey);
+    }
+}
+
+static VOID
+DesBlock(PUCHAR Out, const UCHAR *In, const DES_KEY *Key, BOOLEAN Decrypt)
+{
+    UCHAR State[8], Left[4], Right[4], Feistel[4], SOut[4];
+    ULONG Round, k, i;
+
+    DesPermute(State, In, DesIp, 64);
+    RtlCopyMemory(Left, State, 4);
+    RtlCopyMemory(Right, State + 4, 4);
+
+    for (Round = 0; Round < 16; Round++)
+    {
+        const UCHAR *Subkey = Key->Round[Decrypt ? 15 - Round : Round];
+
+        RtlZeroMemory(SOut, sizeof(SOut));
+        for (k = 0; k < 8; k++)
+        {
+            UCHAR Six = 0, Value;
+            ULONG Row, Column;
+
+            for (i = 0; i < 6; i++)
+                Six |= (UCHAR)(DesBit(Right, DesE[k * 6 + i]) << (5 - i));
+            Six ^= Subkey[k];
+
+            Row = ((Six >> 4) & 2) | (Six & 1);
+            Column = (Six >> 1) & 0x0F;
+            Value = DesSBox[k][Row * 16 + Column];
+            SOut[k >> 1] |= (UCHAR)((k & 1) ? Value : (Value << 4));
+        }
+
+        DesPermute(Feistel, SOut, DesP, 32);
+        for (i = 0; i < 4; i++)
+            Feistel[i] ^= Left[i];
+        RtlCopyMemory(Left, Right, 4);
+        RtlCopyMemory(Right, Feistel, 4);
+    }
+
+    RtlCopyMemory(State, Right, 4);
+    RtlCopyMemory(State + 4, Left, 4);
+    DesPermute(Out, State, DesFp, 64);
+}
+
+/*
+ * One block through the cipher the table was built for.  Triple-DES
+ * runs the three schedules encrypt-decrypt-encrypt, and in the other
+ * order the other way round; every operation code but zero encrypts.
+ */
+static VOID
+DesCryptBlock(PUCHAR Out, const UCHAR *In, const DES_KEY *Keys,
+              ULONG KeyCount, BOOLEAN Decrypt)
+{
+    if (KeyCount == 1)
+    {
+        DesBlock(Out, In, &Keys[0], Decrypt);
+        return;
+    }
+
+    if (!Decrypt)
+    {
+        DesBlock(Out, In, &Keys[0], FALSE);
+        DesBlock(Out, Out, &Keys[1], TRUE);
+        DesBlock(Out, Out, &Keys[2], FALSE);
+    }
+    else
+    {
+        DesBlock(Out, In, &Keys[2], TRUE);
+        DesBlock(Out, Out, &Keys[1], FALSE);
+        DesBlock(Out, Out, &Keys[0], TRUE);
+    }
+}
+
+static ULONG
+DesKeyCount(ULONG Cipher)
+{
+    return Cipher == 0 ? 1 : 3;
+}
+
+static VOID
+DesLoadTable(DES_KEY *Keys, ULONG KeyCount, const UCHAR *Table)
+{
+    ULONG i;
+
+    for (i = 0; i < KeyCount; i++)
+        DesLoadKey(&Keys[i], Table + i * DES_TABLE_BYTES);
+}
 
 /*
  * Force odd parity on every key byte: the low bit is the parity bit, set
@@ -459,9 +749,12 @@ XcDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
 VOID NTAPI
 XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
 {
-    UNREFERENCED_PARAMETER(Cipher);
-    UNREFERENCED_PARAMETER(Key);
-    RtlZeroMemory(KeyTable, 256);
+    ULONG Keys = DesKeyCount(Cipher);
+    ULONG i;
+
+    for (i = 0; i < Keys; i++)
+        DesSchedule((PUCHAR)KeyTable + i * DES_TABLE_BYTES,
+                    (const UCHAR *)Key + i * 8);
 }
 
 VOID NTAPI
@@ -469,12 +762,41 @@ XcBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
                 _In_ PVOID In, _In_ PVOID KeyTable, _In_ ULONG Op,
                 _Inout_ PVOID Feedback)
 {
-    UNREFERENCED_PARAMETER(Cipher);
-    UNREFERENCED_PARAMETER(KeyTable);
-    UNREFERENCED_PARAMETER(Op);
-    UNREFERENCED_PARAMETER(Feedback);
-    if (Out && In && Len)
-        RtlCopyMemory(Out, In, Len);
+    DES_KEY Keys[3];
+    ULONG Count = DesKeyCount(Cipher);
+    PUCHAR Chain = (PUCHAR)Feedback;
+    const UCHAR *Source = (const UCHAR *)In;
+    PUCHAR Target = (PUCHAR)Out;
+    UCHAR Block[DES_BLOCK_BYTES];
+    ULONG i;
+
+    if (Len < DES_BLOCK_BYTES)
+        return;
+
+    DesLoadTable(Keys, Count, (const UCHAR *)KeyTable);
+
+    /* The chaining value is the caller's, and it leaves holding the last
+     * ciphertext block whichever direction the run went. */
+    for (; Len >= DES_BLOCK_BYTES; Len -= DES_BLOCK_BYTES)
+    {
+        if (Op != 0)
+        {
+            for (i = 0; i < DES_BLOCK_BYTES; i++)
+                Block[i] = (UCHAR)(Source[i] ^ Chain[i]);
+            DesCryptBlock(Target, Block, Keys, Count, FALSE);
+            RtlCopyMemory(Chain, Target, DES_BLOCK_BYTES);
+        }
+        else
+        {
+            RtlCopyMemory(Block, Source, DES_BLOCK_BYTES);
+            DesCryptBlock(Target, Source, Keys, Count, TRUE);
+            for (i = 0; i < DES_BLOCK_BYTES; i++)
+                Target[i] ^= Chain[i];
+            RtlCopyMemory(Chain, Block, DES_BLOCK_BYTES);
+        }
+        Source += DES_BLOCK_BYTES;
+        Target += DES_BLOCK_BYTES;
+    }
 }
 
 /* EOF */
