@@ -82,11 +82,43 @@ static bool t_it_is_the_smbus_write(void)
     return true;
 }
 
+/* HalEnableSecureTrayEject hands the eject button to the title.  What
+ * it does about the tray is not visible from here -- under emulation
+ * nothing reflects it back -- so what is covered is that it returns,
+ * costs the caller nothing, and leaves every SMC register a title can
+ * read where it was. */
+static bool t_secure_tray_eject_disturbs_nothing(void)
+{
+    ULONG tray0, tray1, count0, count1, avpack0, avpack1, scratch0, scratch1;
+
+    ASSERT_NTSTATUS(HalReadSMCTrayState(&tray0, &count0), STATUS_SUCCESS);
+    ASSERT_NTSTATUS(HalReadSMBusValue(SMC_ADDRESS, 0x04, FALSE, &avpack0),
+                    STATUS_SUCCESS);
+    if (!scratch(&scratch0)) return false;
+
+    HalEnableSecureTrayEject();
+    HalEnableSecureTrayEject();
+
+    ASSERT_EQ_U32(KeGetCurrentIrql(), PASSIVE_LEVEL);
+    ASSERT_NTSTATUS(HalReadSMCTrayState(&tray1, &count1), STATUS_SUCCESS);
+    ASSERT_NTSTATUS(HalReadSMBusValue(SMC_ADDRESS, 0x04, FALSE, &avpack1),
+                    STATUS_SUCCESS);
+    if (!scratch(&scratch1)) return false;
+
+    ASSERT_EQ_U32(tray1, tray0);
+    ASSERT_EQ_U32(count1, count0);
+    ASSERT_EQ_U32(avpack1, avpack0);
+    ASSERT_EQ_U32(scratch1, scratch0);
+    return true;
+}
+
 static const test_entry_t hal_smc_entries[] = {
     { "the_byte_written_reads_back", t_the_byte_written_reads_back, NULL },
     { "only_the_low_byte_reaches_the_smc",
       t_only_the_low_byte_reaches_the_smc, NULL },
     { "it_is_the_smbus_write", t_it_is_the_smbus_write, NULL },
+    { "secure_tray_eject_disturbs_nothing",
+      t_secure_tray_eject_disturbs_nothing, NULL },
 };
 
 DEFINE_GROUP(hal_smc, "hal/smc");

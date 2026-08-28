@@ -72,6 +72,19 @@ HalReadSMCTrayState(_Out_ PULONG State, _Out_opt_ PULONG Count)
     return status;
 }
 
+/*
+ * A title that means to handle the eject button itself asks for the
+ * secure form first; the console then leaves the tray to the title
+ * instead of rebooting to the dashboard behind its back.  There is no
+ * eject-driven reboot here to switch off -- the SMC interrupt is not
+ * wired up, which is why NxkHalTrayCount never moves -- so the request
+ * is recorded for the ISR that will consult it, and the ordinal is
+ * safe to call in the meantime.
+ */
+static volatile BOOLEAN NxkHalSecureTrayEject = FALSE;
+
+VOID NTAPI HalEnableSecureTrayEject(VOID) { NxkHalSecureTrayEject = TRUE; }
+
 /* Titles poll HalIsResetOrShutdownPending to skip background work after a
  * user-initiated shutdown was requested via HalInitiateShutdown.  The actual
  * power-off comes later through HalReturnToFirmware. */

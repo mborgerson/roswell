@@ -422,6 +422,7 @@
 358  HalIsResetOrShutdownPending
 359  IoMarkIrpMustComplete
 360  HalInitiateShutdown
+365  HalEnableSecureTrayEject      # the title takes the eject button over from the dashboard
 366  HalWriteSMCScratchRegister    # the SMC's low byte only, over SMBus
 
 # --- Rtl printf family (xb/rtlprintf.c -> runtime _vsnprintf) ------------- #
