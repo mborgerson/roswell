@@ -157,7 +157,7 @@
 120  KeInterruptTime                  # live interrupt-time counter; clock advances it
 121  KeIsExecutingDpc
 122  KeLeaveCriticalRegion
-123                                   # different sig from NT KePulseEvent, needs adapter
+123  KePulseEvent                     # signature matches NT; reports the pre-pulse state
 124  KeQueryBasePriorityThread
 125  XeKeQueryInterruptTime          # ULONGLONG
 126  XeKeQueryPerformanceCounter     # ULONGLONG

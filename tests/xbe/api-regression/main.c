@@ -107,6 +107,7 @@ DECLARE_GROUP(io_threadirp);
 DECLARE_GROUP(xc_align);
 DECLARE_GROUP(ex_timer);
 DECLARE_GROUP(ob_bypointer);
+DECLARE_GROUP(ke_pulse);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -187,6 +188,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_io_createfile,
     &g_group_io_threadirp,
     &g_group_ob_bypointer,
+    &g_group_ke_pulse,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
