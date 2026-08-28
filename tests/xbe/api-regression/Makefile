@@ -82,5 +82,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/startio.c \
        $(CURDIR)/xc/cipher.c \
        $(CURDIR)/xc/vector.c \
-       $(CURDIR)/io/createfile.c
+       $(CURDIR)/io/createfile.c \
+       $(CURDIR)/io/threadirp.c
 include $(NXDK_DIR)/Makefile
