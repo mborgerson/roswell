@@ -147,6 +147,7 @@ list(APPEND PCH_SKIP_SOURCE
     xb/rtlbyteswap.c
     xb/xbe.c
     xb/object-types.c
+    xb/obcreate.c
     xb/psstats.c
     xb/devnode.c
     xb/nxldr-entry.c)

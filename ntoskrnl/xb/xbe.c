@@ -27,6 +27,7 @@
 
 #include "strace.h"
 #include "object-types.h"
+#include "obcreate.h"
 #include "mm/mm.h"
 
 /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
@@ -1274,6 +1275,14 @@ XeTranslateOa(_In_opt_ PXBE_OBJECT_ATTRIBUTES Xbox,
     return Nt;
 }
 
+/* obcreate.c builds the shim object's attributes with the same
+ * translation every other named entry uses. */
+POBJECT_ATTRIBUTES
+XeTranslateXboxOa(PVOID Xbox, POBJECT_ATTRIBUTES Nt, PUNICODE_STRING Name)
+{
+    return XeTranslateOa(Xbox, Nt, Name);
+}
+
 NTSTATUS NTAPI
 XeNtAllocateVirtualMemory(PVOID *Base, ULONG_PTR ZeroBits, PSIZE_T Size,
                             ULONG Type, ULONG Protect)
@@ -1762,6 +1771,25 @@ XeObjectTypeToInternal(PVOID Type)
 NTSTATUS NTAPI
 XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
 {
+    /* A title's own objects reach the handle table through a shim, so
+     * once any exist every handle may be one. */
+    if (XobHasTitleObjects())
+    {
+        PVOID Shim;
+
+        if (NT_SUCCESS(ObReferenceObjectByHandle(Handle, 0,
+                                                 XobShimObjectType(),
+                                                 KernelMode, &Shim, NULL)))
+            return XobUnwrapShim(Shim, Type, Object);
+
+        /* Nothing but a title object can be of a title's type, and the
+         * lookup below would take that pointer for one of ntoskrnl's. */
+        if (XobIsTitleType(Type))
+        {
+            *Object = NULL;
+            return STATUS_OBJECT_TYPE_MISMATCH;
+        }
+    }
     return ObReferenceObjectByHandle(Handle, 0, XeObjectTypeToInternal(Type),
                                      KernelMode, Object, NULL);
 }
@@ -1780,8 +1808,17 @@ XeObjectIsOfType(PVOID Object, POBJECT_TYPE Internal)
 NTSTATUS NTAPI
 XeObReferenceObjectByPointer(PVOID Object, PVOID Type)
 {
-    POBJECT_TYPE Internal = XeObjectTypeToInternal(Type);
+    POBJECT_TYPE Internal;
 
+    if (XobHasTitleObjects() && XobIsTitleObject(Object))
+    {
+        if (Type != NULL && XobObjectType(Object) != Type)
+            return STATUS_OBJECT_TYPE_MISMATCH;
+        XobReferenceObject(Object);
+        return STATUS_SUCCESS;
+    }
+
+    Internal = XeObjectTypeToInternal(Type);
     if (!XeObjectIsOfType(Object, Internal))
         return STATUS_OBJECT_TYPE_MISMATCH;
     return ObReferenceObjectByPointer(Object, 0, Internal, KernelMode);
@@ -1792,8 +1829,12 @@ XeObReferenceObjectByPointer(PVOID Object, PVOID Type)
 NTSTATUS NTAPI
 XeObOpenObjectByPointer(PVOID Object, PVOID Type, PHANDLE Handle)
 {
-    POBJECT_TYPE Internal = XeObjectTypeToInternal(Type);
+    POBJECT_TYPE Internal;
 
+    if (XobHasTitleObjects() && XobIsTitleObject(Object))
+        return XobOpenTitleObject(Object, Type, Handle);
+
+    Internal = XeObjectTypeToInternal(Type);
     if (!XeObjectIsOfType(Object, Internal))
     {
         *Handle = NULL;
@@ -1802,6 +1843,35 @@ XeObOpenObjectByPointer(PVOID Object, PVOID Type, PHANDLE Handle)
     return ObOpenObjectByPointer(Object, 0, NULL, GENERIC_ALL, Internal,
                                  KernelMode, Handle);
 }
+/*
+ * The unqualified reference pair and ObMakeTemporaryObject take a bare
+ * object pointer, so each has to know whose object it is before it
+ * touches the header in front of it.
+ */
+VOID FASTCALL
+XeObfReferenceObject(PVOID Object)
+{
+    if (XobHasTitleObjects() && XobIsTitleObject(Object))
+        XobReferenceObject(Object);
+    else
+        ObfReferenceObject(Object);
+}
+VOID FASTCALL
+XeObfDereferenceObject(PVOID Object)
+{
+    if (XobHasTitleObjects() && XobIsTitleObject(Object))
+        XobDereferenceObject(Object);
+    else
+        ObfDereferenceObject(Object);
+}
+VOID NTAPI
+XeObMakeTemporaryObject(PVOID Object)
+{
+    if (XobHasTitleObjects() && XobIsTitleObject(Object))
+        XobMakeTemporary(Object);
+    else
+        ObMakeTemporaryObject(Object);
+}
 NTSTATUS NTAPI
 XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
                        PVOID ParseContext, PHANDLE Handle)
@@ -1809,7 +1879,10 @@ XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
     OBJECT_ATTRIBUTES ntoa;
     UNICODE_STRING name;
     POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
-    NTSTATUS status = ObOpenObjectByName(oa, XeObjectTypeToInternal(Type),
+    NTSTATUS status = ObOpenObjectByName(oa,
+                                         XobIsTitleType(Type)
+                                             ? XobShimObjectType()
+                                             : XeObjectTypeToInternal(Type),
                                          KernelMode, NULL, GENERIC_ALL,
                                          ParseContext, Handle);
     if (name.Buffer != NULL)
@@ -1841,7 +1914,8 @@ XeObReferenceObjectByName(PANSI_STRING ObjectName, ULONG Attributes,
     if (oa == NULL || oa->ObjectName == NULL)
         return STATUS_OBJECT_NAME_INVALID;
 
-    Internal = XeObjectTypeToInternal(Type);
+    Internal = XobIsTitleType(Type) ? XobShimObjectType()
+                                    : XeObjectTypeToInternal(Type);
 
     /* The lookup reads its generic mapping straight out of the type it is
      * handed, so it needs a real one even when the caller asked for any
@@ -1855,6 +1929,10 @@ XeObReferenceObjectByName(PANSI_STRING ObjectName, ULONG Attributes,
                                      KernelMode, ParseContext, Object);
     if (name.Buffer != NULL)
         RtlFreeUnicodeString(&name);
+
+    /* A title object stands in the namespace behind its shim. */
+    if (NT_SUCCESS(status) && XobHasTitleObjects() && XobIsShim(*Object))
+        return XobUnwrapShim(*Object, Type, Object);
 
     /* NT treats the requested type as advisory for kernel-mode callers;
      * the console has no user mode, so the type argument is the caller's

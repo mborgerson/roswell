@@ -284,15 +284,17 @@
 # Remaining anonymous OBJECT_TYPE ords (240/245/249/256) follow the same
 # pattern as 259 when needed: bind to the corresponding ReactOS Ob/Io*Type
 # pointer.  Add them when a title imports them.
+239  XeObCreateObject                # title-owned storage: the type allocates
 240  ObDirectoryObjectType  XeObDirectoryObjectType  # 28-byte Xbox-shape struct
-242  ObMakeTemporaryObject
+241  XeObInsertObject                # handle + namespace, via the shim object
+242  XeObMakeTemporaryObject
 243  XeObOpenObjectByName            # Xbox @16: decoy type + ANSI oa -> NT
 244  XeObOpenObjectByPointer         # Xbox @12: decoy type, no access mask
 246  XeObReferenceObjectByHandle
 247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
 248  XeObReferenceObjectByPointer    # Xbox @8: the type is the only guard
-250  ObfDereferenceObject
-251  ObfReferenceObject
+250  XeObfDereferenceObject          # a title object counts its own references
+251  XeObfReferenceObject
 
 # --- Ethernet PHY -------------------------------------------------------- #
 # MII-bus access via the MCPX NIC at PA 0xFEF00000.
