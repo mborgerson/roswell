@@ -118,6 +118,7 @@
 85   IoSynchronousFsdRequest          XeIoSynchronousFsdRequest
 86   IofCallDriver                    # fastcall ABI matches
 87   IofCompleteRequest               # fastcall ABI matches
+90   XeIoDismountVolume               # dispatches to the owning driver
 91   XeIoDismountVolumeByName         # Xbox ANSI device path
 
 # --- DATA: Kd debugger-presence flags ------------------------------------ #

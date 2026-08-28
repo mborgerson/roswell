@@ -2325,19 +2325,15 @@ extern NTSTATUS NTAPI ros_NtOpenFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
  * answer to the request is not the caller's business.  Only a name that
  * resolves to nothing is reported, as STATUS_OBJECT_NAME_NOT_FOUND.
  */
-NTSTATUS NTAPI
-XeIoDismountVolumeByName(PANSI_STRING DeviceName)
+static NTSTATUS
+XeDismountNamedVolume(PUNICODE_STRING Name)
 {
     OBJECT_ATTRIBUTES oa;
     IO_STATUS_BLOCK iosb;
-    UNICODE_STRING name;
     HANDLE handle;
     NTSTATUS status;
 
-    status = RtlAnsiStringToUnicodeString(&name, DeviceName, TRUE);
-    if (!NT_SUCCESS(status)) return status;
-
-    InitializeObjectAttributes(&oa, &name,
+    InitializeObjectAttributes(&oa, Name,
                                OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
                                NULL, NULL);
     status = ros_NtOpenFile(&handle, SYNCHRONIZE | FILE_READ_ATTRIBUTES, &oa,
@@ -2345,13 +2341,63 @@ XeIoDismountVolumeByName(PANSI_STRING DeviceName)
                             FILE_SHARE_READ | FILE_SHARE_WRITE |
                                 FILE_SHARE_DELETE,
                             FILE_SYNCHRONOUS_IO_NONALERT);
-    RtlFreeUnicodeString(&name);
     if (!NT_SUCCESS(status)) return status;
 
     ros_NtFsControlFile(handle, NULL, NULL, NULL, &iosb,
                         FSCTL_DISMOUNT_VOLUME, NULL, 0, NULL, 0);
     NtClose(handle);
     return STATUS_SUCCESS;
+}
+NTSTATUS NTAPI
+XeIoDismountVolumeByName(PANSI_STRING DeviceName)
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+
+    status = RtlAnsiStringToUnicodeString(&name, DeviceName, TRUE);
+    if (!NT_SUCCESS(status)) return status;
+
+    status = XeDismountNamedVolume(&name);
+    RtlFreeUnicodeString(&name);
+    return status;
+}
+/*
+ * The by-object form dispatches straight into the driver that owns the
+ * device: a console file system publishes a dismount entry point in its
+ * driver object, and whatever it answers is what the caller gets.
+ * Nothing else of the driver object is touched -- a title owns that
+ * storage and it ends at the dispatch table.
+ *
+ * Ours are NT file systems with no such entry point, so for those the
+ * request goes down as the FSCTL the by-name form uses, addressed at the
+ * device the volume is mounted on.  A device with nothing mounted has
+ * nothing to take down and reports success, which is what the console
+ * answers for a raw partition.
+ */
+typedef NTSTATUS (NTAPI *PXBE_DRIVER_DISMOUNTVOLUME)(PDEVICE_OBJECT);
+
+NTSTATUS NTAPI
+XeIoDismountVolume(PDEVICE_OBJECT DeviceObject)
+{
+    UCHAR buffer[sizeof(OBJECT_NAME_INFORMATION) + 128 * sizeof(WCHAR)];
+    POBJECT_NAME_INFORMATION name = (POBJECT_NAME_INFORMATION)buffer;
+    PDRIVER_OBJECT driver = DeviceObject->DriverObject;
+    PDEVICE_OBJECT real;
+    ULONG returned;
+    NTSTATUS status;
+
+    if (driver != NULL && driver->DriverDismountVolume != NULL)
+        return ((PXBE_DRIVER_DISMOUNTVOLUME)driver->DriverDismountVolume)(
+                   DeviceObject);
+
+    if (DeviceObject->Vpb == NULL || DeviceObject->Vpb->RealDevice == NULL)
+        return STATUS_SUCCESS;
+    real = DeviceObject->Vpb->RealDevice;
+
+    status = ObQueryNameString(real, name, sizeof(buffer), &returned);
+    if (!NT_SUCCESS(status) || name->Name.Length == 0)
+        return STATUS_SUCCESS;
+    return XeDismountNamedVolume(&name->Name);
 }
 
 extern NTSTATUS NTAPI NtQueryEvent(HANDLE, EVENT_INFORMATION_CLASS, PVOID,
