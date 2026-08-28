@@ -54,10 +54,11 @@
 21   ExInterlockedCompareExchange64  ExfInterlockedCompareExchange64  # 3-pointer CAS64 (ex; Xbox @12, no spinlock)
 22   ExMutantObjectType  XeExMutantObjectType  # 28-byte Xbox-shape struct
 23   XeExQueryPoolBlockSize          # Xbox @4 -> NT @8 adapter
-24   ExQueryNonVolatileSetting     # EEPROM setting -- zeroed defaults
+24   ExQueryNonVolatileSetting     # a console setting, out of the EEPROM
 26   ExRaiseException  RtlRaiseException   # raise a caller-built EXCEPTION_RECORD
 27   ExRaiseStatus     RtlRaiseStatus      # raise a bare NTSTATUS as an exception
 28   ExReleaseReadWriteLock           # ERWLOCK release (xb/rwlock.c)
+29   ExSaveNonVolatileSetting         # write a user setting back to the EEPROM
 30   ExSemaphoreObjectType  XeExSemaphoreObjectType  # 28-byte Xbox-shape struct
 31   ExTimerObjectType  XeExTimerObjectType   # 28-byte Xbox-shape struct
 32   ExfInterlockedInsertHeadList  XbExfInterlockedInsertHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)

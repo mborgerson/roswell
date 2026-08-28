@@ -450,7 +450,203 @@ static bool t_the_hd_key_is_the_sealed_one(void)
     return true;
 }
 
+/* --- ExSaveNonVolatileSetting -------------------------------------------
+ *
+ * These write the console's own part, so every case puts back what it
+ * found: the value is read first and restored last, and the checksum
+ * that covers the section is a function of the section, so restoring
+ * the value restores the part exactly.
+ *
+ * 0x000D is the static IP address -- a setting the dashboard rewrites
+ * whenever the console is configured, so a moment's disturbance costs
+ * nothing.
+ */
+#define SAVE_INDEX   0x000D
+#define SAVE_OFFSET  0xA8
+
+/* Records a failure and evaluates to false, so a case that has already
+ * disturbed the part can note it and still reach its restore. */
+#define SAVE_FAIL(fmt, ...) \
+    (test_record_failure(__FILE__, __LINE__, fmt, ##__VA_ARGS__), false)
+
+static bool save_setting(ULONG index, ULONG type, const void *value,
+                         ULONG length, NTSTATUS expect)
+{
+    NTSTATUS s = ExSaveNonVolatileSetting(index, type, (PVOID)value, length);
+    if (s != expect)
+        FAIL_AND_RETURN("save 0x%04x len %u: 0x%08x expected 0x%08x",
+                        (unsigned)index, (unsigned)length, (unsigned)s,
+                        (unsigned)expect);
+    return true;
+}
+
+/* A saved value reaches the part, not just the kernel's copy of it. */
+static bool t_a_saved_setting_reaches_the_part(void)
+{
+    ULONG original = 0, readback = 0, type = 0, len = 0;
+    ULONG written = 0x0A141EC8;
+    UCHAR raw[4];
+    bool ok;
+
+    ASSERT_NTSTATUS(ExQueryNonVolatileSetting(SAVE_INDEX, &type, &original,
+                                              sizeof(original), &len),
+                    STATUS_SUCCESS);
+
+    ok = save_setting(SAVE_INDEX, NVS_DWORD, &written, 4, STATUS_SUCCESS);
+    if (ok) {
+        if (!eeprom_bytes(SAVE_OFFSET, 4, raw))
+            ok = false;
+        else if (memcmp(raw, &written, 4) != 0)
+            ok = SAVE_FAIL("the part holds %02x%02x%02x%02x, not the saved value",
+                      raw[0], raw[1], raw[2], raw[3]);
+    }
+    if (ok) {
+        NTSTATUS s = ExQueryNonVolatileSetting(SAVE_INDEX, &type, &readback,
+                                               sizeof(readback), &len);
+        if (!NT_SUCCESS(s))
+            ok = SAVE_FAIL("query after save: 0x%08x", (unsigned)s);
+        else if (readback != written)
+            ok = SAVE_FAIL("read back 0x%08x, saved 0x%08x",
+                           (unsigned)readback, (unsigned)written);
+    }
+
+    /* Put it back whatever happened above. */
+    ExSaveNonVolatileSetting(SAVE_INDEX, NVS_DWORD, &original, 4);
+    return ok;
+}
+
+/* A value shorter than the setting clears the rest of it rather than
+ * leaving the old bytes behind. */
+static bool t_a_short_value_clears_the_rest(void)
+{
+    ULONG original = 0, type = 0, len = 0;
+    ULONG full = 0xFFFFFFFF, part = 0x11223344;
+    UCHAR raw[4];
+    bool ok;
+
+    ASSERT_NTSTATUS(ExQueryNonVolatileSetting(SAVE_INDEX, &type, &original,
+                                              sizeof(original), &len),
+                    STATUS_SUCCESS);
+
+    ok = save_setting(SAVE_INDEX, NVS_DWORD, &full, 4, STATUS_SUCCESS) &&
+         save_setting(SAVE_INDEX, NVS_DWORD, &part, 2, STATUS_SUCCESS);
+    if (ok) {
+        if (!eeprom_bytes(SAVE_OFFSET, 4, raw))
+            ok = false;
+        else if (raw[0] != 0x44 || raw[1] != 0x33 || raw[2] != 0 || raw[3] != 0)
+            ok = SAVE_FAIL("the part holds %02x%02x%02x%02x after a two-byte save",
+                      raw[0], raw[1], raw[2], raw[3]);
+    }
+
+    ExSaveNonVolatileSetting(SAVE_INDEX, NVS_DWORD, &original, 4);
+    return ok;
+}
+
+/* The declared type is not kept: a query still reports the setting's. */
+static bool t_the_saved_type_is_not_kept(void)
+{
+    ULONG original = 0, type = 0, len = 0, value = 0;
+    bool ok;
+
+    ASSERT_NTSTATUS(ExQueryNonVolatileSetting(SAVE_INDEX, &type, &original,
+                                              sizeof(original), &len),
+                    STATUS_SUCCESS);
+
+    ok = save_setting(SAVE_INDEX, NVS_BINARY, &original, 4, STATUS_SUCCESS);
+    if (ok) {
+        type = 0;
+        ASSERT_NTSTATUS(ExQueryNonVolatileSetting(SAVE_INDEX, &type, &value,
+                                                  sizeof(value), &len),
+                        STATUS_SUCCESS);
+        if (type != NVS_DWORD)
+            ok = SAVE_FAIL("type %u after saving as binary", (unsigned)type);
+    }
+
+    ExSaveNonVolatileSetting(SAVE_INDEX, NVS_DWORD, &original, 4);
+    return ok;
+}
+
+/* Only the user section takes a write.  The factory settings and the
+ * sealed one are refused as names; the whole part is recognised and
+ * refused as a parameter. */
+static bool t_only_the_user_section_can_be_written(void)
+{
+    static const ULONG absent[] = { 0x0100, 0x0101, 0x0102, 0x0103, 0x0104,
+                                    0x0013, 0x0080, 0x0200 };
+    UCHAR value[4] = { 0, 0, 0, 0 };
+    ULONG i;
+
+    for (i = 0; i < sizeof(absent) / sizeof(absent[0]); i++)
+        if (!save_setting(absent[i], NVS_DWORD, value, 4,
+                          STATUS_OBJECT_NAME_NOT_FOUND))
+            return false;
+
+    return save_setting(0xFFFF, NVS_BINARY, value, 4, STATUS_INVALID_PARAMETER);
+}
+
+/* A value the setting cannot hold is refused, and nothing moves. */
+static bool t_a_value_longer_than_the_setting_is_refused(void)
+{
+    UCHAR big[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    UCHAR before[4], after[4];
+
+    if (!eeprom_bytes(SAVE_OFFSET, 4, before))
+        return false;
+    if (!save_setting(SAVE_INDEX, NVS_DWORD, big, 8, STATUS_INVALID_PARAMETER))
+        return false;
+    if (!eeprom_bytes(SAVE_OFFSET, 4, after))
+        return false;
+    if (memcmp(before, after, 4) != 0)
+        FAIL_AND_RETURN("the refused save moved the part anyway");
+    return true;
+}
+
+/* The sum in front of the user section has to keep covering it, or the
+ * dashboard rejects the part. */
+static bool t_the_user_checksum_follows_the_section(void)
+{
+    ULONG original = 0, type = 0, len = 0, written = 0x0A141EC9;
+    UCHAR section[0x60];
+    ULONGLONG sum = 0;
+    ULONG stored, computed, i;
+    bool ok;
+
+    ASSERT_NTSTATUS(ExQueryNonVolatileSetting(SAVE_INDEX, &type, &original,
+                                              sizeof(original), &len),
+                    STATUS_SUCCESS);
+
+    ok = save_setting(SAVE_INDEX, NVS_DWORD, &written, 4, STATUS_SUCCESS);
+    if (ok && !eeprom_bytes(0x60, sizeof(section), section))
+        ok = false;
+    if (ok) {
+        memcpy(&stored, section, sizeof(stored));
+        for (i = 4; i + 4 <= sizeof(section); i += 4) {
+            ULONG word;
+            memcpy(&word, section + i, sizeof(word));
+            sum += word;
+        }
+        computed = ~(ULONG)((sum >> 32) + (ULONG)sum);
+        if (stored != computed)
+            ok = SAVE_FAIL("the part's sum is 0x%08x, the section's is 0x%08x",
+                      (unsigned)stored, (unsigned)computed);
+    }
+
+    ExSaveNonVolatileSetting(SAVE_INDEX, NVS_DWORD, &original, 4);
+    return ok;
+}
+
 static const test_entry_t ex_eeprom_entries[] = {
+    { "a_saved_setting_reaches_the_part",
+      t_a_saved_setting_reaches_the_part, NULL },
+    { "a_short_value_clears_the_rest",
+      t_a_short_value_clears_the_rest, NULL },
+    { "the_saved_type_is_not_kept", t_the_saved_type_is_not_kept, NULL },
+    { "only_the_user_section_can_be_written",
+      t_only_the_user_section_can_be_written, NULL },
+    { "a_value_longer_than_the_setting_is_refused",
+      t_a_value_longer_than_the_setting_is_refused, NULL },
+    { "the_user_checksum_follows_the_section",
+      t_the_user_checksum_follows_the_section, NULL },
     { "the_hd_key_is_the_sealed_one", t_the_hd_key_is_the_sealed_one, NULL },
     { "the_time_zone_comes_from_the_user_section",
       t_the_time_zone_comes_from_the_user_section, NULL },

@@ -27,6 +27,8 @@
 /* SMBus primitives (hal/halx86/xbox/smbus.c). */
 NTSTATUS HalpXboxSmBusReadByte(_In_ UCHAR Address, _In_ UCHAR Register,
                                _Out_ PUCHAR Value);
+NTSTATUS HalpXboxSmBusWriteByte(_In_ UCHAR Address, _In_ UCHAR Register,
+                                _In_ UCHAR Value);
 
 /* The console's doubled SHA-1 with settable start states (xb/crypto.c). */
 VOID NxkShaKeyedDouble(_In_reads_(5) const ULONG *First,
@@ -220,6 +222,123 @@ NxkEepromOpen(VOID)
      * leave nothing of a wrong guess behind. */
     RtlZeroMemory(NxkEepromPlain, sizeof(NxkEepromPlain));
     return FALSE;
+}
+
+/*
+ * Each section carries a running 32-bit sum of the words behind it, the
+ * carry out folded back in and the result complemented.  A part whose
+ * sums do not match what follows them is one the dashboard rejects, so
+ * a write has to leave them right.
+ */
+static ULONG
+NxkEepromChecksum(const UCHAR *Data, ULONG Length)
+{
+    ULONGLONG Sum = 0;
+    ULONG i;
+
+    for (i = 0; i < Length / sizeof(ULONG); i++)
+    {
+        ULONG Word;
+        RtlCopyMemory(&Word, Data + i * sizeof(ULONG), sizeof(Word));
+        Sum += Word;
+    }
+
+    return ~(ULONG)((Sum >> 32) + (ULONG)Sum);
+}
+
+#define EEPROM_USER_CHECKSUM  0x60
+#define EEPROM_USER_COVERED   0x5C      /* 0x64 .. 0xBF */
+
+/* Push a run of the kept image out to the part. */
+static NTSTATUS
+NxkEepromStore(ULONG Offset, ULONG Length)
+{
+    ULONG i;
+
+    for (i = 0; i < Length; i++)
+    {
+        NTSTATUS Status =
+            HalpXboxSmBusWriteByte(EEPROM_SLAVE_ADDRESS, (UCHAR)(Offset + i),
+                                   NxkEepromImage[Offset + i]);
+        if (!NT_SUCCESS(Status))
+            return Status;
+    }
+    return STATUS_SUCCESS;
+}
+
+/*
+ * Writing a setting.  Only the user section takes one: a factory index
+ * is refused as a name, the same as an index that is not a setting at
+ * all, and the sealed section has no index on this side.
+ *
+ * A value shorter than the setting is allowed and clears the rest of it
+ * -- the whole setting is zeroed before the caller's bytes go in.  A
+ * value longer than the setting is refused.  The declared type is not
+ * kept: a later query still reports the setting's own.
+ */
+NTSTATUS NTAPI
+ExSaveNonVolatileSetting(ULONG ValueIndex, ULONG Type, PVOID Value,
+                         ULONG ValueLength)
+{
+    ULONG Offset, Length, i;
+
+    UNREFERENCED_PARAMETER(Type);
+
+    if (!NxkEepromLoad())
+        return STATUS_DEVICE_NOT_READY;
+
+    for (i = 0; i < RTL_NUMBER_OF(NxkEepromSettings); i++)
+    {
+        if (NxkEepromSettings[i].Index != ValueIndex)
+            continue;
+        /* The factory settings and the sealed one are read-only. */
+        if (NxkEepromSettings[i].Sealed || NxkEepromSettings[i].Offset < 0x60)
+            return STATUS_OBJECT_NAME_NOT_FOUND;
+
+        Offset = NxkEepromSettings[i].Offset;
+        Length = NxkEepromSettings[i].Length;
+        goto found;
+    }
+
+    /* Only the user section is writable as a whole; the rest are
+     * recognised and refused rather than treated as absent. */
+    for (i = 0; i < RTL_NUMBER_OF(NxkEepromSections); i++)
+    {
+        if (NxkEepromSections[i].Index != ValueIndex)
+            continue;
+        if (NxkEepromSections[i].Index != 0x00FF)
+            return STATUS_INVALID_PARAMETER;
+
+        Offset = NxkEepromSections[i].Offset;
+        Length = NxkEepromSections[i].Length;
+        goto found;
+    }
+
+    return STATUS_OBJECT_NAME_NOT_FOUND;
+
+found:
+    if (Value == NULL || ValueLength > Length)
+        return STATUS_INVALID_PARAMETER;
+
+    RtlZeroMemory(NxkEepromImage + Offset, Length);
+    RtlCopyMemory(NxkEepromImage + Offset, Value, ValueLength);
+
+    /* The sum covers what follows it, so it is recomputed after the
+     * setting lands and before either reaches the part. */
+    {
+        ULONG Sum = NxkEepromChecksum(
+            NxkEepromImage + EEPROM_USER_CHECKSUM + sizeof(ULONG),
+            EEPROM_USER_COVERED);
+        RtlCopyMemory(NxkEepromImage + EEPROM_USER_CHECKSUM, &Sum,
+                      sizeof(Sum));
+    }
+
+    {
+        NTSTATUS Status = NxkEepromStore(EEPROM_USER_CHECKSUM, sizeof(ULONG));
+        if (NT_SUCCESS(Status))
+            Status = NxkEepromStore(Offset, Length);
+        return Status;
+    }
 }
 
 NTSTATUS NTAPI
