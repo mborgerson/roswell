@@ -364,6 +364,7 @@
 307  RtlUlongByteSwap              # FASTCALL byteswap (xb/rtlbyteswap.c)
 308  RtlUnicodeStringToAnsiString
 310  RtlUnicodeToMultiByteN
+309  RtlUnicodeStringToInteger
 311  RtlUnicodeToMultiByteSize
 312  RtlUnwind
 313  RtlUpcaseUnicodeChar

@@ -5,9 +5,65 @@
  * export to reference them.  One test per export.
  */
 
+/* The vendored nxdk header decorates this one with XBAPI where NTAPI
+ * belongs, so its declaration comes out cdecl and cannot resolve the
+ * @12 stdcall export.  Rename it out of the way on the way in and
+ * declare the shape the import library carries. */
+#define RtlUnicodeStringToInteger nxdk_RtlUnicodeStringToInteger
 #include "../harness.h"
+#undef RtlUnicodeStringToInteger
 #include <string.h>
 #include <wchar.h>
+
+__declspec(dllimport) NTSTATUS NTAPI RtlUnicodeStringToInteger
+(
+    PUNICODE_STRING String,
+    ULONG Base,
+    PULONG Value
+);
+
+/* The counted-string counterpart of RtlCharToInteger: same bases, same
+ * autodetection, and it stops at the string's length rather than at a
+ * terminator. */
+static bool t_unicode_string_to_integer(void)
+{
+    UNICODE_STRING s;
+    ULONG v;
+
+    RtlInitUnicodeString(&s, L"12345");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 10, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 12345);
+
+    RtlInitUnicodeString(&s, L"ff");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 16, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 0xff);
+
+    RtlInitUnicodeString(&s, L"777");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 8, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 0777);
+
+    /* base 0 autodetects the prefix, as the char form does. */
+    RtlInitUnicodeString(&s, L"0x1f");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 0, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 0x1f);
+
+    /* A leading sign is taken. */
+    RtlInitUnicodeString(&s, L"-5");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 10, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, (ULONG)-5);
+
+    /* The length bounds the scan: the digits past it are not read. */
+    RtlInitUnicodeString(&s, L"1234");
+    s.Length = 2 * sizeof(WCHAR);
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 10, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 12);
+
+    /* A digit the base does not have ends the number. */
+    RtlInitUnicodeString(&s, L"12a");
+    ASSERT_NTSTATUS(RtlUnicodeStringToInteger(&s, 10, &v), STATUS_SUCCESS);
+    ASSERT_EQ_U32(v, 12);
+    return true;
+}
 
 static bool t_char_to_integer(void)
 {
@@ -235,6 +291,7 @@ static bool t_extended_magic_divide(void)
 
 static const test_entry_t rtl_intconv_entries[] = {
     {"char_to_integer", t_char_to_integer},
+    {"unicode_string_to_integer", t_unicode_string_to_integer},
     {"integer_to_char", t_integer_to_char},
     {"integer_to_unicode_string", t_integer_to_unicode_string},
     {"compare_string", t_compare_string},
