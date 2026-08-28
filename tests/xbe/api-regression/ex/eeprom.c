@@ -426,7 +426,32 @@ static bool t_reading_twice_gives_the_same_answer(void)
     return true;
 }
 
+/* The HDD key is published as a datum, not through a call: it is the 16
+ * bytes the sealed section carries between the confounder and the
+ * region, and it has to be there before a title ever runs. */
+static bool t_the_hd_key_is_the_sealed_one(void)
+{
+    UCHAR plain[0x1C];
+
+    if (!eeprom_open_sealed(plain))
+        return false;
+
+    if (memcmp(XboxHDKey, plain + 8, 16) != 0)
+        FAIL_AND_RETURN("XboxHDKey is not the sealed section's HDD key");
+
+    /* A part that opened has a key in it; all zeros would mean the
+     * export is still the scaffold. */
+    {
+        UCHAR zero[16];
+        memset(zero, 0, sizeof(zero));
+        if (memcmp(XboxHDKey, zero, sizeof(zero)) == 0)
+            FAIL_AND_RETURN("XboxHDKey is all zeros");
+    }
+    return true;
+}
+
 static const test_entry_t ex_eeprom_entries[] = {
+    { "the_hd_key_is_the_sealed_one", t_the_hd_key_is_the_sealed_one, NULL },
     { "the_time_zone_comes_from_the_user_section",
       t_the_time_zone_comes_from_the_user_section, NULL },
     { "the_user_settings_come_from_the_user_section",

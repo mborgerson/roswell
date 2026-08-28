@@ -383,6 +383,7 @@
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #
 322  XboxHardwareInfo              # 8-byte XBOX_HARDWARE_INFO; USB-hub flag + GPU/MCP revs (not the 4-byte scaffold)
+323  XboxHDKey                     # 16-byte console HDD key, out of the EEPROM's sealed section
 324  XboxKrnlVersion               # 8-byte XBOX_KRNL_VERSION; titles gate on Major=1
 326  XeImageFileName               # ANSI_STRING -- the running image name
 

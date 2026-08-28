@@ -1428,6 +1428,12 @@ Phase1InitializationDiscard(IN PVOID Context)
     /* Get the SOS setting */
     SosEnabled = (CommandLine && strstr(CommandLine, "SOS") != NULL);
 
+    /* Open the EEPROM before any title can read the key it publishes. */
+    {
+        extern VOID NxkInitializeEeprom(VOID);
+        NxkInitializeEeprom();
+    }
+
     /* Bring up the UC MMIO window + NV2A CRTC/TV encoder BEFORE bootvid
      * latches the framebuffer pointer.  Without this, VidInitialize reads
      * the unprogrammed NV2A and disables itself ("Unsupported screen

@@ -175,6 +175,13 @@ static const struct
 static UCHAR   NxkEepromPlain[EEPROM_SEALED_LENGTH];
 static BOOLEAN NxkEepromOpened = FALSE;
 
+/*
+ * The console's hard-disk key, a DATA export.  A title reads the datum
+ * itself rather than calling for it, so it has to hold the key before
+ * any title runs -- see NxkInitializeEeprom below.
+ */
+UCHAR XboxHDKey[16];
+
 static BOOLEAN
 NxkEepromOpen(VOID)
 {
@@ -202,6 +209,8 @@ NxkEepromOpen(VOID)
         if (RtlCompareMemory(Check, NxkEepromImage, sizeof(Check)) ==
             sizeof(Check))
         {
+            /* Section layout: confounder[8], HDD key[16], region. */
+            RtlCopyMemory(XboxHDKey, NxkEepromPlain + 8, sizeof(XboxHDKey));
             NxkEepromOpened = TRUE;
             return TRUE;
         }
@@ -278,6 +287,18 @@ ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type, PVOID Value,
     }
 
     return STATUS_OBJECT_NAME_NOT_FOUND;
+}
+
+/*
+ * Opened at boot rather than on the first query: the HDD key is read as
+ * a datum and there is no call on that path to open it lazily.  A part
+ * that will not open leaves the key zeroed and every stored setting
+ * still answering.
+ */
+VOID
+NxkInitializeEeprom(VOID)
+{
+    (VOID)NxkEepromOpen();
 }
 
 /* EOF */
