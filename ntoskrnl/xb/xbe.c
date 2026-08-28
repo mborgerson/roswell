@@ -328,6 +328,7 @@ XePsCreateSystemThreadEx(
 {
     PXBE_THREAD_CTX ctx;
     NTSTATUS status;
+    CLIENT_ID cid;
     HANDLE handle;
 
     UNREFERENCED_PARAMETER(ThreadExtensionSize);
@@ -357,7 +358,7 @@ XePsCreateSystemThreadEx(
      * CreateThread(CREATE_SUSPENDED) parks the thread until
      * NtResumeThread so the creator can set priority/affinity first. */
     status = NxkPsCreateSystemThread(&handle, THREAD_ALL_ACCESS, NULL, NULL,
-                                     NULL, XeThreadTrampoline, ctx,
+                                     &cid, XeThreadTrampoline, ctx,
                                      KernelStackSize, CreateSuspended);
     if (!NT_SUCCESS(status))
     {
@@ -368,7 +369,7 @@ XePsCreateSystemThreadEx(
 
     *ThreadHandle = handle;
     if (ThreadId != NULL)
-        *ThreadId = handle;             /* bring-up: handle stands in for ID */
+        *ThreadId = cid.UniqueThread;
     return STATUS_SUCCESS;
 }
 
@@ -385,12 +386,14 @@ XePsCreateSystemThread(_Out_ PHANDLE ThreadHandle,
                         _In_ BOOLEAN DebuggerThread)
 {
     NTSTATUS status;
+    CLIENT_ID cid;
+
     UNREFERENCED_PARAMETER(DebuggerThread);
 
     status = PsCreateSystemThread(ThreadHandle, THREAD_ALL_ACCESS, NULL,
-                                  NULL, NULL, StartRoutine, StartContext);
+                                  NULL, &cid, StartRoutine, StartContext);
     if (NT_SUCCESS(status) && ThreadId != NULL)
-        *ThreadId = *ThreadHandle;      /* handle stands in for ID */
+        *ThreadId = cid.UniqueThread;
     return status;
 }
 
