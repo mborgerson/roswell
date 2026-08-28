@@ -1005,7 +1005,14 @@ VfatCreateFile(
 
         if (RequestedDisposition == FILE_SUPERSEDE)
         {
+#ifdef SARCH_XBOX
+            /* The console answers a supersede the way it answers an
+             * overwrite, so a title reading the status block cannot
+             * tell the two dispositions apart. */
+            Irp->IoStatus.Information = FILE_OVERWRITTEN;
+#else
             Irp->IoStatus.Information = FILE_SUPERSEDED;
+#endif
         }
         else if (RequestedDisposition == FILE_OVERWRITE ||
                  RequestedDisposition == FILE_OVERWRITE_IF)
