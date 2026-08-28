@@ -235,6 +235,45 @@ static bool t_sha_final_reinitialises(void)
     }
 }
 
+/* The RC4 key struct is 258 bytes from the start of the caller's buffer. */
+static bool t_rc4_key_struct(void)
+{
+    static const unsigned char key[5] = {1, 2, 3, 4, 5};
+    /* The first bytes of the schedule, as the console builds it. */
+    static const unsigned char head[16] = {
+        0x01,0x03,0x08,0xc9,0x15,0x1b,0x23,0x43,
+        0xf2,0x91,0xcf,0x59,0x5c,0x6d,0x1f,0x90};
+    unsigned char data[8];
+    unsigned i;
+
+    memset(g_ctx, CTX_GUARD, sizeof(g_ctx));
+    XcRC4Key(g_ctx, sizeof(key), (PUCHAR)key);
+    if (!digest_eq(g_ctx, head, sizeof(head), "rc4 key struct"))
+        return false;
+    for (i = 258; i < sizeof(g_ctx); i++)
+        ASSERT_EQ_U32(g_ctx[i], CTX_GUARD);
+
+    /* Encrypting keeps the state inside the same 258 bytes. */
+    memset(data, 0, sizeof(data));
+    XcRC4Crypt(g_ctx, sizeof(data), data);
+    for (i = 258; i < sizeof(g_ctx); i++)
+        ASSERT_EQ_U32(g_ctx[i], CTX_GUARD);
+    return true;
+}
+
+/* HMAC writes its twenty bytes and no more. */
+static bool t_hmac_digest_width(void)
+{
+    unsigned char digest[64];
+    unsigned i;
+
+    memset(digest, CTX_GUARD, sizeof(digest));
+    XcHMAC((PUCHAR)"key", 3, (PUCHAR)"abc", 3, (PUCHAR)"def", 3, digest);
+    for (i = 20; i < sizeof(digest); i++)
+        ASSERT_EQ_U32(digest[i], CTX_GUARD);
+    return true;
+}
+
 static const test_entry_t xc_crypto_entries[] = {
     {"sha1_abc", t_sha1_abc},
     {"sha1_empty", t_sha1_empty},
@@ -246,6 +285,8 @@ static const test_entry_t xc_crypto_entries[] = {
     {"sha_context_layout", t_sha_context_layout},
     {"sha_context_counts_bytes", t_sha_context_counts_bytes},
     {"sha_final_reinitialises", t_sha_final_reinitialises},
+    {"rc4_key_struct", t_rc4_key_struct},
+    {"hmac_digest_width", t_hmac_digest_width},
 };
 
 DEFINE_GROUP(xc_crypto, "xc/crypto");
