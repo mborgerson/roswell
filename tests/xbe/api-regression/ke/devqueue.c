@@ -9,8 +9,9 @@
  * past the end of the title's structure.
  *
  * The insert/remove routines run at DISPATCH_LEVEL, which is also the
- * whole exclusion on a uniprocessor console, so every case raises IRQL
- * around the queue operations.
+ * whole exclusion on a uniprocessor console, so the cases below raise
+ * IRQL around the queue operations -- except the last one, which is
+ * there to show the console does not require it.
  */
 
 #include "../harness.h"
@@ -307,6 +308,41 @@ static bool t_device_lock_follows_queue(void)
     return true;
 }
 
+/* NT documents these as DISPATCH_LEVEL-only and the console does not
+ * enforce it: a title calling in from PASSIVE_LEVEL gets the same queue
+ * behaviour and its own level back.  IoStartNextPacket takes exactly
+ * that route on the caller's behalf (io/startio), so the ordinals have
+ * to answer there too. */
+static bool t_a_passive_level_caller_is_taken(void)
+{
+    KDEVICE_QUEUE q;
+    KDEVICE_QUEUE_ENTRY e1, e2;
+    PKDEVICE_QUEUE_ENTRY got;
+    BOOLEAN ins1, ins2;
+    KIRQL entry, after;
+
+    KeInitializeDeviceQueue(&q);
+    memset(&e1, 0, sizeof(e1));
+    memset(&e2, 0, sizeof(e2));
+
+    entry = KeGetCurrentIrql();
+    ins1 = KeInsertDeviceQueue(&q, &e1);
+    ins2 = KeInsertDeviceQueue(&q, &e2);
+    got = KeRemoveDeviceQueue(&q);
+    after = KeGetCurrentIrql();
+
+    tap_comment("devqueue passive: caller=%u after=%u",
+                (unsigned)entry, (unsigned)after);
+
+    ASSERT_EQ_U32(entry, PASSIVE_LEVEL);
+    ASSERT_EQ_U32(ins1, FALSE);
+    ASSERT_EQ_U32(ins2, TRUE);
+    ASSERT_EQ_PTR(got, &e2);
+    ASSERT_EQ_U32(q.Busy, TRUE);
+    ASSERT_EQ_U32(after, entry);
+    return true;
+}
+
 static const test_entry_t ke_devqueue_entries[] = {
     {"initialize",                  t_initialize},
     {"insert_remove",               t_insert_remove},
@@ -316,6 +352,7 @@ static const test_entry_t ke_devqueue_entries[] = {
     {"remove_entry",                t_remove_entry},
     {"device_object_queue",         t_device_object_queue},
     {"device_lock_follows_queue",    t_device_lock_follows_queue},
+    {"a_passive_level_caller_is_taken", t_a_passive_level_caller_is_taken},
 };
 
 DEFINE_GROUP(ke_devqueue, "ke/devqueue");
