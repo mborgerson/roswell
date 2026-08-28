@@ -400,6 +400,59 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
 #define PK_EXPONENT(k)      ((const ULONG *)(k) + 4)
 #define PK_MODULUS(k)       ((const ULONG *)(k) + 5)
 
+/*
+ * The raw public-key operation.  The caller's value is not the modulus'
+ * width but eight bytes wider, and the console reads all of it: the two
+ * words above the modulus have to be zero, and the whole value below the
+ * modulus, or it refuses without writing anything.  What it writes back
+ * is the same width, the answer with those eight bytes zeroed.
+ */
+static ULONG NTAPI
+XcpPKEncPublic(_In_ PVOID PubKey, _In_ PVOID In, _Out_ PVOID Out)
+{
+    ULONG Top = PK_MODULUS_TOP(PubKey);
+    ULONG Bytes = Top + 1;
+    ULONG Words = Bytes / 4;
+    PULONG Pool, Base, Exp, Mod, Result;
+    ULONG Answer = 0;
+    ULONG i;
+
+    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS)
+        return 0;
+
+    Pool = ExAllocatePoolWithTag(NonPagedPool, 4 * Bytes + 8, 'pXcX');
+    if (Pool == NULL)
+        return 0;
+    Base = Pool;
+    Exp = Base + Words + 2;
+    Mod = Exp + Words;
+    Result = Mod + Words;
+
+    RtlCopyMemory(Base, In, Bytes + 8);
+    RtlZeroMemory(Exp, Bytes);
+    Exp[0] = *PK_EXPONENT(PubKey);
+    RtlCopyMemory(Mod, PK_MODULUS(PubKey), Bytes);
+
+    /* Anything above the modulus' width, or at or above the modulus
+     * itself, is refused rather than reduced. */
+    if (Base[Words] != 0 || Base[Words + 1] != 0)
+        goto Done;
+    if (BnCompare(Base, Mod, Words) != (ULONG)-1)
+        goto Done;
+
+    if (XcpModExp(Result, Base, Exp, Mod, Words) == 0)
+        goto Done;
+
+    RtlCopyMemory(Out, Result, Bytes);
+    for (i = 0; i < 8; i++)
+        ((PUCHAR)Out)[Bytes + i] = 0;
+    Answer = 1;
+
+Done:
+    ExFreePool(Pool);
+    return Answer;
+}
+
 static ULONG NTAPI
 XcpPKGetKeyLen(_In_ PVOID PubKey)
 {
@@ -920,19 +973,19 @@ typedef struct _XC_VECTOR
 } XC_VECTOR, *PXC_VECTOR;
 
 /*
- * Two slots have no routine behind them: the raw public and private key
- * operations are unmapped ordinals still, so the slot carries the export
- * scaffold's own stub.  Reaching them through the vector then bugchecks
- * naming the ordinal, exactly as calling the export does.
+ * One slot has no routine behind it: the private key operation is an
+ * unmapped ordinal still -- the layout of the blob it wants is unknown
+ * -- so the slot carries the export scaffold's own stub.  Reaching it
+ * through the vector then bugchecks naming the ordinal, exactly as
+ * calling the export does.
  */
-ULONG __stdcall XbExpStub_341(ULONG, ULONG, ULONG);
 ULONG __stdcall XbExpStub_342(ULONG, ULONG, ULONG);
 
 #define XC_ROM_VECTOR                                       \
 {                                                           \
     XcpSHAInit, XcpSHAUpdate, XcpSHAFinal,                  \
     XcpRC4Key, XcpRC4Crypt, XcpHMAC,                        \
-    (ULONG (NTAPI *)(PVOID, PVOID, PVOID))XbExpStub_341,    \
+    XcpPKEncPublic,                                         \
     (ULONG (NTAPI *)(PVOID, PVOID, PVOID))XbExpStub_342,    \
     XcpPKGetKeyLen, XcpVerifyPKCS1Signature, XcpModExp,     \
     XcpDESKeyParity, XcpKeyTable, XcpBlockCrypt,            \
@@ -980,6 +1033,9 @@ VOID NTAPI XcRC4Crypt(_In_ PVOID KeyStruct, _In_ ULONG Len, _Inout_ PVOID Data)
 VOID NTAPI XcHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
                   _In_ PVOID I2, _In_ ULONG L2, _Out_writes_(20) PVOID Out)
 { XcVector.HMAC(K, Kl, I1, L1, I2, L2, Out); }
+
+ULONG NTAPI XcPKEncPublic(_In_ PVOID PubKey, _In_ PVOID In, _Out_ PVOID Out)
+{ return XcVector.PKEncPublic(PubKey, In, Out); }
 
 ULONG NTAPI XcPKGetKeyLen(_In_ PVOID PubKey)
 { return XcVector.PKGetKeyLen(PubKey); }

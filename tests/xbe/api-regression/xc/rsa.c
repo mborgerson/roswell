@@ -283,6 +283,140 @@ static bool t_verify_smaller_key(void)
     return true;
 }
 
+
+/* 3 raised by the public exponent under PUBKEY, as the console answers it. */
+static const UCHAR ENC_OF_THREE[256] = {
+    0x98,0x05,0x50,0x1b,0xf5,0x6a,0xc8,0x5d,0x8e,0x7f,0x04,0xd1,
+    0x33,0xcd,0x1c,0xd9,0xbe,0xc2,0x30,0x83,0x86,0x4a,0xd3,0xc9,
+    0xce,0x79,0x6e,0xe5,0x80,0x0d,0x1b,0x1d,0x60,0xd9,0xea,0x3c,
+    0xe6,0xef,0x8a,0x4d,0xf4,0x58,0x03,0x53,0x68,0x91,0x0e,0xd6,
+    0x2a,0x52,0x4e,0x6a,0x2e,0x61,0x78,0x05,0x6c,0x35,0x69,0x48,
+    0x60,0xc8,0x70,0xf7,0xcc,0xf5,0x7c,0x73,0xcb,0x15,0xd0,0xd6,
+    0xd9,0x3f,0x30,0x2c,0x2b,0x5e,0x73,0x2a,0xe8,0x37,0xc7,0xcc,
+    0xeb,0xac,0x24,0x88,0x08,0x54,0x22,0xd6,0x3f,0x72,0x28,0x44,
+    0x5b,0xb6,0x3e,0xca,0x04,0x24,0x6d,0xdc,0xd2,0x43,0xfc,0xaa,
+    0xd8,0x60,0xd5,0xa6,0xbf,0xbd,0x52,0x30,0x63,0xfa,0xe5,0xa7,
+    0x1f,0x81,0xe7,0x2d,0xab,0xbb,0x85,0x7a,0xed,0xaf,0xa3,0xff,
+    0x10,0xd1,0x2e,0xd9,0x43,0x10,0x38,0x94,0xe5,0xaf,0xd6,0x61,
+    0x1b,0x00,0x7e,0xed,0xc4,0x50,0xc7,0xea,0x4c,0x60,0x3f,0xd1,
+    0x4b,0x11,0xb3,0x78,0x76,0x00,0x7a,0x3a,0xf0,0xf5,0x92,0x9d,
+    0x90,0x82,0x7e,0x9f,0x01,0x5b,0xee,0xa4,0x05,0x52,0x3b,0x8a,
+    0x92,0xe0,0x41,0x1f,0x3f,0x62,0x59,0x34,0x32,0xf0,0x86,0x88,
+    0x8c,0xfe,0x7a,0x8a,0x48,0x23,0x57,0xfb,0xf1,0xdd,0x3b,0xce,
+    0x95,0xdc,0x6b,0xf4,0x8c,0x6f,0x26,0x72,0xc2,0xaa,0x88,0xf5,
+    0x8d,0xdd,0xbe,0x27,0xec,0x40,0x47,0x6a,0x95,0x6a,0x83,0x9a,
+    0x09,0xa3,0x5c,0xa3,0x62,0xad,0xb0,0xd7,0x31,0xfc,0xd0,0x72,
+    0x7c,0xbd,0x2e,0x3d,0x67,0x21,0x84,0x4f,0xf9,0xbb,0xa2,0x36,
+    0xf1,0x62,0x2c,0x0a,
+};
+
+#define PK_GUARD 0xCC
+
+static UCHAR g_pk_in[512], g_pk_out[512];
+
+static bool pk_bytes_eq(const UCHAR *got, const UCHAR *want, unsigned n,
+                        const char *tag)
+{
+    unsigned i;
+    for (i = 0; i < n; i++) {
+        if (got[i] != want[i]) {
+            test_record_failure(__FILE__, __LINE__,
+                "%s: byte %u got 0x%02x expected 0x%02x",
+                tag, i, got[i], want[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+static void pk_set(const UCHAR *value, unsigned n)
+{
+    memset(g_pk_in, 0, sizeof(g_pk_in));
+    if (value != NULL)
+        memcpy(g_pk_in, value, n);
+    memset(g_pk_out, PK_GUARD, sizeof(g_pk_out));
+}
+
+/* The raw public operation, against a value the console answered. */
+static bool t_encpublic(void)
+{
+    static const UCHAR three[1] = {3};
+    unsigned i;
+
+    pk_set(three, 1);
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 1);
+    if (!pk_bytes_eq(g_pk_out, ENC_OF_THREE, 256, "encpublic(3)"))
+        return false;
+
+    /* The answer is eight bytes wider than the modulus, and those eight
+     * are zeroed; nothing past them is touched. */
+    for (i = 256; i < 264; i++)
+        ASSERT_EQ_U32(g_pk_out[i], 0);
+    for (i = 264; i < sizeof(g_pk_out); i++)
+        ASSERT_EQ_U32(g_pk_out[i], PK_GUARD);
+    return true;
+}
+
+/* It is the same operation the signature check runs internally. */
+static bool t_encpublic_is_the_verify_step(void)
+{
+    UCHAR block[264];
+    unsigned i;
+
+    pk_set(SIGNATURE, sizeof(SIGNATURE));
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 1);
+    memcpy(block, g_pk_out, sizeof(block));
+
+    /* The recovered block carries the digest, least significant byte
+     * first, under the PKCS#1 padding. */
+    for (i = 0; i < 20; i++) {
+        if (block[i] != DIGEST[19 - i])
+            FAIL_AND_RETURN("recovered digest byte %u is 0x%02x, "
+                            "expected 0x%02x", i, block[i], DIGEST[19 - i]);
+    }
+    ASSERT_EQ_U32(block[255], 0x00);
+    ASSERT_EQ_U32(block[254], 0x01);
+    return true;
+}
+
+/* A value at or above the modulus is refused, not reduced. */
+static bool t_encpublic_refuses_out_of_range(void)
+{
+    UCHAR modulus[256];
+    unsigned i;
+
+    memcpy(modulus, PUBKEY + 20, sizeof(modulus));
+
+    pk_set(modulus, sizeof(modulus));
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 0);
+    for (i = 0; i < sizeof(g_pk_out); i++)
+        ASSERT_EQ_U32(g_pk_out[i], PK_GUARD);
+
+    memset(modulus, 0xFF, sizeof(modulus));
+    pk_set(modulus, sizeof(modulus));
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 0);
+    ASSERT_EQ_U32(g_pk_out[0], PK_GUARD);
+    return true;
+}
+
+/* The value is read eight bytes past the modulus' width: the two words
+ * above it belong to the number and have to be zero. */
+static bool t_encpublic_reads_past_the_modulus(void)
+{
+    static const UCHAR three[1] = {3};
+
+    pk_set(three, 1);
+    memset(g_pk_in + 256, 0xFF, 8);
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 0);
+    ASSERT_EQ_U32(g_pk_out[0], PK_GUARD);
+
+    /* One byte further out is nothing to do with it. */
+    pk_set(three, 1);
+    g_pk_in[264] = 0xFF;
+    ASSERT_EQ_U32(XcPKEncPublic((PUCHAR)PUBKEY, g_pk_in, g_pk_out), 1);
+    return pk_bytes_eq(g_pk_out, ENC_OF_THREE, 256, "encpublic(3) again");
+}
+
 static const test_entry_t xc_rsa_entries[] = {
     {"modexp_small",             t_modexp_small},
     {"modexp_reduces_base",      t_modexp_reduces_base},
@@ -295,6 +429,10 @@ static const test_entry_t xc_rsa_entries[] = {
     {"verify_wrong_digest",      t_verify_rejects_wrong_digest},
     {"verify_wrong_signature",   t_verify_rejects_wrong_signature},
     {"verify_smaller_key",       t_verify_smaller_key},
+    {"encpublic",                t_encpublic},
+    {"encpublic_is_verify_step", t_encpublic_is_the_verify_step},
+    {"encpublic_out_of_range",   t_encpublic_refuses_out_of_range},
+    {"encpublic_reads_past_the_modulus", t_encpublic_reads_past_the_modulus},
 };
 
 DEFINE_GROUP(xc_rsa, "xc/rsa");
