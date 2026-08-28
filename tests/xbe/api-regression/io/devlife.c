@@ -138,9 +138,97 @@ static bool t_delete_with_handle_open(void)
     return true;
 }
 
+/*
+ * The console's DRIVER_OBJECT ends at its fourteen-entry dispatch table
+ * and the title owns the storage, so nothing past it belongs to the
+ * kernel.  NT's structure is far longer, and the fields its unload path
+ * wants -- a device list, flags it writes as well as reads, an unload
+ * routine it calls -- all land beyond the console's end, in whatever the
+ * title keeps there.  A guard after the driver object proves the delete
+ * path stops where it should.
+ *
+ * The offsets below are NT's, measured from the start of the driver
+ * object: it keeps the list and the flags under the window and the
+ * unload routine inside it.  Zeros underneath let a kernel that mistook
+ * the two structures run its whole tail rather than stop at its first
+ * check, and a callable routine throughout the window keeps it from
+ * jumping to a wild address on the way.
+ *
+ * It does not keep it alive: a kernel that gets this wrong goes on to
+ * make the title's structure a temporary object and takes the box down
+ * a moment later, so a regression here ends the run rather than
+ * reporting.  That is why this case is last in its group.
+ */
+#define GUARD_BYTES 0x100
+#define HOOK_LO     0xA0
+#define HOOK_HI     0x100
+
+static const char NAME_GUARD[] = "\\Device\\nxkrnlguard";
+
+static volatile LONG g_unload_calls;
+
+static VOID NTAPI unload_probe(PVOID context)
+{
+    (void)context;
+    g_unload_calls++;
+}
+
+static struct {
+    DRIVER_OBJECT drv;
+    UCHAR         guard[GUARD_BYTES];
+} g_guarded;
+
+static bool t_delete_leaves_the_driver_object_alone(void)
+{
+    OBJECT_STRING dev_name = {
+        .Length        = (USHORT)(sizeof(NAME_GUARD) - 1),
+        .MaximumLength = (USHORT)sizeof(NAME_GUARD),
+        .Buffer        = (PCHAR)NAME_GUARD,
+    };
+    UCHAR *base = (UCHAR *)(void *)&g_guarded;
+    const unsigned tail = sizeof(DRIVER_OBJECT);
+    UCHAR expected[sizeof(g_guarded)];
+    PDEVICE_OBJECT dev = NULL;
+    NTSTATUS s;
+    unsigned i;
+
+    ASSERT_TRUE(HOOK_HI <= sizeof(g_guarded));
+
+    memset(&g_guarded, 0, sizeof(g_guarded));
+    for (i = 0; i < MJ_SLOTS; i++)
+        g_guarded.drv.MajorFunction[i] = pass_dispatch;
+    for (i = HOOK_LO; i + sizeof(PVOID) <= HOOK_HI; i += sizeof(PVOID))
+        *(PVOID *)(void *)(base + i) = (PVOID)unload_probe;
+    memcpy(expected, base, sizeof(g_guarded));
+
+    g_unload_calls = 0;
+    s = IoCreateDevice(&g_guarded.drv, 0, &dev_name, FILE_DEVICE_UNKNOWN,
+                       FALSE, &dev);
+    if (!NT_SUCCESS(s)) FAIL_AND_RETURN("create -> 0x%08x", (unsigned)s);
+    dev->Flags |= DO_READY_SET;
+    dev->Flags &= ~DO_READY_CLEAR;
+
+    IoDeleteDevice(dev);
+
+    if (g_unload_calls != 0)
+        FAIL_AND_RETURN("the delete called through the driver object %ld time(s)",
+                        (long)g_unload_calls);
+    for (i = tail; i < sizeof(g_guarded); i++) {
+        if (base[i] != expected[i])
+            FAIL_AND_RETURN("the delete wrote driver+0x%x: 0x%02x -> 0x%02x",
+                            i, expected[i], base[i]);
+    }
+    /* The console's own fields are still the title's, too. */
+    for (i = 0; i < MJ_SLOTS; i++)
+        ASSERT_EQ_PTR(g_guarded.drv.MajorFunction[i], pass_dispatch);
+    return true;
+}
+
 static const test_entry_t io_devlife_entries[] = {
     {"delete_unopened",         t_delete_unopened},
     {"delete_with_handle_open", t_delete_with_handle_open},
+    {"delete_leaves_the_driver_object_alone",
+     t_delete_leaves_the_driver_object_alone},
 };
 
 DEFINE_GROUP(io_devlife, "io/devlife");

@@ -400,6 +400,10 @@ IopUnloadDevice(IN PDEVICE_OBJECT DeviceObject)
 {
     PDRIVER_OBJECT DriverObject = DeviceObject->DriverObject;
     PEXTENDED_DEVOBJ_EXTENSION ThisExtension = IoGetDevObjExtension(DeviceObject);
+#ifdef SARCH_XBOX
+    /* Captured before the keep-alive below goes away with the device. */
+    BOOLEAN TitleOwnedDriver = DeviceObject->TitleOwnedDriver;
+#endif
 
     /* Check if deletion is pending */
     if (ThisExtension->ExtensionFlags & DOE_DELETE_PENDING)
@@ -426,7 +430,7 @@ IopUnloadDevice(IN PDEVICE_OBJECT DeviceObject)
         /* Remove the device from the list (a title's driver object keeps
          * no such list -- see IoCreateDevice) */
 #ifdef SARCH_XBOX
-        if (!DeviceObject->TitleOwnedDriver)
+        if (!TitleOwnedDriver)
         {
             IopEditDeviceList(DeviceObject->DriverObject, DeviceObject,
                               IopRemove);
@@ -438,6 +442,15 @@ IopUnloadDevice(IN PDEVICE_OBJECT DeviceObject)
         /* Dereference the keep-alive */
         ObDereferenceObject(DeviceObject);
     }
+
+#ifdef SARCH_XBOX
+    /* A driver object the title owns ends at its dispatch table.  The
+     * flags, the device list and the unload routine the rest of this
+     * routine reads all sit past that, in whatever the title happens to
+     * keep there -- and the flags are written, not just read.  Console
+     * drivers are permanent, so there is nothing here to unload. */
+    if (TitleOwnedDriver) return;
+#endif
 
     /* We can't unload a non-PnP driver here */
     if (DriverObject->Flags & DRVO_LEGACY_DRIVER)
