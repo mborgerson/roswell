@@ -635,7 +635,73 @@ static bool t_the_user_checksum_follows_the_section(void)
     return ok;
 }
 
+/* --- ExReadWriteRefurbInfo ----------------------------------------------
+ *
+ * The refurbishment record is not a setting and is not in the EEPROM:
+ * it is sixteen bytes in the fourth sector of the hard disk, behind a
+ * marker the kernel stamps itself.  Nothing else can see that sector
+ * from here, so these cases place it by writing and reading it back;
+ * the record they leave behind is the one they found.
+ */
+static bool t_the_refurb_record_round_trips(void)
+{
+    XBOX_REFURB_INFO original, written, got;
+    NTSTATUS s;
+    bool had_one;
+
+    memset(&original, 0, sizeof(original));
+    ASSERT_NTSTATUS(ExReadWriteRefurbInfo(&original, sizeof(original), FALSE),
+                    STATUS_SUCCESS);
+    had_one = original.Signature != 0;
+
+    written.Signature = 0x12345678;     /* not the marker: it is stamped */
+    written.PowerCycleCount = 0x0000ABCD;
+    written.FirstSetTime.u.LowPart = 0x89ABCDEF;
+    written.FirstSetTime.u.HighPart = 0x01234567;
+    ASSERT_NTSTATUS(ExReadWriteRefurbInfo(&written, sizeof(written), TRUE),
+                    STATUS_SUCCESS);
+
+    memset(&got, 0xAA, sizeof(got));
+    s = ExReadWriteRefurbInfo(&got, sizeof(got), FALSE);
+
+    /* Put back whatever was there before deciding anything. */
+    if (had_one)
+        ExReadWriteRefurbInfo(&original, sizeof(original), TRUE);
+
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("read after write: 0x%08x", (unsigned)s);
+    if (got.Signature != 0x52465242)
+        FAIL_AND_RETURN("marker 0x%08x, not the one the kernel stamps",
+                        (unsigned)got.Signature);
+    if (got.PowerCycleCount != written.PowerCycleCount ||
+        got.FirstSetTime.u.LowPart != written.FirstSetTime.u.LowPart ||
+        got.FirstSetTime.u.HighPart != written.FirstSetTime.u.HighPart)
+        FAIL_AND_RETURN("the record did not come back as it went in");
+
+    return true;
+}
+
+/* A length that is not the record's is refused. */
+static bool t_a_refurb_length_that_is_not_the_records_is_refused(void)
+{
+    XBOX_REFURB_INFO info;
+
+    memset(&info, 0xAA, sizeof(info));
+    ASSERT_NTSTATUS(ExReadWriteRefurbInfo(&info, 4, FALSE),
+                    STATUS_INVALID_PARAMETER);
+    ASSERT_NTSTATUS(ExReadWriteRefurbInfo(&info, 20, FALSE),
+                    STATUS_INVALID_PARAMETER);
+    ASSERT_NTSTATUS(ExReadWriteRefurbInfo(&info, 0, TRUE),
+                    STATUS_INVALID_PARAMETER);
+    ASSERT_EQ_U32(info.Signature, 0xAAAAAAAA);
+    return true;
+}
+
 static const test_entry_t ex_eeprom_entries[] = {
+    { "the_refurb_record_round_trips",
+      t_the_refurb_record_round_trips, NULL },
+    { "a_refurb_length_that_is_not_the_records_is_refused",
+      t_a_refurb_length_that_is_not_the_records_is_refused, NULL },
     { "a_saved_setting_reaches_the_part",
       t_a_saved_setting_reaches_the_part, NULL },
     { "a_short_value_clears_the_rest",
