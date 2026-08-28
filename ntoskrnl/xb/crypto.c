@@ -392,13 +392,19 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
  *
  * Layout and semantics per xbedump's xboxlib.c, confirmed against the
  * retail kernel: the length ordinal hands back the header's own length
- * field untouched -- it neither validates the magic nor derives anything.
+ * field untouched -- it neither validates the magic nor derives anything
+ * -- while both operations that do arithmetic on the key refuse a blob
+ * carrying any other magic.
  */
 
+#define PK_MAGIC(k)         (((const ULONG *)(k))[0])
 #define PK_BLOB_LENGTH(k)   (((const ULONG *)(k))[1])
+#define PK_MODULUS_BITS(k)  (((const ULONG *)(k))[2])
 #define PK_MODULUS_TOP(k)   (((const ULONG *)(k))[3])
 #define PK_EXPONENT(k)      ((const ULONG *)(k) + 4)
 #define PK_MODULUS(k)       ((const ULONG *)(k) + 5)
+#define PK_PUBLIC_MAGIC     0x31415352      /* "RSA1" */
+#define PK_PRIVATE_MAGIC    0x32415352      /* "RSA2" */
 
 /*
  * The raw public-key operation.  The caller's value is not the modulus'
@@ -417,7 +423,8 @@ XcpPKEncPublic(_In_ PVOID PubKey, _In_ PVOID In, _Out_ PVOID Out)
     ULONG Answer = 0;
     ULONG i;
 
-    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS)
+    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS ||
+        PK_MAGIC(PubKey) != PK_PUBLIC_MAGIC)
         return 0;
 
     Pool = ExAllocatePoolWithTag(NonPagedPool, 4 * Bytes + 8, 'pXcX');
@@ -482,11 +489,6 @@ XcpPKGetKeyLen(_In_ PVOID PubKey)
  * is one word wider than the modulus and is not checked against it; the
  * four bytes above that word are not read.
  */
-
-#define PK_MAGIC(k)         (((const ULONG *)(k))[0])
-#define PK_MODULUS_BITS(k)  (((const ULONG *)(k))[2])
-#define PK_PUBLIC_MAGIC     0x31415352      /* "RSA1" */
-#define PK_PRIVATE_MAGIC    0x32415352      /* "RSA2" */
 
 static BOOLEAN
 BnIsZero(const ULONG *A, ULONG N)
@@ -635,7 +637,8 @@ XcpVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
     BOOLEAN Ok = FALSE;
 
     /* The block has to hold the hash, a prefix and at least some padding. */
-    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS || Bytes < 64)
+    if ((Bytes & 3) != 0 || Words == 0 || Words > BN_MAX_WORDS ||
+        Bytes < 64 || PK_MAGIC(PubKey) != PK_PUBLIC_MAGIC)
         return FALSE;
 
     Pool = ExAllocatePoolWithTag(NonPagedPool, 4 * Bytes, 'sXcX');

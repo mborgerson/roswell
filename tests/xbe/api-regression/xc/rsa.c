@@ -313,6 +313,7 @@ static const UCHAR ENC_OF_THREE[256] = {
 #define PK_GUARD 0xCC
 
 static UCHAR g_pk_in[512], g_pk_out[512];
+static UCHAR g_pk_key[sizeof(PUBKEY)];
 
 static bool pk_bytes_eq(const UCHAR *got, const UCHAR *want, unsigned n,
                         const char *tag)
@@ -417,6 +418,48 @@ static bool t_encpublic_reads_past_the_modulus(void)
     return pk_bytes_eq(g_pk_out, ENC_OF_THREE, 256, "encpublic(3) again");
 }
 
+/* Both operations that do arithmetic on a key refuse a blob whose magic
+ * is not the public one -- the private blob's magic included -- and
+ * refuse it before writing anything. */
+static bool t_encpublic_wants_the_public_magic(void)
+{
+    static const UCHAR three[1] = {3};
+    static const ULONG magics[] = { 0x32415352, 0 };
+    unsigned i, j;
+
+    for (i = 0; i < sizeof(magics) / sizeof(magics[0]); i++) {
+        memcpy(g_pk_key, PUBKEY, sizeof(PUBKEY));
+        ((ULONG *)g_pk_key)[0] = magics[i];
+        pk_set(three, 1);
+        ASSERT_EQ_U32(XcPKEncPublic(g_pk_key, g_pk_in, g_pk_out), 0);
+        for (j = 0; j < sizeof(g_pk_out); j++)
+            ASSERT_EQ_U32(g_pk_out[j], PK_GUARD);
+    }
+    return true;
+}
+
+static bool t_verify_wants_the_public_magic(void)
+{
+    memcpy(g_pk_key, PUBKEY, sizeof(PUBKEY));
+    ((ULONG *)g_pk_key)[0] = 0x32415352;
+    ASSERT_TRUE(!XcVerifyPKCS1Signature((PUCHAR)SIGNATURE, g_pk_key,
+                                        (PUCHAR)DIGEST));
+
+    ((ULONG *)g_pk_key)[0] = 0;
+    ASSERT_TRUE(!XcVerifyPKCS1Signature((PUCHAR)SIGNATURE, g_pk_key,
+                                        (PUCHAR)DIGEST));
+    return true;
+}
+
+/* The length accessor does not care, though -- it reads one field. */
+static bool t_keylen_ignores_the_magic(void)
+{
+    memcpy(g_pk_key, PUBKEY, sizeof(PUBKEY));
+    ((ULONG *)g_pk_key)[0] = 0;
+    ASSERT_EQ_U32(XcPKGetKeyLen(g_pk_key), 264);
+    return true;
+}
+
 static const test_entry_t xc_rsa_entries[] = {
     {"modexp_small",             t_modexp_small},
     {"modexp_reduces_base",      t_modexp_reduces_base},
@@ -433,6 +476,9 @@ static const test_entry_t xc_rsa_entries[] = {
     {"encpublic_is_verify_step", t_encpublic_is_the_verify_step},
     {"encpublic_out_of_range",   t_encpublic_refuses_out_of_range},
     {"encpublic_reads_past_the_modulus", t_encpublic_reads_past_the_modulus},
+    {"encpublic_wants_the_public_magic", t_encpublic_wants_the_public_magic},
+    {"verify_wants_the_public_magic",    t_verify_wants_the_public_magic},
+    {"keylen_ignores_the_magic",         t_keylen_ignores_the_magic},
 };
 
 DEFINE_GROUP(xc_rsa, "xc/rsa");
