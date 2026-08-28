@@ -757,6 +757,19 @@ XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
                     (const UCHAR *)Key + i * 8);
 }
 
+/* One block, no chaining: the operation code decrypts only when zero. */
+VOID NTAPI
+XcBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,
+             _In_ PVOID KeyTable, _In_ ULONG Op)
+{
+    DES_KEY Keys[3];
+    ULONG Count = DesKeyCount(Cipher);
+
+    DesLoadTable(Keys, Count, (const UCHAR *)KeyTable);
+    DesCryptBlock((PUCHAR)Out, (const UCHAR *)In, Keys, Count,
+                  (BOOLEAN)(Op == 0));
+}
+
 VOID NTAPI
 XcBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
                 _In_ PVOID In, _In_ PVOID KeyTable, _In_ ULONG Op,

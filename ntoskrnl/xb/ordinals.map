@@ -386,6 +386,7 @@
 345  XcModExp
 346  XcDESKeyParity
 347  XcKeyTable
+348  XcBlockCrypt
 349  XcBlockCryptCBC
 
 # --- HAL boot / shutdown ------------------------------------------------- #

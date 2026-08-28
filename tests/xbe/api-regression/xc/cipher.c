@@ -250,6 +250,51 @@ static bool t_cbc_in_place(void)
     return bytes_eq(buf, PLAIN, sizeof(buf), "cbc in place back");
 }
 
+/* The FIPS single-block vector, straight through the cipher. */
+static bool t_block_ecb(void)
+{
+    static const unsigned char plain[8] = {
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xe7};
+    static const unsigned char cipher[8] = {
+        0xc9, 0x57, 0x44, 0x25, 0x6a, 0x5e, 0xd3, 0x1d};
+    unsigned char out[16], back[8];
+
+    schedule(0, KEY);
+    memset(out, 0xEE, sizeof(out));
+    XcBlockCrypt(0, out, (PUCHAR)plain, g_table, 1);
+    if (!bytes_eq(out, cipher, sizeof(cipher), "ecb"))
+        return false;
+    /* One block, and nothing past it. */
+    ASSERT_EQ_U32(out[8], 0xEE);
+
+    XcBlockCrypt(0, back, (PUCHAR)cipher, g_table, 0);
+    return bytes_eq(back, plain, sizeof(plain), "ecb back");
+}
+
+/* Only operation zero decrypts; every other code encrypts. */
+static bool t_block_op_codes(void)
+{
+    unsigned char out[8];
+
+    schedule(0, KEY);
+    XcBlockCrypt(0, out, (PUCHAR)PLAIN, g_table, 2);
+    return bytes_eq(out, DES_CBC, sizeof(out), "op 2");
+}
+
+/* Triple-DES runs the three schedules encrypt-decrypt-encrypt. */
+static bool t_block_triple(void)
+{
+    unsigned char out[8], back[8];
+
+    schedule(1, KEY3);
+    XcBlockCrypt(1, out, (PUCHAR)PLAIN, g_table, 1);
+    if (!bytes_eq(out, DES3_CBC, sizeof(out), "3des ecb"))
+        return false;
+
+    XcBlockCrypt(1, back, out, g_table, 0);
+    return bytes_eq(back, PLAIN, sizeof(back), "3des ecb back");
+}
+
 static const test_entry_t xc_cipher_entries[] = {
     {"des_key_table", t_des_table},
     {"des_key_table_extent", t_des_table_extent},
@@ -261,6 +306,9 @@ static const test_entry_t xc_cipher_entries[] = {
     {"cbc_without_a_whole_block", t_cbc_empty},
     {"triple_cbc", t_des3_cbc},
     {"cbc_in_place", t_cbc_in_place},
+    {"block_ecb", t_block_ecb},
+    {"block_operation_codes", t_block_op_codes},
+    {"block_triple", t_block_triple},
 };
 
 DEFINE_GROUP(xc_cipher, "xc/cipher");
