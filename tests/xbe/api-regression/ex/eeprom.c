@@ -128,19 +128,159 @@ static bool t_the_factory_settings_are_where_they_were_written(void)
            setting_matches(0x0103, 0x58,  4, NVS_DWORD);
 }
 
-/* The game region answers on the console but matches no plaintext byte
- * of the part: it is kept in the encrypted section, which needs the
- * per-console key we cannot derive yet. */
+/* --- opening the EEPROM's sealed section, title-side ---------------------
+ *
+ * The game region matches no stored byte of the part: it lives in the
+ * 0x1C sealed bytes at 0x14.  To place it the way every other setting
+ * here is placed, the test opens that section itself out of the bytes it
+ * reads over the bus, and compares.  That needs the console's doubled
+ * SHA-1 -- ordinary SHA-1 driven from a version-specific start state
+ * with the length counter preset to one block -- which no exported
+ * ordinal offers, so it is written out here.
+ */
+
+static ULONG sha1_rol(int n, ULONG x) { return (x << n) | (x >> (32 - n)); }
+
+static void sha1_block(ULONG *st, const UCHAR *blk)
+{
+    static const ULONG k[] = { 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6 };
+    ULONG w[80], a = st[0], b = st[1], c = st[2], d = st[3], e = st[4], t;
+    int i;
+
+    for (i = 0; i < 16; i++)
+        w[i] = ((ULONG)blk[i * 4] << 24) | ((ULONG)blk[i * 4 + 1] << 16) |
+               ((ULONG)blk[i * 4 + 2] << 8) | blk[i * 4 + 3];
+    for (i = 16; i < 80; i++)
+        w[i] = sha1_rol(1, w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]);
+
+    for (i = 0; i < 80; i++) {
+        ULONG f = i < 20 ? ((b & c) | (~b & d))
+                : i < 40 ? (b ^ c ^ d)
+                : i < 60 ? ((b & c) | (b & d) | (c & d))
+                : (b ^ c ^ d);
+        t = sha1_rol(5, a) + f + e + w[i] + k[i / 20];
+        e = d; d = c; c = sha1_rol(30, b); b = a; a = t;
+    }
+    st[0] += a; st[1] += b; st[2] += c; st[3] += d; st[4] += e;
+}
+
+/* One pass: start state `iv`, length counter preset to 512 bits. */
+static void sha1_pass(const ULONG *iv, const UCHAR *data, ULONG len,
+                      UCHAR *out)
+{
+    UCHAR blk[64];
+    ULONG st[5], bits = 512 + (len << 3), i, n = 0;
+
+    memcpy(st, iv, sizeof(st));
+    while (len - n >= 64) { sha1_block(st, data + n); n += 64; }
+
+    memset(blk, 0, sizeof(blk));
+    memcpy(blk, data + n, len - n);
+    blk[len - n] = 0x80;
+    if (len - n >= 56) { sha1_block(st, blk); memset(blk, 0, sizeof(blk)); }
+    blk[60] = (UCHAR)(bits >> 24); blk[61] = (UCHAR)(bits >> 16);
+    blk[62] = (UCHAR)(bits >> 8);  blk[63] = (UCHAR)bits;
+    sha1_block(st, blk);
+
+    for (i = 0; i < 20; i++)
+        out[i] = (UCHAR)(st[i >> 2] >> (8 * (3 - (i & 3))));
+}
+
+static void xbox_sha1(const ULONG *iv1, const ULONG *iv2, const UCHAR *data,
+                      ULONG len, UCHAR *out)
+{
+    UCHAR inner[20];
+    sha1_pass(iv1, data, len, inner);
+    sha1_pass(iv2, inner, 20, out);
+}
+
+static void eeprom_rc4(const UCHAR *key, ULONG keylen, UCHAR *data, ULONG len)
+{
+    UCHAR s[256];
+    ULONG i, j = 0, n;
+
+    for (i = 0; i < 256; i++) s[i] = (UCHAR)i;
+    for (i = 0; i < 256; i++) {
+        UCHAR t;
+        j = (j + s[i] + key[i % keylen]) & 0xFF;
+        t = s[i]; s[i] = s[j]; s[j] = t;
+    }
+    i = j = 0;
+    for (n = 0; n < len; n++) {
+        UCHAR t;
+        i = (i + 1) & 0xFF;
+        j = (j + s[i]) & 0xFF;
+        t = s[i]; s[i] = s[j]; s[j] = t;
+        data[n] ^= s[(s[i] + s[j]) & 0xFF];
+    }
+}
+
+/* Which set sealed a part is not recorded in it: try all four and keep
+ * the one whose recomputed hash matches the stored one. */
+static const ULONG eeprom_keys[][2][5] = {
+    { { 0x85F9E51A, 0xE04613D2, 0x6D86A50C, 0x77C32E3C, 0x4BD717A4 },
+      { 0x5D7A9C6B, 0xE1922BEB, 0xB82CCDBC, 0x3137AB34, 0x486B52B3 } },
+    { { 0x72127625, 0x336472B9, 0xBE609BEA, 0xF55E226B, 0x99958DAC },
+      { 0x76441D41, 0x4DE82659, 0x2E8EF85E, 0xB256FACA, 0xC4FE2DE8 } },
+    { { 0x39B06E79, 0xC9BD25E8, 0xDBC6B498, 0x40B4389D, 0x86BBD7ED },
+      { 0x9B49BED3, 0x84B430FC, 0x6B8749CD, 0xEBFE5FE5, 0xD96E7393 } },
+    { { 0x8058763A, 0xF97D4E0E, 0x865A9762, 0x8A3D920D, 0x08995B2C },
+      { 0x01075307, 0xA2F1E037, 0x1186EEEA, 0x88DA9992, 0x168A5609 } },
+};
+
+/* Reads the part over the bus and opens its sealed 0x1C bytes into
+ * `plain`.  Returns false having already failed the case if the part
+ * cannot be read or no key set matches it. */
+static bool eeprom_open_sealed(UCHAR *plain)
+{
+    UCHAR hash[20], key[20], check[20];
+    ULONG i;
+
+    if (!eeprom_bytes(0x00, 20, hash))
+        return false;
+
+    for (i = 0; i < sizeof(eeprom_keys) / sizeof(eeprom_keys[0]); i++) {
+        xbox_sha1(eeprom_keys[i][0], eeprom_keys[i][1], hash, 20, key);
+        if (!eeprom_bytes(0x14, 0x1C, plain))
+            return false;
+        eeprom_rc4(key, 20, plain, 0x1C);
+        xbox_sha1(eeprom_keys[i][0], eeprom_keys[i][1], plain, 0x1C, check);
+        if (memcmp(check, hash, 20) == 0)
+            return true;
+    }
+
+    FAIL_AND_RETURN("no EEPROM key set opens this part");
+}
+
+/* The game region is the one setting that is sealed rather than stored,
+ * so it is placed against the opened section instead of the raw part. */
 static bool t_the_game_region_answers(void)
 {
-    UCHAR buf[8];
+    UCHAR buf[8], plain[0x1C];
     ULONG type = 0, len = 0;
 
+    memset(buf, 0xAA, sizeof(buf));
     ASSERT_NTSTATUS(ExQueryNonVolatileSetting(0x0104, &type, buf, sizeof(buf),
                                               &len),
                     STATUS_SUCCESS);
     ASSERT_EQ_U32(type, NVS_DWORD);
     ASSERT_EQ_U32(len, 4);
+
+    if (!eeprom_open_sealed(plain))
+        return false;
+
+    /* The section is confounder[8], HDD key[16], then the region. */
+    if (memcmp(buf, plain + 0x18, 4) != 0)
+        FAIL_AND_RETURN("game region 0x%08x, sealed section holds 0x%08x",
+                        (unsigned)*(ULONG *)buf,
+                        (unsigned)*(ULONG *)(plain + 0x18));
+
+    /* Unlike every stored setting, this one does not zero what it does
+     * not fill: the rest of the caller's buffer comes back untouched. */
+    for (ULONG i = 4; i < sizeof(buf); i++)
+        if (buf[i] != 0xAA)
+            FAIL_AND_RETURN("byte %u past the region is 0x%02x, not left alone",
+                            (unsigned)i, buf[i]);
     return true;
 }
 
@@ -295,8 +435,7 @@ static const test_entry_t ex_eeprom_entries[] = {
       t_the_network_settings_come_from_the_user_section, NULL },
     { "the_factory_settings_are_where_they_were_written",
       t_the_factory_settings_are_where_they_were_written, NULL },
-    { "the_game_region_answers", t_the_game_region_answers,
-      "the game region is in the EEPROM's encrypted section" },
+    { "the_game_region_answers", t_the_game_region_answers, NULL },
     { "a_short_buffer_is_refused_without_a_length",
       t_a_short_buffer_is_refused_without_a_length, NULL },
     { "an_index_that_is_not_a_setting_is_refused",
