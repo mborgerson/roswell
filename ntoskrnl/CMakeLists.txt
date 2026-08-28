@@ -141,6 +141,7 @@ list(APPEND PCH_SKIP_SOURCE
     ${REACTOS_SOURCE_DIR}/sdk/lib/cryptlib/rc4.c
     xb/strace.c
     xb/rwlock.c
+    xb/eeprom.c
     xb/scattergather.c
     xb/exflist.c
     xb/rtlprintf.c

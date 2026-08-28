@@ -2383,23 +2383,6 @@ XeNtCreateSemaphore(PHANDLE SemaphoreHandle, PXBE_OBJECT_ATTRIBUTES XAttr,
     return status;
 }
 
-/* Read an EEPROM setting.  No EEPROM/SMC subsystem yet -- return zeros with
- * the requested length reported back (asserted by libcs seeding rand_s
- * with the 256-byte whole-image read at ValueIndex 0xFFFF). */
-NTSTATUS NTAPI
-ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type, PVOID Value,
-                              ULONG ValueLength, PULONG ResultLength)
-{
-    UNREFERENCED_PARAMETER(ValueIndex);
-
-    if (Value != NULL && ValueLength != 0)
-        RtlZeroMemory(Value, ValueLength);
-    if (Type != NULL)
-        *Type = 0;
-    if (ResultLength != NULL)
-        *ResultLength = ValueLength;
-    return STATUS_SUCCESS;
-}
 
 /*
  * The SMC's scratch byte, which survives a warm reboot and is how the
