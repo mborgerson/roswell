@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # gen-flash-bin.py -- inject an XZ-compressed xboxkrnl.exe payload into
-# the 256 KB nxldr.bin produced by boot/nxldr.
+# the nxldr.bin produced by boot/nxldr (256 KB release, 512 KB DBG).
 #
 # The linker (boot/nxldr/nxldr.ld) lays out a complete flash image:
 #   - .low_rom (MCPX magic + Xcodes + post-Xcode entry) at file offset 0

@@ -1,11 +1,11 @@
 /*
- * Linker script for boot/nxldr.  Produces the 256 KB flash image, laid out at
- * its physical location: the top 256 KB of the 32-bit address space (the flash
- * mirrors across 0xff000000-0xffffffff; LOW_ROM_BASE is the last mirror, where
- * the CPU reset vector and MCPX's Xcode entry live).
+ * Linker script for boot/nxldr.  Produces the flash image, laid out at its
+ * physical location: the top FLASH_SIZE_LMA of the 32-bit address space (the
+ * flash mirrors across 0xff000000-0xffffffff; LOW_ROM_BASE is the last mirror,
+ * where the CPU reset vector and MCPX's Xcode entry live).
  *
  *   file off      VMA           content
- *   0x000000      0xfffc0000    .low_rom: MCPX magic, Xcodes, post-Xcode
+ *   0x000000      LOW_ROM_BASE  .low_rom: MCPX magic, Xcodes, post-Xcode
  *                               entry + ramcopy stub (runs in-place from flash)
  *   after .low_rom 0x00100000   .text/.rodata/.data source -- ramcopied to
  *                               RAM at boot, runs from VA RAM_CODE thereafter
@@ -26,15 +26,23 @@ OUTPUT_FORMAT("elf32-i386")
 OUTPUT_ARCH(i386)
 ENTRY(_start_low_rom)
 
-/* Total flash file size: 256 KB, the real Xbox ROM size (release + DBG).
- * Every file offset below derives from this. */
-FLASH_SIZE_LMA = 0x40000;
+/* Total flash file size, which every file offset below derives from: 256 KB,
+ * the real Xbox ROM size.  The debug kernel carries ~200 KB more DPRINT and
+ * assert text than the release one and no longer fits that slot compressed, so
+ * the DBG build overrides the PROVIDE below with --defsym (see
+ * boot/nxldr/CMakeLists.txt) to link a 512 KB image.  DEFINED() would not work
+ * here: ld does not consider a --defsym symbol defined for it.
+ * That image is an xemu artifact -- xemu mirrors any multiple of 64 KB across
+ * the ROM window -- and needs a >=512 KB part to flash on real hardware; the
+ * release image stays retail-exact. */
+PROVIDE(__nxldr_flash_size__ = 0x40000);
+FLASH_SIZE_LMA = __nxldr_flash_size__;
 
 /* The flash occupies the top FLASH_SIZE_LMA of the 32-bit address space (its
  * last mirror) -- that's where the CPU reset vector (0xfffffff0) and MCPX's
  * Xcode entry sit.  Linking the in-flash image here makes every flash-resident
  * VMA match where it actually executes. */
-LOW_ROM_BASE   = 0x100000000 - FLASH_SIZE_LMA;   /* 0xfffc0000 */
+LOW_ROM_BASE   = 0x100000000 - FLASH_SIZE_LMA;   /* 0xfffc0000 at 256 KB */
 RAM_CODE       = 0x00100000;   /* VA the ramcopied .text/.rodata/.data run at */
 
 SECTIONS {
@@ -149,6 +157,10 @@ KernelPayloadMaxSize = (FLASH_SIZE_LMA - 0x200) - KernelPayloadOffset;
 KernelPayloadVa      = LOW_ROM_BASE + KernelPayloadOffset;
 ASSERT(KernelPayloadOffset < FLASH_SIZE_LMA - 0x200,
        "boot/nxldr: loader code leaves no room for the kernel payload");
+
+/* Where MCPX's on-die interpreter -- and our stand-in for it in startup.S --
+ * reads the Xcode bytecode: .low_rom offset 0x80, in this image's mirror. */
+XcodeStart       = LOW_ROM_BASE + 0x80;
 
 /* MCPX overflow-trick jump stub (xcodes.inc.S).  The poked stub does
  * `mov $XcodeJumpAddr, %eax; jmp *%eax`, jumping to the post-Xcode entry.  The

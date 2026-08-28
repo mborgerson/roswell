@@ -1,6 +1,7 @@
-# boot/nxldr -- minimal Xbox loader.  Output: nxldr.bin, the 256 KB flash image
-# with a 0xff-filled hole that gen-flash-bin.py fills with the XZ-compressed
-# kernel payload (at the KernelPayload* linker symbols from nxldr.ld).
+# boot/nxldr -- minimal Xbox loader.  Output: nxldr.bin, the flash image with a
+# 0xff-filled hole that gen-flash-bin.py fills with the XZ-compressed kernel
+# payload (at the KernelPayload* linker symbols from nxldr.ld).  256 KB for the
+# release image, 512 KB for DBG -- see FLASH_SIZE_LMA in nxldr.ld.
 
 set(NXLDR_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(NXLDR_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
@@ -44,6 +45,12 @@ set(NXLDR_LDFLAGS
     --gc-sections
     -T ${NXLDR_SRC_DIR}/nxldr.ld
 )
+
+if(DBG)
+    # The debug kernel does not fit the retail 256 KB ROM compressed; it boots
+    # only under xemu, so link it into a 512 KB image (nxldr.ld reads this).
+    list(APPEND NXLDR_LDFLAGS --defsym __nxldr_flash_size__=0x80000)
+endif()
 
 # Listed so any header edit retriggers the whole loader build.
 set(NXLDR_HEADERS

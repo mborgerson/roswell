@@ -3,7 +3,7 @@
  *
  * Replaces cromwell+freeldr in the boot chain.  MCPX runs our Xcodes at
  * flash file offset 0x80, the Xcodes-end overflow trick lands the CPU at
- * 0xfffc1000 (top-256K of flash, mirrored copy), and from there we set up
+ * LOW_ROM_BASE + 0x1000 (the last flash mirror), and from there we set up
  * MTRRs, copy the RAM-resident half of this binary into PA 0x100000, and
  * call LoaderMain() in C on the flat segments we were entered with.
  *
@@ -44,7 +44,7 @@
 .code32
 
 /*
- * .low_rom -- runs in-place from flash MMIO.  VMA = 0xfffc0000+.
+ * .low_rom -- runs in-place from flash MMIO.  VMA = LOW_ROM_BASE+.
  * Layout matches what MCPX expects at the start of an Xbox flash image.
  */
 .section .low_rom, "ax"
@@ -93,8 +93,9 @@ _start_low_rom:
  *   - Without: the reset vector at the end of this file runs our 16-bit
  *     init, transitions to pmode, calls xcode_interpreter() (which replays
  *     the bytecode above), then `jmp _post_xcode_entry`.
- * Must sit at exactly offset 0x1000 -- 0xfffc0000 + 0x1000 = 0xfffc1000,
- * the absolute address the Xcode overflow trick targets.
+ * Must sit at exactly offset 0x1000 -- LOW_ROM_BASE + 0x1000, the absolute
+ * address the Xcode overflow trick targets (computed in nxldr.ld, so it
+ * follows the image size).
  */
 .org 0x1000
 .global _post_xcode_entry
@@ -365,7 +366,7 @@ pmode_entry:
  */
 .global xcode_interpreter
 xcode_interpreter:
-    movl  $0xfffc0080, %esi      /* pc -> Xcode start (LOW_ROM_BASE + 0x80) */
+    movl  $XcodeStart, %esi      /* pc -> Xcode start (LOW_ROM_BASE + 0x80) */
     xorl  %edi, %edi             /* result = 0 */
     xorl  %ebp, %ebp             /* scratch = 0 */
 
