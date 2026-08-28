@@ -109,32 +109,18 @@ NTAPI
 ExDereferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack,
                            IN PEX_CALLBACK_ROUTINE_BLOCK CallbackBlock)
 {
-#ifdef SARCH_XBOX
-    /* No registration path is built (see ExReferenceCallBackBlock) */
-    UNREFERENCED_PARAMETER(CallBack);
-    UNREFERENCED_PARAMETER(CallbackBlock);
-    ASSERT(FALSE);
-#else
     /* Release a fast reference */
     if (!ExReleaseFastReference(&CallBack->RoutineBlock, CallbackBlock))
     {
         /* Take slow path */
         ExReleaseRundownProtection(&CallbackBlock->RundownProtect);
     }
-#endif
 }
 
 PEX_CALLBACK_ROUTINE_BLOCK
 NTAPI
 ExReferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack)
 {
-#ifdef SARCH_XBOX
-    /* Nothing can install a callback block (ExCreateCallback and the Ps
-     * notify-routine setters are not built), so every EX_CALLBACK stays
-     * empty for the system's lifetime. */
-    UNREFERENCED_PARAMETER(CallBack);
-    return NULL;
-#else
     EX_FAST_REF OldValue;
     ULONG_PTR Count;
     PEX_CALLBACK_ROUTINE_BLOCK CallbackBlock;
@@ -177,7 +163,6 @@ ExReferenceCallBackBlock(IN OUT PEX_CALLBACK CallBack)
 
     /* Return the callback block */
     return CallbackBlock;
-#endif
 }
 
 BOOLEAN
