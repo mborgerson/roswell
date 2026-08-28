@@ -1760,10 +1760,10 @@ XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
                                      KernelMode, Object, NULL);
 }
 /*
- * NT treats the requested type as advisory for a kernel-mode caller, and
- * there is no other kind here, so the check is ours to make: the type
- * argument is all that stands between a title and the wrong kind of
- * object.
+ * The pointer-taking pair.  NT treats the requested type as advisory for
+ * a kernel-mode caller, and there is no other kind here, so the check is
+ * ours to make: the type argument is all that stands between a title and
+ * the wrong kind of object.
  */
 static BOOLEAN
 XeObjectIsOfType(PVOID Object, POBJECT_TYPE Internal)
@@ -1779,6 +1779,22 @@ XeObReferenceObjectByPointer(PVOID Object, PVOID Type)
     if (!XeObjectIsOfType(Object, Internal))
         return STATUS_OBJECT_TYPE_MISMATCH;
     return ObReferenceObjectByPointer(Object, 0, Internal, KernelMode);
+}
+/* A refused open reports through the return value alone, so the
+ * caller's handle still has to be cleared -- the console leaves nothing
+ * of its own there either. */
+NTSTATUS NTAPI
+XeObOpenObjectByPointer(PVOID Object, PVOID Type, PHANDLE Handle)
+{
+    POBJECT_TYPE Internal = XeObjectTypeToInternal(Type);
+
+    if (!XeObjectIsOfType(Object, Internal))
+    {
+        *Handle = NULL;
+        return STATUS_OBJECT_TYPE_MISMATCH;
+    }
+    return ObOpenObjectByPointer(Object, 0, NULL, GENERIC_ALL, Internal,
+                                 KernelMode, Handle);
 }
 NTSTATUS NTAPI
 XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,

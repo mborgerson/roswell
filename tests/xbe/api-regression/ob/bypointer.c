@@ -1,12 +1,12 @@
 /*
- * The object-manager entries that take the object itself rather than a
- * handle or a name.
+ * The two object-manager entries that take the object itself rather
+ * than a handle or a name.
  *
  * There is no user mode here, so the type argument is the caller's only
- * guard against being handed the wrong kind of object: the routine
- * enforces it and refuses a mismatch with STATUS_OBJECT_TYPE_MISMATCH.
- * The reference it takes is the caller's own -- it outlives the handle
- * the object was reached through.
+ * guard against being handed the wrong kind of object: both routines
+ * enforce it and refuse a mismatch with STATUS_OBJECT_TYPE_MISMATCH.
+ * The reference each takes is the caller's own -- it outlives the
+ * handle the object was reached through.
  */
 
 #include "../harness.h"
@@ -102,12 +102,97 @@ static bool t_the_reference_outlives_the_handle(void)
     return true;
 }
 
+static bool t_a_pointer_opens_a_handle(void)
+{
+    HANDLE h, opened = NULL;
+    PVOID obj;
+    NTSTATUS s;
+    LONG previous = -1;
+
+    s = open_event(&h, &obj);
+    if (!NT_SUCCESS(s)) FAIL_AND_RETURN("open -> 0x%08x", (unsigned)s);
+
+    s = ObOpenObjectByPointer(obj, &ExEventObjectType, &opened);
+    if (!NT_SUCCESS(s)) {
+        NtClose(h);
+        FAIL_AND_RETURN("open by pointer -> 0x%08x", (unsigned)s);
+    }
+    if (opened == NULL || opened == h) {
+        NtClose(h);
+        FAIL_AND_RETURN("handle %p, original %p", opened, h);
+    }
+
+    /* The handle addresses the same event: setting it through the new
+     * one is visible through the old one. */
+    s = NtSetEvent(opened, NULL);
+    if (NT_SUCCESS(s))
+        s = NtSetEvent(h, &previous);
+    NtClose(opened);
+    NtClose(h);
+
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    ASSERT_EQ_U32(previous, 1);
+    return true;
+}
+
+/* The opened handle carries a reference of its own. */
+static bool t_the_opened_handle_outlives_the_first(void)
+{
+    HANDLE h, opened = NULL;
+    PVOID obj;
+    NTSTATUS s;
+    LONG previous = -1;
+
+    s = open_event(&h, &obj);
+    if (!NT_SUCCESS(s)) FAIL_AND_RETURN("open -> 0x%08x", (unsigned)s);
+
+    s = ObOpenObjectByPointer(obj, &ExEventObjectType, &opened);
+    if (!NT_SUCCESS(s)) {
+        NtClose(h);
+        FAIL_AND_RETURN("open by pointer -> 0x%08x", (unsigned)s);
+    }
+
+    NtClose(h);
+    s = NtSetEvent(opened, &previous);
+    NtClose(opened);
+
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+    ASSERT_EQ_U32(previous, 0);
+    return true;
+}
+
+/* A refused open reports through the return value and leaves nothing
+ * behind: the caller's handle reads NULL, not its own sentinel. */
+static bool t_a_refused_open_returns_no_handle(void)
+{
+    HANDLE h, opened = (HANDLE)0x5A5A5A5A;
+    PVOID obj;
+    NTSTATUS s;
+
+    s = open_event(&h, &obj);
+    if (!NT_SUCCESS(s)) FAIL_AND_RETURN("open -> 0x%08x", (unsigned)s);
+
+    s = ObOpenObjectByPointer(obj, &ExSemaphoreObjectType, &opened);
+    if (NT_SUCCESS(s))
+        NtClose(opened);
+    NtClose(h);
+
+    ASSERT_NTSTATUS(s, STATUS_OBJECT_TYPE_MISMATCH);
+    ASSERT_EQ_PTR(opened, NULL);
+    return true;
+}
+
 static const test_entry_t ob_bypointer_entries[] = {
     { "the_object_s_own_type_is_accepted",
       t_the_object_s_own_type_is_accepted, NULL },
     { "another_type_is_refused", t_another_type_is_refused, NULL },
     { "the_reference_outlives_the_handle",
       t_the_reference_outlives_the_handle, NULL },
+    { "a_pointer_opens_a_handle", t_a_pointer_opens_a_handle, NULL },
+    { "the_opened_handle_outlives_the_first",
+      t_the_opened_handle_outlives_the_first, NULL },
+    { "a_refused_open_returns_no_handle",
+      t_a_refused_open_returns_no_handle, NULL },
 };
 
 DEFINE_GROUP(ob_bypointer, "ob/bypointer");
