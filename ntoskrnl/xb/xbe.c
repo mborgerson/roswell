@@ -2398,6 +2398,35 @@ ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type, PVOID Value,
     return STATUS_SUCCESS;
 }
 
+/*
+ * The console masks and unmasks an interrupt by its bus-relative level
+ * and carries no IRQL, where NT's HAL takes the IDT vector the level
+ * was mapped to.  Both ends keep the mask in the HAL's software IDR
+ * rather than in the PIC, so the mask register is recomputed on the
+ * next IRQL transition and a caller that writes the port itself does
+ * not stay written.  A level with no line behind it is ignored.
+ */
+/* The IDT vector an ISA level maps to (ndk asm.h defines it for the
+ * assembler side only). */
+#define XB_PRIMARY_VECTOR_BASE 0x30
+
+VOID NTAPI
+NxHalDisableSystemInterrupt(ULONG BusInterruptLevel)
+{
+    if (BusInterruptLevel < 16)
+        HalDisableSystemInterrupt(XB_PRIMARY_VECTOR_BASE + BusInterruptLevel,
+                                  PASSIVE_LEVEL);
+}
+
+VOID NTAPI
+NxHalEnableSystemInterrupt(ULONG BusInterruptLevel,
+                           KINTERRUPT_MODE InterruptMode)
+{
+    if (BusInterruptLevel < 16)
+        HalEnableSystemInterrupt(XB_PRIMARY_VECTOR_BASE + BusInterruptLevel,
+                                 PASSIVE_LEVEL, InterruptMode);
+}
+
 /* Defer to the HAL's Type-1 PCI config driver; it handles arbitrary offset
  * and length and serialises on HalpPCIConfigLock. */
 VOID NTAPI

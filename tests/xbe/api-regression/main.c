@@ -116,6 +116,7 @@ DECLARE_GROUP(ob_create);
 DECLARE_GROUP(ke_dispatcher);
 DECLARE_GROUP(hal_softint);
 DECLARE_GROUP(xc_privkey);
+DECLARE_GROUP(hal_sysint);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -205,6 +206,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ke_dispatcher,
     &g_group_hal_softint,
     &g_group_xc_privkey,
+    &g_group_hal_sysint,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */

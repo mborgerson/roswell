@@ -37,6 +37,8 @@
 # --- Hal* ----------------------------------------------------------------- #
 9    HalReadSMCTrayState              # tray state from SMC reg 0x03 + eject count
 38   HalClearSoftwareInterrupt        # the pending-request bit APC/DPC delivery runs on
+39   NxHalDisableSystemInterrupt      # the console masks by bus-relative level, with no IRQL
+43   NxHalEnableSystemInterrupt
 48   HalRequestSoftwareInterrupt
 
 # --- Ex* allocator (Xbox ABI: implicit NonPagedPool, no POOL_TYPE arg) ---- #
