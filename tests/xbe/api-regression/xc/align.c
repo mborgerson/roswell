@@ -11,31 +11,36 @@
  * whatever it writes there it puts back.  Invisible in RAM, fatal in
  * read-only memory.
  *
- * The rule that falls out: keep a cipher input either eight-byte
- * aligned or writable.  This group pins the aligned case and puts the
- * off-boundary observation on the record; it is last in the file and
- * last in the suite because the console can be made to fault here.
+ * Every buffer that reaches the cipher now says so where it is
+ * declared, XC_BLOCK_ALIGNED in blockalign.h, so no caller's alignment
+ * depends on link order any more.  This group keeps the reasoning
+ * reachable: it pins the aligned case and reports what the console does
+ * with the skew that started it, out of storage that can absorb the
+ * write.
  */
 
 #include "../harness.h"
+#include "blockalign.h"
 #include <string.h>
 
-/* Writable, so a write the console aims at the input cannot fault. */
-static UCHAR g_table[384];
-static UCHAR g_in[64];
-static UCHAR g_out[64];
-static UCHAR g_feedback[8];
+/* Writable, so a write the console aims at the input cannot fault, and
+ * explicitly aligned so the skew below is the one this file asks for
+ * rather than whatever the linker chose. */
+static UCHAR g_table[384] XC_BLOCK_ALIGNED;
+static UCHAR g_in[64] XC_BLOCK_ALIGNED;
+static UCHAR g_out[64] XC_BLOCK_ALIGNED;
+static UCHAR g_feedback[8] XC_BLOCK_ALIGNED;
 
-static const UCHAR KEY[8] = {
+static const UCHAR KEY[8] XC_BLOCK_ALIGNED = {
     0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
 
-static const UCHAR PLAIN[16] = {
+static const UCHAR PLAIN[16] XC_BLOCK_ALIGNED = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
 
 /* PLAIN through single-DES CBC with a zero feedback -- the retail
  * kernel's own answer, shared with the xc/cipher group. */
-static const UCHAR DES_CBC[16] = {
+static const UCHAR DES_CBC[16] XC_BLOCK_ALIGNED = {
     0x32, 0x60, 0x26, 0x6c, 0x2c, 0xf2, 0x02, 0xe2,
     0x79, 0xcf, 0x70, 0xcd, 0x1d, 0xac, 0x09, 0xa5};
 

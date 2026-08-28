@@ -80,9 +80,9 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/io/ioquery.c \
        $(CURDIR)/io/volquery.c \
        $(CURDIR)/io/startio.c \
-       $(CURDIR)/xc/cipher.c \
-       $(CURDIR)/xc/vector.c \
        $(CURDIR)/io/createfile.c \
        $(CURDIR)/io/threadirp.c \
+       $(CURDIR)/xc/cipher.c \
+       $(CURDIR)/xc/vector.c \
        $(CURDIR)/xc/align.c
 include $(NXDK_DIR)/Makefile

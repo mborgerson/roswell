@@ -7,24 +7,25 @@
  */
 
 #include "../harness.h"
+#include "blockalign.h"
 #include <string.h>
 
 #define DES_TABLE_BYTES   128
 #define DES3_TABLE_BYTES  384
 #define GUARD             0xCC
 
-static unsigned char g_table[1024];
+static unsigned char g_table[1024] XC_BLOCK_ALIGNED;
 
-static const unsigned char KEY[8] = {
+static const unsigned char KEY[8] XC_BLOCK_ALIGNED = {
     0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
 
 /* Three keys' worth, the first of which is KEY. */
-static const unsigned char KEY3[24] = {
+static const unsigned char KEY3[24] XC_BLOCK_ALIGNED = {
     0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
     0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
     0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23};
 
-static const unsigned char PLAIN[16] = {
+static const unsigned char PLAIN[16] XC_BLOCK_ALIGNED = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
 
@@ -80,7 +81,7 @@ static const unsigned char DES3_TABLE[DES3_TABLE_BYTES] = {
 };
 
 /* PLAIN through CBC with an all-zero feedback, both ciphers. */
-static const unsigned char DES_CBC[16] = {
+static const unsigned char DES_CBC[16] XC_BLOCK_ALIGNED = {
     0x32,0x60,0x26,0x6c,0x2c,0xf2,0x02,0xe2,0x79,0xcf,0x70,0xcd,
     0x1d,0xac,0x09,0xa5,
 };
@@ -164,7 +165,8 @@ static bool t_nonzero_cipher_is_triple(void)
 
 static bool t_cbc_encrypt(void)
 {
-    unsigned char out[16], feedback[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memset(out, 0xEE, sizeof(out));
@@ -178,7 +180,8 @@ static bool t_cbc_encrypt(void)
 
 static bool t_cbc_decrypt(void)
 {
-    unsigned char out[16], feedback[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memset(out, 0xEE, sizeof(out));
@@ -192,7 +195,8 @@ static bool t_cbc_decrypt(void)
 /* The caller's feedback carries a run across calls. */
 static bool t_cbc_chains(void)
 {
-    unsigned char out[16], feedback[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memset(out, 0xEE, sizeof(out));
@@ -205,7 +209,8 @@ static bool t_cbc_chains(void)
 /* A run with no whole block in it touches nothing at all. */
 static bool t_cbc_empty(void)
 {
-    unsigned char out[16], feedback[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memset(out, 0xEE, sizeof(out));
@@ -218,7 +223,9 @@ static bool t_cbc_empty(void)
 
 static bool t_des3_cbc(void)
 {
-    unsigned char out[16], back[16], feedback[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char back[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(1, KEY3);
     memset(out, 0xEE, sizeof(out));
@@ -236,7 +243,8 @@ static bool t_des3_cbc(void)
 /* Encrypting over the input buffer works. */
 static bool t_cbc_in_place(void)
 {
-    unsigned char buf[16], feedback[8];
+    unsigned char buf[16] XC_BLOCK_ALIGNED;
+    unsigned char feedback[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memcpy(buf, PLAIN, sizeof(buf));
@@ -253,11 +261,12 @@ static bool t_cbc_in_place(void)
 /* The FIPS single-block vector, straight through the cipher. */
 static bool t_block_ecb(void)
 {
-    static const unsigned char plain[8] = {
+    static const unsigned char plain[8] XC_BLOCK_ALIGNED = {
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xe7};
-    static const unsigned char cipher[8] = {
+    static const unsigned char cipher[8] XC_BLOCK_ALIGNED = {
         0xc9, 0x57, 0x44, 0x25, 0x6a, 0x5e, 0xd3, 0x1d};
-    unsigned char out[16], back[8];
+    unsigned char out[16] XC_BLOCK_ALIGNED;
+    unsigned char back[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     memset(out, 0xEE, sizeof(out));
@@ -274,7 +283,7 @@ static bool t_block_ecb(void)
 /* Only operation zero decrypts; every other code encrypts. */
 static bool t_block_op_codes(void)
 {
-    unsigned char out[8];
+    unsigned char out[8] XC_BLOCK_ALIGNED;
 
     schedule(0, KEY);
     XcBlockCrypt(0, out, (PUCHAR)PLAIN, g_table, 2);
@@ -284,7 +293,8 @@ static bool t_block_op_codes(void)
 /* Triple-DES runs the three schedules encrypt-decrypt-encrypt. */
 static bool t_block_triple(void)
 {
-    unsigned char out[8], back[8];
+    unsigned char out[8] XC_BLOCK_ALIGNED;
+    unsigned char back[8] XC_BLOCK_ALIGNED;
 
     schedule(1, KEY3);
     XcBlockCrypt(1, out, (PUCHAR)PLAIN, g_table, 1);
