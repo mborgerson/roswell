@@ -199,12 +199,81 @@ static bool t_only_a_user_alertable_wait_delivers(void)
     return true;
 }
 
+/* --- delivery into a wait that is already blocked ------------------------ */
+
+/*
+ * The group above queues into a thread that then enters a wait.  The
+ * other order -- the thread already blocked in its alertable wait when
+ * the APC arrives -- breaks that wait from the outside, and the question
+ * is whether the routine has run by the time the wait returns.  The
+ * console runs it there: the wait that breaks with STATUS_USER_APC is
+ * the delivery point either way.
+ */
+
+static KEVENT g_solo_running;
+static KEVENT g_solo_done;
+static volatile LONG g_solo_status;
+static volatile LONG g_solo_calls_at_return;
+
+static void NTAPI solo_worker(PVOID arg)
+{
+    (void)arg;
+    KeSetEvent(&g_solo_running, 0, FALSE);
+    g_solo_status = delay(500, UserMode, TRUE);
+    g_solo_calls_at_return = g_calls;
+    KeSetEvent(&g_solo_done, 0, FALSE);
+}
+
+static bool t_a_blocked_wait_runs_the_routine_before_returning(void)
+{
+    LARGE_INTEGER timeout;
+    HANDLE h = NULL;
+    NTSTATUS s;
+
+    reset();
+    g_solo_status = 0;
+    g_solo_calls_at_return = -1;
+    KeInitializeEvent(&g_solo_running, NotificationEvent, FALSE);
+    KeInitializeEvent(&g_solo_done, NotificationEvent, FALSE);
+
+    s = PsCreateSystemThreadEx(&h, 0, 0, 0, NULL, solo_worker, NULL, FALSE,
+                               FALSE, worker_system_routine);
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("create worker: 0x%08x", (unsigned)s);
+
+    /* Let it get well inside the wait before the APC arrives. */
+    timeout.QuadPart = -((LONGLONG)2 * 1000 * 10000);
+    KeWaitForSingleObject(&g_solo_running, Executive, KernelMode, FALSE,
+                          &timeout);
+    delay(50, KernelMode, FALSE);
+
+    s = NtQueueApcThread(h, apc_routine, (PVOID)0x11223344, NULL, NULL);
+    if (!NT_SUCCESS(s)) {
+        KeWaitForSingleObject(&g_solo_done, Executive, KernelMode, FALSE,
+                              &timeout);
+        NtClose(h);
+        FAIL_AND_RETURN("queue -> 0x%08x", (unsigned)s);
+    }
+
+    timeout.QuadPart = -((LONGLONG)2 * 1000 * 10000);
+    s = KeWaitForSingleObject(&g_solo_done, Executive, KernelMode, FALSE,
+                              &timeout);
+    NtClose(h);
+    if (s != STATUS_SUCCESS) FAIL_AND_RETURN("worker never finished");
+
+    ASSERT_NTSTATUS((NTSTATUS)g_solo_status, STATUS_USER_APC);
+    ASSERT_EQ_U32(g_solo_calls_at_return, 1);
+    return true;
+}
+
 static const test_entry_t ke_apc_entries[] = {
     { "the_wait_is_the_delivery_point", t_the_wait_is_the_delivery_point,
       NULL },
     { "one_wait_drains_them_all_in_order",
       t_one_wait_drains_them_all_in_order, NULL },
     { "another_thread_receives_it", t_another_thread_receives_it, NULL },
+    { "a_blocked_wait_runs_the_routine_before_returning",
+      t_a_blocked_wait_runs_the_routine_before_returning, NULL },
     { "only_a_user_alertable_wait_delivers",
       t_only_a_user_alertable_wait_delivers, NULL },
 };

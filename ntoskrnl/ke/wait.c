@@ -396,6 +396,7 @@ KeDelayExecutionThread(IN KPROCESSOR_MODE WaitMode,
                 if (WaitStatus == STATUS_TIMEOUT) WaitStatus = STATUS_SUCCESS;
 
                 /* Return Status */
+                KiDeliverXboxUserApcs(WaitStatus);
                 return WaitStatus;
             }
 
@@ -570,7 +571,11 @@ KeWaitForSingleObject(IN PVOID Object,
             WaitStatus = (NTSTATUS)KiSwapThread(Thread, KeGetCurrentPrcb());
 
             /* Check if we were executing an APC */
-            if (WaitStatus != STATUS_KERNEL_APC) return WaitStatus;
+            if (WaitStatus != STATUS_KERNEL_APC)
+            {
+                KiDeliverXboxUserApcs(WaitStatus);
+                return WaitStatus;
+            }
 
             /* Check if we had a timeout */
             if (Timeout)
@@ -863,7 +868,11 @@ KeWaitForMultipleObjects(IN ULONG Count,
             WaitStatus = (NTSTATUS)KiSwapThread(Thread, KeGetCurrentPrcb());
 
             /* Check if we were executing an APC */
-            if (WaitStatus != STATUS_KERNEL_APC) return WaitStatus;
+            if (WaitStatus != STATUS_KERNEL_APC)
+            {
+                KiDeliverXboxUserApcs(WaitStatus);
+                return WaitStatus;
+            }
 
             /* Check if we had a timeout */
             if (Timeout)
