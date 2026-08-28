@@ -302,6 +302,7 @@
 # --- Ps* (xbe thread spawn -- Xbox PsCreateSystemThreadEx takes a TLS size) #
 254  XePsCreateSystemThread          # Xbox @20 (no oa/process/ACCESS_MASK) -> NT @28
 255  XePsCreateSystemThreadEx
+256  XePsQueryStatistics             # thread and handle counts; exact Length
 258  PsTerminateSystemThread
 259  PsThreadType  XePsThreadObjectType  # 28-byte Xbox-shape struct; title reads .PoolTag at +0x18
 

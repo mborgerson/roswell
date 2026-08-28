@@ -110,6 +110,7 @@ DECLARE_GROUP(ob_bypointer);
 DECLARE_GROUP(ke_pulse);
 DECLARE_GROUP(ke_boost);
 DECLARE_GROUP(ob_directory);
+DECLARE_GROUP(ps_statistics);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -193,6 +194,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_ke_pulse,
     &g_group_ke_boost,
     &g_group_ob_directory,
+    &g_group_ps_statistics,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */
