@@ -120,4 +120,58 @@ NxkPublishThreadProcess(_Out_writes_bytes_(0x80) PUCHAR Shadow)
     *(PLONG)(Shadow + XBE_KTHREAD_QUANTUM) = XBE_THREAD_QUANTUM;
 }
 
+/*
+ * KeSetPriorityProcess -- a partial implementation, deliberately.
+ *
+ * Probed on the console: it returns the process' previous base
+ * priority, writes the new one into the field with no validation at all
+ * (0, 16, 31 and -1 all land verbatim), and moves every thread of the
+ * title to the new priority.  Out of range the threads are clamped and
+ * the clamp does not undo, so a caller that goes outside 1..15 and comes
+ * back leaves its threads somewhere else entirely.
+ *
+ * What is done here: the return value, the field, and the calling
+ * thread.  What is not: the title's *other* threads, which stay where
+ * they were.  Moving them means walking a list of the title's threads,
+ * and there isn't one -- the console's lives in KPROCESS.ThreadListHead,
+ * which is empty here for the reason at the top of this file.  NT's own
+ * EPROCESS thread list is not a substitute without care: there is one
+ * process on this console and it carries the kernel's system threads
+ * alongside the title's, so an unfiltered walk would re-prioritise the
+ * kernel.  KTHREAD.XeXboxFs4 marks a registered title thread and is the
+ * filter that walk would need.
+ *
+ * A title that sets its process priority therefore sees the right answer
+ * back and gets the calling thread moved; the rest of its threads keep
+ * running where they were.  That is a real divergence, and the
+ * ke/procprio case that spawns a thread names it.
+ */
+LONG NTAPI
+KeSetPriorityProcess(PVOID Process, LONG BasePriority)
+{
+    PXBE_KPROCESS Target = (PXBE_KPROCESS)Process;
+    LONG Old;
+
+    if (Target == NULL)
+        return 0;
+
+    /* The console stores whatever it is handed, so this does too. */
+    Old = Target->BasePriority;
+    Target->BasePriority = (CHAR)BasePriority;
+
+    /* Only move a thread for a value the console would not have had to
+     * clamp -- how it clamps was never pinned down, and guessing would
+     * be worse than leaving the thread alone. */
+    if (BasePriority >= 1 && BasePriority <= 15)
+    {
+        PKTHREAD Thread = KeGetCurrentThread();
+
+        KeSetPriorityThread(Thread, BasePriority);
+        Thread->XeXboxShadow[XBE_KTHREAD_PRIORITY] = (UCHAR)BasePriority;
+        Thread->XeXboxShadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)BasePriority;
+    }
+
+    return Old;
+}
+
 /* EOF */

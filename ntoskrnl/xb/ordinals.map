@@ -190,7 +190,7 @@
 144  KeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
 145  KeSetEvent
 146  KeSetEventBoostPriority
-147                                   # Xbox-only, no NT equiv
+147  KeSetPriorityProcess            # sets the field + the calling thread; others stay put
 148  KeSetPriorityThread
 149  KeSetTimer                       # native KDPC/KTIMER; direct
 150  KeSetTimerEx                     # native KDPC/KTIMER; direct
