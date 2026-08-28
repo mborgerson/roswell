@@ -2704,8 +2704,14 @@ IopCreateFile(OUT PHANDLE FileHandle,
     }
 
     /* Check if we need to do parameter checking */
-#ifndef SARCH_XBOX
+#ifdef SARCH_XBOX
+    /* Every caller here is kernel-mode, so the checks are reachable only
+     * on request -- which is the whole difference between the exported
+     * IoCreateFile and NtCreateFile, the latter never asking for them. */
+    if (Options & IO_CHECK_CREATE_PARAMETERS)
+#else
     if ((AccessMode != KernelMode) || (Options & IO_CHECK_CREATE_PARAMETERS))
+#endif
     {
         /* Validate parameters */
         if (FileAttributes & ~FILE_ATTRIBUTE_VALID_FLAGS)
@@ -2788,6 +2794,7 @@ IopCreateFile(OUT PHANDLE FileHandle,
             return STATUS_INVALID_PARAMETER;
         }
 
+#ifndef SARCH_XBOX
         /* Now check if this is a named pipe */
         if (CreateFileType == CreateFileTypeNamedPipe)
         {
@@ -2832,8 +2839,8 @@ IopCreateFile(OUT PHANDLE FileHandle,
                 return STATUS_INVALID_PARAMETER;
             }
         }
-    }
 #endif
+    }
 
     /* Allocate the open packet */
     OpenPacket = ExAllocatePoolWithTag(NonPagedPool, sizeof(*OpenPacket), 'pOoI');
