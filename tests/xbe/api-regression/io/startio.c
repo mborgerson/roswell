@@ -25,6 +25,7 @@ static const char DEVICE_NAME[] = "\\Device\\nxkrnl-api-startio";
 static DRIVER_OBJECT g_driver;
 static PIRP g_packets[MAX_PACKETS];
 static volatile LONG g_order[MAX_PACKETS];
+static volatile LONG g_irql[MAX_PACKETS];
 static volatile LONG g_started;
 
 /* StartIo runs at DISPATCH_LEVEL, so it only records. */
@@ -40,6 +41,7 @@ static void NTAPI start_io(PDEVICE_OBJECT dev, PIRP irp)
             break;
         }
     }
+    if (n < MAX_PACKETS) g_irql[n] = (LONG)KeGetCurrentIrql();
     g_started = n + 1;
 }
 
@@ -83,6 +85,7 @@ static void reset(void)
     for (i = 0; i < MAX_PACKETS; i++) {
         g_packets[i] = NULL;
         g_order[i] = -1;
+        g_irql[i] = -1;
     }
 }
 
@@ -208,10 +211,53 @@ static bool t_by_key_sweeps_forward(void)
     return true;
 }
 
+/* The two routes into StartIo differ, and a driver can tell: IoStartPacket
+ * raises to DISPATCH_LEVEL and runs StartIo there, while IoStartNextPacket
+ * runs it at whatever level the caller was at -- NT documents that one as
+ * DISPATCH_LEVEL-only and the console simply does not raise for it.  Either
+ * way the caller's own level is what it gets back. */
+static bool t_start_packet_raises_and_next_does_not(void)
+{
+    PDEVICE_OBJECT dev;
+    KIRQL entry, after;
+    NTSTATUS s;
+
+    reset();
+    s = make_device(&dev);
+    if (!NT_SUCCESS(s)) FAIL_AND_RETURN("create -> 0x%08x", (unsigned)s);
+
+    if (make_packet(dev, 0) == NULL || make_packet(dev, 1) == NULL) {
+        free_packets();
+        IoDeleteDevice(dev);
+        FAIL_AND_RETURN("out of packets");
+    }
+
+    entry = KeGetCurrentIrql();
+    IoStartPacket(dev, g_packets[0], NULL);   /* straight to StartIo */
+    IoStartPacket(dev, g_packets[1], NULL);   /* queues behind it */
+    IoStartNextPacket(dev);                   /* hands the queued one over */
+    after = KeGetCurrentIrql();
+
+    IoStartNextPacket(dev);
+    free_packets();
+    IoDeleteDevice(dev);
+
+    tap_comment("startio irql: caller=%u start=%ld next=%ld after=%u",
+                (unsigned)entry, (long)g_irql[0], (long)g_irql[1],
+                (unsigned)after);
+
+    ASSERT_EQ_U32((ULONG)g_irql[0], DISPATCH_LEVEL);
+    ASSERT_EQ_U32((ULONG)g_irql[1], (ULONG)entry);
+    ASSERT_EQ_U32(after, entry);
+    return true;
+}
+
 static const test_entry_t io_startio_entries[] = {
     { "the_first_packet_starts_the_device",
       t_the_first_packet_starts_the_device, NULL },
     { "by_key_sweeps_forward", t_by_key_sweeps_forward, NULL },
+    { "start_packet_raises_and_next_does_not", t_start_packet_raises_and_next_does_not,
+      NULL },
 };
 
 DEFINE_GROUP(io_startio, "io/startio");

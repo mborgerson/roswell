@@ -686,16 +686,14 @@ KiAcquireDeviceQueueLock(IN PKDEVICE_QUEUE DeviceQueue,
 {
 #ifdef SARCH_XBOX
     /* The queue carries no lock: raising to dispatch level is the whole
-       exclusion on a uniprocessor machine. */
+       exclusion on a uniprocessor machine.  Raise unconditionally rather
+       than requiring the caller to already be there -- the console lets a
+       queue call in from PASSIVE_LEVEL (IoStartNextPacket runs StartIo at
+       whatever level its caller had), and the raise is invisible to the
+       caller: it ends with the matching release, before the queue routine
+       returns. */
     UNREFERENCED_PARAMETER(DeviceQueue);
-    if (KeGetCurrentPrcb()->DpcThreadActive)
-    {
-        KeRaiseIrql(DISPATCH_LEVEL, &DeviceLock->OldIrql);
-    }
-    else
-    {
-        ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
-    }
+    KeRaiseIrql(DISPATCH_LEVEL, &DeviceLock->OldIrql);
 #else
     /* Check if we were called from a threaded DPC */
     if (KeGetCurrentPrcb()->DpcThreadActive)
@@ -718,14 +716,7 @@ VOID
 KiReleaseDeviceQueueLock(IN PKLOCK_QUEUE_HANDLE DeviceLock)
 {
 #ifdef SARCH_XBOX
-    if (KeGetCurrentPrcb()->DpcThreadActive)
-    {
-        KeLowerIrql(DeviceLock->OldIrql);
-    }
-    else
-    {
-        ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
-    }
+    KeLowerIrql(DeviceLock->OldIrql);
 #else
     /* Check if we were called from a threaded DPC */
     if (KeGetCurrentPrcb()->DpcThreadActive)
