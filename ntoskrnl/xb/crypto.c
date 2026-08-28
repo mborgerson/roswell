@@ -460,6 +460,154 @@ XcpPKGetKeyLen(_In_ PVOID PubKey)
 }
 
 /*
+ * The private-key blob repeats that header under its own magic and
+ * carries the CRT parameters after the modulus.  Every number sits in a
+ * field eight bytes wider than the value, the halves taking four each,
+ * so the fields stride by the blob-length field rather than by the
+ * modulus' width:
+ *
+ *   +0x00  "RSA2"
+ *   +0x04  blob length (the modulus' width plus eight)
+ *   +0x08  modulus bits
+ *   +0x0c  index of the modulus' top byte
+ *   +0x10  public exponent
+ *   +0x14  modulus, then prime1, prime2, exponent1, exponent2 and the
+ *          coefficient, then the private exponent
+ *
+ * Probed against the retail kernel: the operation is the CRT one, so
+ * only the magic, the bit length and the five CRT parameters are read.
+ * The modulus, the private exponent, the public exponent and the
+ * top-byte index are not, and neither is anything past the structure.
+ * A zero prime is refused without writing anything.  The value handed in
+ * is one word wider than the modulus and is not checked against it; the
+ * four bytes above that word are not read.
+ */
+
+#define PK_MAGIC(k)         (((const ULONG *)(k))[0])
+#define PK_MODULUS_BITS(k)  (((const ULONG *)(k))[2])
+#define PK_PUBLIC_MAGIC     0x31415352      /* "RSA1" */
+#define PK_PRIVATE_MAGIC    0x32415352      /* "RSA2" */
+
+static BOOLEAN
+BnIsZero(const ULONG *A, ULONG N)
+{
+    while (N-- > 0)
+        if (A[N] != 0)
+            return FALSE;
+    return TRUE;
+}
+
+/* A += B, returning the carry out of the top word. */
+static ULONG
+BnAdd(PULONG A, const ULONG *B, ULONG N)
+{
+    ULONGLONG Carry = 0;
+    ULONG i;
+
+    for (i = 0; i < N; i++)
+    {
+        Carry += (ULONGLONG)A[i] + B[i];
+        A[i] = (ULONG)Carry;
+        Carry >>= 32;
+    }
+    return (ULONG)Carry;
+}
+
+/* Result = A * B, N words each into 2N. */
+static VOID
+BnMultiply(PULONG Result, const ULONG *A, const ULONG *B, ULONG N)
+{
+    ULONG i, j;
+
+    RtlZeroMemory(Result, 2 * N * sizeof(ULONG));
+    for (i = 0; i < N; i++)
+    {
+        ULONGLONG Carry = 0;
+        for (j = 0; j < N; j++)
+        {
+            Carry += (ULONGLONG)A[j] * B[i] + Result[i + j];
+            Result[i + j] = (ULONG)Carry;
+            Carry >>= 32;
+        }
+        Result[i + N] = (ULONG)Carry;
+    }
+}
+
+static ULONG NTAPI
+XcpPKDecPrivate(_In_ PVOID PrivKey, _In_ PVOID In, _Out_ PVOID Out)
+{
+    ULONG Bytes = PK_MODULUS_BITS(PrivKey) / 8;
+    ULONG Words = Bytes / 4;
+    ULONG Half = Words / 2;
+    ULONG Stride = PK_BLOB_LENGTH(PrivKey);
+    const UCHAR *Field = (const UCHAR *)PrivKey + 0x14 + Stride;
+    PULONG Pool, P, Q, Dp, Dq, Qi, Value, M1, M2, T, H, Product, Scratch;
+    ULONG Carry, i;
+
+    if ((Bytes & 7) != 0 || Half == 0 || Words > BN_MAX_WORDS ||
+        Stride < Bytes || (Stride & 1) != 0 ||
+        PK_MAGIC(PrivKey) != PK_PRIVATE_MAGIC)
+        return 0;
+
+    Pool = ExAllocatePoolWithTag(NonPagedPool,
+                                 (16 * Half + 8) * sizeof(ULONG), 'kXcX');
+    if (Pool == NULL)
+        return 0;
+    P = Pool;                   /* five CRT parameters, Half words each */
+    Q = P + Half;
+    Dp = Q + Half;
+    Dq = Dp + Half;
+    Qi = Dq + Half;
+    Value = Qi + Half;          /* the caller's value, one word wider */
+    M1 = Value + Words + 1;     /* the two halves and their combination */
+    M2 = M1 + Half;
+    T = M2 + Half;
+    H = T + Half;
+    Product = H + Half;         /* Words, then 2 * Half of scratch */
+    Scratch = Product + Words;
+
+    RtlCopyMemory(P, Field, Half * sizeof(ULONG));
+    RtlCopyMemory(Q, Field + Stride / 2, Half * sizeof(ULONG));
+    RtlCopyMemory(Dp, Field + Stride, Half * sizeof(ULONG));
+    RtlCopyMemory(Dq, Field + 3 * (Stride / 2), Half * sizeof(ULONG));
+    RtlCopyMemory(Qi, Field + 2 * Stride, Half * sizeof(ULONG));
+    RtlCopyMemory(Value, In, (Words + 1) * sizeof(ULONG));
+
+    /* Neither half can be taken modulo nothing. */
+    if (BnIsZero(P, Half) || BnIsZero(Q, Half))
+    {
+        ExFreePool(Pool);
+        return 0;
+    }
+
+    BnReduce(T, Value, Words + 1, P, Half);
+    if (XcpModExp(M1, T, Dp, P, Half) == 0 ||
+        (BnReduce(T, Value, Words + 1, Q, Half),
+         XcpModExp(M2, T, Dq, Q, Half) == 0))
+    {
+        ExFreePool(Pool);
+        return 0;
+    }
+
+    /* (M1 - M2) * Qi mod P, then back up to the whole answer. */
+    RtlCopyMemory(T, M1, Half * sizeof(ULONG));
+    if (BnSubtract(T, M2, Half) != 0)
+        BnAdd(T, P, Half);
+    BnMulMod(H, T, Qi, P, Scratch, Half);
+    BnMultiply(Product, H, Q, Half);
+    Carry = BnAdd(Product, M2, Half);
+    for (i = Half; Carry != 0 && i < Words; i++)
+        Carry = (++Product[i] == 0);
+
+    RtlCopyMemory(Out, Product, Bytes);
+    for (i = 0; i < 8; i++)
+        ((PUCHAR)Out)[Bytes + i] = 0;
+
+    ExFreePool(Pool);
+    return 1;
+}
+
+/*
  * The DigestInfo that prefixes a SHA-1 hash inside a PKCS#1 v1.5 block,
  * stored the way the decrypted block reads out: least significant byte
  * first, so these run backwards compared to the ASN.1 encoding.  Both the
@@ -972,21 +1120,11 @@ typedef struct _XC_VECTOR
     ULONG (NTAPI *CryptService)(ULONG Op, PVOID Args);
 } XC_VECTOR, *PXC_VECTOR;
 
-/*
- * One slot has no routine behind it: the private key operation is an
- * unmapped ordinal still -- the layout of the blob it wants is unknown
- * -- so the slot carries the export scaffold's own stub.  Reaching it
- * through the vector then bugchecks naming the ordinal, exactly as
- * calling the export does.
- */
-ULONG __stdcall XbExpStub_342(ULONG, ULONG, ULONG);
-
 #define XC_ROM_VECTOR                                       \
 {                                                           \
     XcpSHAInit, XcpSHAUpdate, XcpSHAFinal,                  \
     XcpRC4Key, XcpRC4Crypt, XcpHMAC,                        \
-    XcpPKEncPublic,                                         \
-    (ULONG (NTAPI *)(PVOID, PVOID, PVOID))XbExpStub_342,    \
+    XcpPKEncPublic, XcpPKDecPrivate,                        \
     XcpPKGetKeyLen, XcpVerifyPKCS1Signature, XcpModExp,     \
     XcpDESKeyParity, XcpKeyTable, XcpBlockCrypt,            \
     XcpBlockCryptCBC, XcpCryptService,                      \
@@ -1036,6 +1174,9 @@ VOID NTAPI XcHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
 
 ULONG NTAPI XcPKEncPublic(_In_ PVOID PubKey, _In_ PVOID In, _Out_ PVOID Out)
 { return XcVector.PKEncPublic(PubKey, In, Out); }
+
+ULONG NTAPI XcPKDecPrivate(_In_ PVOID PrivKey, _In_ PVOID In, _Out_ PVOID Out)
+{ return XcVector.PKDecPrivate(PrivKey, In, Out); }
 
 ULONG NTAPI XcPKGetKeyLen(_In_ PVOID PubKey)
 { return XcVector.PKGetKeyLen(PubKey); }

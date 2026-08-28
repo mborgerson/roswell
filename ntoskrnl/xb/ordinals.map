@@ -397,6 +397,7 @@
 339  XcRC4Crypt
 340  XcHMAC
 341  XcPKEncPublic                   # raw public-key operation, value eight bytes wider than the modulus
+342  XcPKDecPrivate                  # CRT private-key operation; the fields stride by the blob length
 343  XcPKGetKeyLen                   # the blob's own length field, verbatim
 344  XcVerifyPKCS1Signature          # RSASSA-PKCS1-v1_5 over SHA-1
 345  XcModExp
