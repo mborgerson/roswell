@@ -237,13 +237,13 @@ target_link_options(ntoskrnl PRIVATE
 
 # Auto-INIT placement (two-stage link).  -ffunction-sections on the LINK makes
 # per-function .text$<fn> sections survive LTO codegen; tools/lto-init-relink.py
-# (wired as RULE_LAUNCH_LINK) then renames boot-only functions' sections to
-# INIT$<fn> in the ltrans cache and relinks, so they land in the discardable
-# INIT section -- no source CODE_SEG tags.  init-ref-check (below) gates it.
+# (wired as RULE_LAUNCH_LINK) then relinks against a generated linker script
+# that names each boot-only function's section inside the discardable INIT
+# section -- no source CODE_SEG tags.  init-ref-check (below) gates it.
 if(SARCH STREQUAL "xbox" AND NOT MSVC)
     target_link_options(ntoskrnl PRIVATE -ffunction-sections)
     set_target_properties(ntoskrnl PROPERTIES RULE_LAUNCH_LINK
-        "${CMAKE_COMMAND} -E env LTO_INIT_FINDTOOL=${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py DEF=${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def NM=${CMAKE_NM} OBJDUMP=${CMAKE_OBJDUMP} OBJCOPY=${CMAKE_OBJCOPY} AR=${CMAKE_AR} python3 ${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py")
+        "${CMAKE_COMMAND} -E env LTO_INIT_FINDTOOL=${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py DEF=${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def NM=${CMAKE_NM} OBJDUMP=${CMAKE_OBJDUMP} AR=${CMAKE_AR} python3 ${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py")
     # RULE_LAUNCH_LINK is only a command prefix -- CMake does not treat the
     # scripts/data it names as inputs, so editing them would not relink the
     # kernel (and flash.bin would stay stale).  Declare them as LINK_DEPENDS so
