@@ -389,6 +389,7 @@
 348  XcBlockCrypt
 349  XcBlockCryptCBC
 350  XcCryptService                  # answers zero to every operation
+351  XcUpdateCrypto                  # replaces the vector every Xc entry dispatches through
 
 # --- HAL boot / shutdown ------------------------------------------------- #
 356  HalBootSMCVideoMode           # = 1 (HDTV)

@@ -1,9 +1,9 @@
 /*
  * PROJECT:     nxkrnl -- a free kernel for the original Xbox
  * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
- * PURPOSE:     Xc* crypto ordinals -- SHA-1, RC4, HMAC-SHA1, plus stubs for
- *              the cipher framework (DES key parity / key table /
- *              block-crypt) and modular exponentiation.
+ * PURPOSE:     Xc* crypto ordinals -- SHA-1, RC4, HMAC-SHA1, modular
+ *              exponentiation and the DES cipher framework, published
+ *              through the vector a title can replace.
  *
  * Titles sign and verify HDD cache content with these; a no-op leaves
  * them consuming a zeroed digest / unencrypted keystream and crashes
@@ -24,32 +24,32 @@
  */
 #define XC_SHA_CTX(c)  ((PSHA_CTX)((PUCHAR)(c) + 24))
 
-VOID NTAPI XcSHAInit(_In_ PVOID Ctx)
+static VOID NTAPI XcpSHAInit(_In_ PVOID Ctx)
 { A_SHAInit(XC_SHA_CTX(Ctx)); }
-VOID NTAPI XcSHAUpdate(_In_ PVOID Ctx, _In_ PVOID Data, _In_ ULONG Len)
+static VOID NTAPI XcpSHAUpdate(_In_ PVOID Ctx, _In_ PVOID Data, _In_ ULONG Len)
 { A_SHAUpdate(XC_SHA_CTX(Ctx), (const unsigned char *)Data, Len); }
-VOID NTAPI XcSHAFinal(_In_ PVOID Ctx, _Out_writes_(20) PVOID Digest)
+static VOID NTAPI XcpSHAFinal(_In_ PVOID Ctx, _Out_writes_(20) PVOID Digest)
 { A_SHAFinal(XC_SHA_CTX(Ctx), (PULONG)Digest); }
 
 /* RC4 key schedule.  RC4_CONTEXT (258 B) fits inside the key-struct slot. */
-VOID NTAPI
-XcRC4Key(_Out_ PVOID KeyStruct, _In_ ULONG KeyLen, _In_ PVOID KeyData)
+static VOID NTAPI
+XcpRC4Key(_Out_ PVOID KeyStruct, _In_ ULONG KeyLen, _In_ PVOID KeyData)
 {
     rc4_init((RC4_CONTEXT *)KeyStruct,
              (const unsigned char *)KeyData, KeyLen);
 }
 
 /* RC4 transform, in place. */
-VOID NTAPI
-XcRC4Crypt(_In_ PVOID KeyStruct, _In_ ULONG Len, _Inout_ PVOID Data)
+static VOID NTAPI
+XcpRC4Crypt(_In_ PVOID KeyStruct, _In_ ULONG Len, _Inout_ PVOID Data)
 {
     rc4_crypt((RC4_CONTEXT *)KeyStruct, (unsigned char *)Data, Len);
 }
 
 /* HMAC-SHA1 over two data segments:
  *   inner = SHA1(ipad || I1 || I2);  Out = SHA1(opad || inner). */
-VOID NTAPI
-XcHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
+static VOID NTAPI
+XcpHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
        _In_ PVOID I2, _In_ ULONG L2, _Out_writes_(20) PVOID Out)
 {
     UCHAR pad1[64], pad2[64], temp[64 + 20];
@@ -216,8 +216,8 @@ BnMulMod(PULONG Result, const ULONG *A, const ULONG *B, const ULONG *M,
     BnReduce(Result, Scratch, 2 * N, M, N);
 }
 
-ULONG NTAPI
-XcModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+static ULONG NTAPI
+XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
          _In_ PULONG Modulus, _In_ ULONG Words)
 {
     PULONG Pool, Acc, Val, Tmp, Scratch;
@@ -340,8 +340,8 @@ XcModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
 #define PK_EXPONENT(k)      ((const ULONG *)(k) + 4)
 #define PK_MODULUS(k)       ((const ULONG *)(k) + 5)
 
-ULONG NTAPI
-XcPKGetKeyLen(_In_ PVOID PubKey)
+static ULONG NTAPI
+XcpPKGetKeyLen(_In_ PVOID PubKey)
 {
     return PK_BLOB_LENGTH(PubKey);
 }
@@ -360,8 +360,8 @@ static const struct { UCHAR Length; UCHAR Bytes[15]; } XcPkcs1Prefix[] = {
             0x06, 0x07, 0x30, 0x1f, 0x30 } },
 };
 
-BOOLEAN NTAPI
-XcVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
+static BOOLEAN NTAPI
+XcpVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
                        _In_ PVOID Digest)
 {
     const UCHAR *Hash = (const UCHAR *)Digest;
@@ -390,7 +390,7 @@ XcVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
     Exp[0] = *PK_EXPONENT(PubKey);
     RtlCopyMemory(Mod, PK_MODULUS(PubKey), Bytes);
 
-    if (XcModExp(Block, Sig, Exp, Mod, Words) == 0)
+    if (XcpModExp(Block, Sig, Exp, Mod, Words) == 0)
         goto Done;
 
     /* The block reads out least significant byte first, so the hash sits
@@ -729,8 +729,8 @@ DesLoadTable(DES_KEY *Keys, ULONG KeyCount, const UCHAR *Table)
  * so each byte carries an odd number of 1s.  The upper seven bits are the
  * key material and are left untouched.
  */
-VOID NTAPI
-XcDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
+static VOID NTAPI
+XcpDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
 {
     PUCHAR k = (PUCHAR)Key;
     ULONG i;
@@ -746,8 +746,8 @@ XcDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
     }
 }
 
-VOID NTAPI
-XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
+static VOID NTAPI
+XcpKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
 {
     ULONG Keys = DesKeyCount(Cipher);
     ULONG i;
@@ -762,8 +762,8 @@ XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
  * number it is handed: probed across the first sixteen, none of which
  * touches the argument block.
  */
-ULONG NTAPI
-XcCryptService(_In_ ULONG Op, _In_ PVOID Args)
+static ULONG NTAPI
+XcpCryptService(_In_ ULONG Op, _In_ PVOID Args)
 {
     UNREFERENCED_PARAMETER(Op);
     UNREFERENCED_PARAMETER(Args);
@@ -771,8 +771,8 @@ XcCryptService(_In_ ULONG Op, _In_ PVOID Args)
 }
 
 /* One block, no chaining: the operation code decrypts only when zero. */
-VOID NTAPI
-XcBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,
+static VOID NTAPI
+XcpBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,
              _In_ PVOID KeyTable, _In_ ULONG Op)
 {
     DES_KEY Keys[3];
@@ -783,8 +783,8 @@ XcBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,
                   (BOOLEAN)(Op == 0));
 }
 
-VOID NTAPI
-XcBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
+static VOID NTAPI
+XcpBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
                 _In_ PVOID In, _In_ PVOID KeyTable, _In_ ULONG Op,
                 _Inout_ PVOID Feedback)
 {
@@ -824,5 +824,131 @@ XcBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
         Target += DES_BLOCK_BYTES;
     }
 }
+
+/* --- the crypto vector ---------------------------------------------------- *
+ * Every Xc entry the console publishes is a thunk through a vector a title
+ * can replace wholesale, which is what the update ordinal exists for.
+ * Probed on the retail kernel: the address of an export is not the routine
+ * the ROM vector names, installing a vector diverts the export -- including
+ * its return value -- and the out-parameter always hands back the ROM's own
+ * table, never whatever was installed last.
+ */
+
+typedef struct _XC_VECTOR
+{
+    VOID (NTAPI *SHAInit)(PVOID Ctx);
+    VOID (NTAPI *SHAUpdate)(PVOID Ctx, PVOID Data, ULONG Len);
+    VOID (NTAPI *SHAFinal)(PVOID Ctx, PVOID Digest);
+    VOID (NTAPI *RC4Key)(PVOID KeyStruct, ULONG KeyLen, PVOID KeyData);
+    VOID (NTAPI *RC4Crypt)(PVOID KeyStruct, ULONG Len, PVOID Data);
+    VOID (NTAPI *HMAC)(PVOID K, ULONG Kl, PVOID I1, ULONG L1,
+                       PVOID I2, ULONG L2, PVOID Digest);
+    ULONG (NTAPI *PKEncPublic)(PVOID PubKey, PVOID In, PVOID Out);
+    ULONG (NTAPI *PKDecPrivate)(PVOID PrivKey, PVOID In, PVOID Out);
+    ULONG (NTAPI *PKGetKeyLen)(PVOID PubKey);
+    BOOLEAN (NTAPI *VerifyPKCS1Signature)(PVOID Signature, PVOID PubKey,
+                                          PVOID Digest);
+    ULONG (NTAPI *ModExp)(PULONG Result, PULONG Base, PULONG Exponent,
+                          PULONG Modulus, ULONG Words);
+    VOID (NTAPI *DESKeyParity)(PVOID Key, ULONG KeyLen);
+    VOID (NTAPI *KeyTable)(ULONG Cipher, PVOID KeyTable, PVOID Key);
+    VOID (NTAPI *BlockCrypt)(ULONG Cipher, PVOID Out, PVOID In,
+                             PVOID KeyTable, ULONG Op);
+    VOID (NTAPI *BlockCryptCBC)(ULONG Cipher, ULONG Len, PVOID Out, PVOID In,
+                                PVOID KeyTable, ULONG Op, PVOID Feedback);
+    ULONG (NTAPI *CryptService)(ULONG Op, PVOID Args);
+} XC_VECTOR, *PXC_VECTOR;
+
+/*
+ * Two slots have no routine behind them: the raw public and private key
+ * operations are unmapped ordinals still, so the slot carries the export
+ * scaffold's own stub.  Reaching them through the vector then bugchecks
+ * naming the ordinal, exactly as calling the export does.
+ */
+ULONG __stdcall XbExpStub_341(ULONG, ULONG, ULONG);
+ULONG __stdcall XbExpStub_342(ULONG, ULONG, ULONG);
+
+#define XC_ROM_VECTOR                                       \
+{                                                           \
+    XcpSHAInit, XcpSHAUpdate, XcpSHAFinal,                  \
+    XcpRC4Key, XcpRC4Crypt, XcpHMAC,                        \
+    (ULONG (NTAPI *)(PVOID, PVOID, PVOID))XbExpStub_341,    \
+    (ULONG (NTAPI *)(PVOID, PVOID, PVOID))XbExpStub_342,    \
+    XcpPKGetKeyLen, XcpVerifyPKCS1Signature, XcpModExp,     \
+    XcpDESKeyParity, XcpKeyTable, XcpBlockCrypt,            \
+    XcpBlockCryptCBC, XcpCryptService,                      \
+}
+
+static const XC_VECTOR XcRomVector = XC_ROM_VECTOR;
+static XC_VECTOR XcVector = XC_ROM_VECTOR;
+
+VOID NTAPI
+XcUpdateCrypto(_In_ PVOID NewVector, _Out_opt_ PVOID RomVector)
+{
+    PVOID *Live = (PVOID *)&XcVector;
+    const PVOID *New = (const PVOID *)NewVector;
+    ULONG i;
+
+    if (RomVector != NULL)
+        RtlCopyMemory(RomVector, &XcRomVector, sizeof(XcRomVector));
+
+    /* An empty slot keeps whatever is installed, so a title replacing one
+     * routine hands over a vector with the rest left NULL.  The whole
+     * structure is function pointers, so walk it as such. */
+    for (i = 0; i < sizeof(XcVector) / sizeof(PVOID); i++)
+    {
+        if (New[i] != NULL)
+            Live[i] = New[i];
+    }
+}
+
+VOID NTAPI XcSHAInit(_In_ PVOID Ctx)
+{ XcVector.SHAInit(Ctx); }
+
+VOID NTAPI XcSHAUpdate(_In_ PVOID Ctx, _In_ PVOID Data, _In_ ULONG Len)
+{ XcVector.SHAUpdate(Ctx, Data, Len); }
+
+VOID NTAPI XcSHAFinal(_In_ PVOID Ctx, _Out_writes_(20) PVOID Digest)
+{ XcVector.SHAFinal(Ctx, Digest); }
+
+VOID NTAPI XcRC4Key(_Out_ PVOID KeyStruct, _In_ ULONG KeyLen, _In_ PVOID KeyData)
+{ XcVector.RC4Key(KeyStruct, KeyLen, KeyData); }
+
+VOID NTAPI XcRC4Crypt(_In_ PVOID KeyStruct, _In_ ULONG Len, _Inout_ PVOID Data)
+{ XcVector.RC4Crypt(KeyStruct, Len, Data); }
+
+VOID NTAPI XcHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
+                  _In_ PVOID I2, _In_ ULONG L2, _Out_writes_(20) PVOID Out)
+{ XcVector.HMAC(K, Kl, I1, L1, I2, L2, Out); }
+
+ULONG NTAPI XcPKGetKeyLen(_In_ PVOID PubKey)
+{ return XcVector.PKGetKeyLen(PubKey); }
+
+BOOLEAN NTAPI XcVerifyPKCS1Signature(_In_ PVOID Signature, _In_ PVOID PubKey,
+                                     _In_ PVOID Digest)
+{ return XcVector.VerifyPKCS1Signature(Signature, PubKey, Digest); }
+
+ULONG NTAPI XcModExp(_Out_ PULONG Result, _In_ PULONG Base,
+                     _In_ PULONG Exponent, _In_ PULONG Modulus,
+                     _In_ ULONG Words)
+{ return XcVector.ModExp(Result, Base, Exponent, Modulus, Words); }
+
+VOID NTAPI XcDESKeyParity(_Inout_ PVOID Key, _In_ ULONG KeyLen)
+{ XcVector.DESKeyParity(Key, KeyLen); }
+
+VOID NTAPI XcKeyTable(_In_ ULONG Cipher, _Out_ PVOID KeyTable, _In_ PVOID Key)
+{ XcVector.KeyTable(Cipher, KeyTable, Key); }
+
+VOID NTAPI XcBlockCrypt(_In_ ULONG Cipher, _Out_ PVOID Out, _In_ PVOID In,
+                        _In_ PVOID KeyTable, _In_ ULONG Op)
+{ XcVector.BlockCrypt(Cipher, Out, In, KeyTable, Op); }
+
+VOID NTAPI XcBlockCryptCBC(_In_ ULONG Cipher, _In_ ULONG Len, _Out_ PVOID Out,
+                           _In_ PVOID In, _In_ PVOID KeyTable, _In_ ULONG Op,
+                           _Inout_ PVOID Feedback)
+{ XcVector.BlockCryptCBC(Cipher, Len, Out, In, KeyTable, Op, Feedback); }
+
+ULONG NTAPI XcCryptService(_In_ ULONG Op, _In_ PVOID Args)
+{ return XcVector.CryptService(Op, Args); }
 
 /* EOF */

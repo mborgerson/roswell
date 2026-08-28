@@ -82,6 +82,7 @@ DECLARE_GROUP(xc_parity);
 DECLARE_GROUP(xc_crypto);
 DECLARE_GROUP(xc_rsa);
 DECLARE_GROUP(xc_cipher);
+DECLARE_GROUP(xc_vector);
 DECLARE_GROUP(io_delete);
 DECLARE_GROUP(ob_refname);
 DECLARE_GROUP(ke_devqueue);
@@ -160,6 +161,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_xc_crypto,
     &g_group_xc_rsa,
     &g_group_xc_cipher,
+    &g_group_xc_vector,
     &g_group_io_delete,
     &g_group_ob_refname,
     &g_group_ke_devqueue,
