@@ -6,17 +6,19 @@
  * title starts from.  It is also the only handle a title has on the
  * process, so it is what 147 KeSetPriorityProcess would be called with.
  *
- * Our KTHREAD is still NT's rather than the console's, so a title
- * reading these fields reads the wrong offsets and finds zeros.  The
- * cases below assert what the console does and are marked TODO for
- * that: they are the gate on mapping KeSetPriorityProcess, which cannot
- * be reached with a usable pointer until the thread layout lands.
+ * Our threads are NT's, so what a title sees is an Xbox-shaped shadow
+ * that the kernel fills at the console's offsets (xb/procobj.c).  The
+ * one thing it does not fill is the process' thread list: linking into
+ * it needs a field past the end of the shadow and a hook on every way
+ * out of a thread, so it is published empty and the case that expects
+ * it non-empty stays a documented divergence rather than a fiction.
  */
 
 #include "../harness.h"
 
-static const char *const NO_KTHREAD_LAYOUT =
-    "our KTHREAD is NT's, so the console's offsets read as zero";
+static const char *const NO_THREAD_LIST =
+    "the process' thread list is published empty: linking into it needs "
+    "KTHREAD.ThreadListEntry, past the end of the shadow";
 
 /* The thread names the process it belongs to. */
 static bool t_the_thread_names_its_process(void)
@@ -39,10 +41,22 @@ static bool t_the_process_has_the_console_layout(void)
     ASSERT_NOT_NULL(p);
     ASSERT_EQ_PTR(p->ReadListHead.Flink, &p->ReadListHead);
     ASSERT_EQ_PTR(p->ReadListHead.Blink, &p->ReadListHead);
-    ASSERT_TRUE(p->ThreadListHead.Flink != &p->ThreadListHead);
     ASSERT_TRUE(p->StackCount >= 1);
     ASSERT_TRUE(p->ThreadQuantum > 0);
     ASSERT_TRUE(p->BasePriority >= 1 && p->BasePriority <= 15);
+    return true;
+}
+
+/* The console links every thread of the title into the process, so the
+ * list is never empty while a thread is running to read it. */
+static bool t_the_process_lists_its_threads(void)
+{
+    PKTHREAD t = KeGetCurrentThread();
+    PKPROCESS p = t->ApcState.Process;
+
+    ASSERT_NOT_NULL(p);
+    ASSERT_TRUE(p->ThreadListHead.Flink != &p->ThreadListHead);
+    ASSERT_TRUE(p->ThreadListHead.Blink != &p->ThreadListHead);
     return true;
 }
 
@@ -60,12 +74,13 @@ static bool t_the_thread_starts_at_the_process_base(void)
 }
 
 static const test_entry_t ke_procprio_entries[] = {
-    { "the_thread_names_its_process", t_the_thread_names_its_process,
-      NO_KTHREAD_LAYOUT },
+    { "the_thread_names_its_process", t_the_thread_names_its_process, NULL },
     { "the_process_has_the_console_layout",
-      t_the_process_has_the_console_layout, NO_KTHREAD_LAYOUT },
+      t_the_process_has_the_console_layout, NULL },
     { "the_thread_starts_at_the_process_base",
-      t_the_thread_starts_at_the_process_base, NO_KTHREAD_LAYOUT },
+      t_the_thread_starts_at_the_process_base, NULL },
+    { "the_process_lists_its_threads", t_the_process_lists_its_threads,
+      NO_THREAD_LIST },
 };
 
 DEFINE_GROUP(ke_procprio, "ke/procprio");

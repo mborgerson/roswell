@@ -162,6 +162,9 @@ static PCWSTR const XeTitleSearchPaths[] = {
  * is a no-op for them.
  */
 
+/* Fills the process-facing fields of the shadow (xb/procobj.c). */
+VOID NxkPublishThreadProcess(_Out_writes_bytes_(0x80) PUCHAR Shadow);
+
 #define XBE_KTHREAD_TLSDATA  0x28      /* Xbox KTHREAD.TlsData offset */
 #define XBE_TIB_STACKBASE    0x04      /* fs:[] offset for the TLS pointer */
 
@@ -176,6 +179,8 @@ XeRegisterThread(_In_opt_ PVOID TlsData, _In_ ULONG_PTR Fs4)
 
     RtlZeroMemory(self->XeXboxShadow, sizeof(self->XeXboxShadow));
     *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_TLSDATA) = TlsData;
+    /* The rest of the process-facing view (xb/procobj.c). */
+    NxkPublishThreadProcess(self->XeXboxShadow);
     self->XeXboxFs4 = Fs4;
     /* SEH chain head before any title frame: the int3 dispatch baseline. */
     self->XeBaseSeh = (PVOID)__readfsdword(0);

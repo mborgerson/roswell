@@ -144,6 +144,7 @@ list(APPEND PCH_SKIP_SOURCE
     xb/eeprom.c
     xb/refurb.c
     xb/titlekeys.c
+    xb/procobj.c
     xb/scattergather.c
     xb/exflist.c
     xb/rtlprintf.c
