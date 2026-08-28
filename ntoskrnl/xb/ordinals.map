@@ -138,6 +138,7 @@
 93   KeAlertThread                    # signature matches NT
 94   KeBoostPriorityThread            # base-relative, capped below the real-time range
 95   KeBugCheck
+96   KeBugCheckEx                     # the five words land in KiBugCheckData verbatim
 97   KeCancelTimer                    # KTIMER layout matches; direct
 98   XeKeConnectInterrupt            # routes through the KINTERRUPT shadow
 99   KeDelayExecutionThread
