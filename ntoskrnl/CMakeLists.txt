@@ -143,6 +143,7 @@ list(APPEND PCH_SKIP_SOURCE
     xb/rwlock.c
     xb/eeprom.c
     xb/refurb.c
+    xb/titlekeys.c
     xb/scattergather.c
     xb/exflist.c
     xb/rtlprintf.c

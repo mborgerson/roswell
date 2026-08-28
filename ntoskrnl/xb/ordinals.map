@@ -387,7 +387,12 @@
 322  XboxHardwareInfo              # 8-byte XBOX_HARDWARE_INFO; USB-hub flag + GPU/MCP revs (not the 4-byte scaffold)
 323  XboxHDKey                     # 16-byte console HDD key, out of the EEPROM's sealed section
 324  XboxKrnlVersion               # 8-byte XBOX_KRNL_VERSION; titles gate on Major=1
+325  XboxSignatureKey              # per-title: HMAC of the image's certificate field
 326  XeImageFileName               # ANSI_STRING -- the running image name
+
+# --- DATA: the title's own keys, derived from its certificate ------------ #
+353  XboxLANKey                    # per-title: HMAC of the image's certificate field
+354  XboxAlternateSignatureKeys    # per-title: sixteen of them, same derivation
 
 # --- Buffered port I/O (rep ins/outs; single-value accessors inline) ----- #
 329  READ_PORT_BUFFER_UCHAR

@@ -121,6 +121,7 @@ DECLARE_GROUP(ke_bugcheck);
 DECLARE_GROUP(hal_smc);
 DECLARE_GROUP(ke_procprio);
 DECLARE_GROUP(ex_eeprom);
+DECLARE_GROUP(xbe_titlekeys);
 
 static const test_group_t *const GROUPS[] = {
     &g_group_rtl_status,
@@ -215,6 +216,7 @@ static const test_group_t *const GROUPS[] = {
     &g_group_hal_smc,
     &g_group_ke_procprio,
     &g_group_ex_eeprom,
+    &g_group_xbe_titlekeys,
     &g_group_ex_timer,
     /* Allocates a permanent framebuffer, so keep it after the FS/IO
      * groups but before the memory-exhaustion finale. */

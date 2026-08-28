@@ -187,6 +187,19 @@ XcpHMAC(_In_ PVOID K, _In_ ULONG Kl, _In_ PVOID I1, _In_ ULONG L1,
     A_SHAFinal(&c, (PULONG)Out);
 }
 
+/*
+ * The same HMAC for the kernel's own use.  The exported one runs through
+ * the vector a title can replace; anything the kernel computes for
+ * itself has to be the kernel's implementation.
+ */
+VOID
+NxkHmacSha1(_In_reads_bytes_(KeyLength) const VOID *Key, _In_ ULONG KeyLength,
+            _In_reads_bytes_(Length) const VOID *Data, _In_ ULONG Length,
+            _Out_writes_(20) PUCHAR Digest)
+{
+    XcpHMAC((PVOID)Key, KeyLength, (PVOID)Data, Length, NULL, 0, Digest);
+}
+
 /* --- modular exponentiation ---------------------------------------------- *
  * Operands are arrays of 32-bit words, least significant word first, all
  * the same length.  Result = Base^Exponent mod Modulus.

@@ -3461,6 +3461,13 @@ XeLoadXbe(_In_ HANDLE FileHandle)
     }
     hdr = (PXBE_HEADER)imageBase;
 
+    /* The keys the title signs and links with come out of its own
+     * certificate; derive them now, while nothing can have read them. */
+    {
+        extern VOID NxkDeriveTitleKeys(PVOID Certificate);
+        NxkDeriveTitleKeys((PVOID)(ULONG_PTR)hdr->CertificateAddr);
+    }
+
     /* XeLoadSection re-reads raw data through this handle for the life of
      * the title; the caller no longer closes it. */
     XepImageFileHandle = FileHandle;
