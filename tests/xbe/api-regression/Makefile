@@ -97,5 +97,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/xc/privkey.c \
        $(CURDIR)/hal/sysint.c \
        $(CURDIR)/ke/bugcheck.c \
-       $(CURDIR)/hal/smc.c
+       $(CURDIR)/hal/smc.c \
+       $(CURDIR)/ke/procprio.c
 include $(NXDK_DIR)/Makefile
