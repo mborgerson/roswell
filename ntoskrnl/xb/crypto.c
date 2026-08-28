@@ -59,16 +59,21 @@ XcpShaStore(PXC_SHA_CONTEXT Xc, const SHA_CTX *Ctx, BOOLEAN WholeBuffer)
 }
 
 /*
- * The doubled SHA-1 the console seals its EEPROM with.  It is the same
- * compression function, driven differently: the state starts at a
- * caller-supplied word quintet instead of the standard one, the length
- * counter starts at 512 bits as though a block had already gone in, and
- * the 20-byte result is fed straight back through a second pass with a
- * second start state.  The exported XcSHA* cannot express either
- * change, so this stays internal to the kernel.
+ * HMAC-SHA1 resumed from the middle.
+ *
+ * HMAC pads its key out to a whole 64-byte block, so for a key that
+ * never changes both padded blocks are constant and can be compressed
+ * once.  A caller keeping the two resulting states computes the same
+ * HMAC without ever holding the key: start at the inner state with the
+ * length counter already at 512 bits, hash the message, then run the
+ * 20-byte result through the outer state the same way.
+ *
+ * The exported XcSHA* set the standard start state and start the length
+ * at zero, so neither half is expressible through them; this stays
+ * internal to the kernel.
  */
 static VOID
-NxkShaKeyedPass(_In_reads_(5) const ULONG *Start,
+NxkShaResumedPass(_In_reads_(5) const ULONG *Start,
                 _In_reads_bytes_(Length) const VOID *Data,
                 _In_ ULONG Length,
                 _Out_writes_(20) PUCHAR Digest)
@@ -78,8 +83,9 @@ NxkShaKeyedPass(_In_reads_(5) const ULONG *Start,
     RtlZeroMemory(&Ctx, sizeof(Ctx));
     RtlCopyMemory(Ctx.State, Start, sizeof(Ctx.State));
 
-    /* A whole block already counted, none of it buffered: the padding
-     * length comes out 512 bits longer than the data alone. */
+    /* The padded key block is already counted and none of it is
+     * buffered, so the padding length comes out 512 bits longer than
+     * the message alone -- as though that block had gone in here. */
     Ctx.Count[0] = 0;
     Ctx.Count[1] = 64;
 
@@ -88,16 +94,16 @@ NxkShaKeyedPass(_In_reads_(5) const ULONG *Start,
 }
 
 VOID
-NxkShaKeyedDouble(_In_reads_(5) const ULONG *First,
-                  _In_reads_(5) const ULONG *Second,
+NxkShaResumedHmac(_In_reads_(5) const ULONG *InnerState,
+                  _In_reads_(5) const ULONG *OuterState,
                   _In_reads_bytes_(Length) const VOID *Data,
                   _In_ ULONG Length,
                   _Out_writes_(20) PUCHAR Digest)
 {
     UCHAR Inner[20];
 
-    NxkShaKeyedPass(First, Data, Length, Inner);
-    NxkShaKeyedPass(Second, Inner, sizeof(Inner), Digest);
+    NxkShaResumedPass(InnerState, Data, Length, Inner);
+    NxkShaResumedPass(OuterState, Inner, sizeof(Inner), Digest);
 }
 
 static VOID NTAPI XcpSHAInit(_In_ PVOID Context)

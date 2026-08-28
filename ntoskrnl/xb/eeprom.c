@@ -30,9 +30,9 @@ NTSTATUS HalpXboxSmBusReadByte(_In_ UCHAR Address, _In_ UCHAR Register,
 NTSTATUS HalpXboxSmBusWriteByte(_In_ UCHAR Address, _In_ UCHAR Register,
                                 _In_ UCHAR Value);
 
-/* The console's doubled SHA-1 with settable start states (xb/crypto.c). */
-VOID NxkShaKeyedDouble(_In_reads_(5) const ULONG *First,
-                       _In_reads_(5) const ULONG *Second,
+/* HMAC-SHA1 resumed from a kept key state (xb/crypto.c). */
+VOID NxkShaResumedHmac(_In_reads_(5) const ULONG *InnerState,
+                       _In_reads_(5) const ULONG *OuterState,
                        _In_reads_bytes_(Length) const VOID *Data,
                        _In_ ULONG Length,
                        _Out_writes_(20) PUCHAR Digest);
@@ -145,20 +145,26 @@ NxkEepromLoad(VOID)
  * section and, hashed a second time, the RC4 key that covers it.  RC4
  * is its own inverse, so sealing run backwards opens it:
  *
- *     key   = XboxSha1(stored hash, 20)
+ *     key   = Hmac(stored hash, 20)
  *     plain = RC4(key) over the 0x1C bytes from 0x14
- *     check: XboxSha1(plain, 0x1C) == stored hash
+ *     check: Hmac(plain, 0x1C) == stored hash
  *
- * The start states are version-specific and nothing in the part records
- * which version sealed it, so all four are tried and the one whose
- * recomputed hash matches is the right one.  These are published
- * reverse-engineering constants, the same class as the SMC register
- * numbers the HAL already carries.
+ * The hash is HMAC-SHA1 under a key this kernel does not have.  It does
+ * not need it: the key is sixteen bytes, HMAC pads it out to a whole
+ * block, and a block that never changes can be compressed once and the
+ * state kept instead.  Each pair below is that state -- the key after
+ * the inner and the outer pad, past the point where it can be read back
+ * out of them.  It is the construction xemu's EEPROM generator and
+ * xbeeprom use, and it is why no key is stored here.
+ *
+ * The pairs are version-specific and nothing in the part records which
+ * version sealed it, so all four are tried and the one whose recomputed
+ * hash matches is the right one.
  */
 static const struct
 {
-    ULONG First[5];
-    ULONG Second[5];
+    ULONG Inner[5];
+    ULONG Outer[5];
 } NxkEepromKeys[] = {
     /* debug */
     { { 0x85F9E51A, 0xE04613D2, 0x6D86A50C, 0x77C32E3C, 0x4BD717A4 },
@@ -198,7 +204,7 @@ NxkEepromOpen(VOID)
 
     for (i = 0; i < RTL_NUMBER_OF(NxkEepromKeys); i++)
     {
-        NxkShaKeyedDouble(NxkEepromKeys[i].First, NxkEepromKeys[i].Second,
+        NxkShaResumedHmac(NxkEepromKeys[i].Inner, NxkEepromKeys[i].Outer,
                           NxkEepromImage, 20, Key);
 
         RtlCopyMemory(NxkEepromPlain, NxkEepromImage + EEPROM_SEALED_OFFSET,
@@ -206,7 +212,7 @@ NxkEepromOpen(VOID)
         rc4_init(&Rc4, Key, sizeof(Key));
         rc4_crypt(&Rc4, NxkEepromPlain, EEPROM_SEALED_LENGTH);
 
-        NxkShaKeyedDouble(NxkEepromKeys[i].First, NxkEepromKeys[i].Second,
+        NxkShaResumedHmac(NxkEepromKeys[i].Inner, NxkEepromKeys[i].Outer,
                           NxkEepromPlain, EEPROM_SEALED_LENGTH, Check);
         if (RtlCompareMemory(Check, NxkEepromImage, sizeof(Check)) ==
             sizeof(Check))
