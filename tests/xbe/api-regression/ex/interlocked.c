@@ -9,7 +9,63 @@
  * reads garbage for the tail arguments rather than failing to link.
  */
 
+/* The vendored nxdk header declares the large-integer add two-argument,
+ * which GCC decorates @12 -- the export is the three-argument @16 form,
+ * spinlock and all, so the header's declaration cannot resolve.  Rename
+ * it out of the way on the way in and declare the shape the import
+ * library actually carries. */
+#define ExInterlockedAddLargeInteger nxdk_ExInterlockedAddLargeInteger
 #include "../harness.h"
+#undef ExInterlockedAddLargeInteger
+
+/* nxdk declares no spinlock type either; on this console it is one
+ * word, and the caller only has to hand over a zeroed one. */
+typedef ULONG XD_SPIN_LOCK;
+
+__declspec(dllimport) LARGE_INTEGER NTAPI ExInterlockedAddLargeInteger
+(
+    IN OUT PLARGE_INTEGER Addend,
+    IN LARGE_INTEGER Increment,
+    IN OUT XD_SPIN_LOCK *Lock
+);
+
+/* The add takes the caller's spinlock with interrupts off and answers
+ * with what the addend held before it ran. */
+static bool t_add_large_integer(void)
+{
+    XD_SPIN_LOCK lock = 0;
+    LARGE_INTEGER v, inc, old;
+
+    v.QuadPart = 100;
+    inc.QuadPart = 23;
+    old = ExInterlockedAddLargeInteger(&v, inc, &lock);
+    ASSERT_TRUE(old.QuadPart == 100);
+    ASSERT_TRUE(v.QuadPart == 123);
+
+    /* A carry out of the low dword, and a negative increment. */
+    v.QuadPart = 0xFFFFFFFFULL;
+    inc.QuadPart = 1;
+    old = ExInterlockedAddLargeInteger(&v, inc, &lock);
+    ASSERT_TRUE(old.QuadPart == 0xFFFFFFFFULL);
+    ASSERT_TRUE(v.QuadPart == 0x100000000ULL);
+
+    inc.QuadPart = -0x100000000LL;
+    old = ExInterlockedAddLargeInteger(&v, inc, &lock);
+    ASSERT_TRUE(old.QuadPart == 0x100000000ULL);
+    ASSERT_TRUE(v.QuadPart == 0);
+
+    /* The whole 64-bit increment arrives, high dword included -- a
+     * wrapper that dropped it would leave the addend where it was. */
+    v.QuadPart = 1;
+    inc.QuadPart = 0x0000000500000007ULL;
+    old = ExInterlockedAddLargeInteger(&v, inc, &lock);
+    ASSERT_TRUE(old.QuadPart == 1);
+    ASSERT_TRUE(v.QuadPart == 0x0000000500000008ULL);
+
+    /* It runs at PASSIVE and hands the caller back their IRQL. */
+    ASSERT_EQ_U32(KeGetCurrentIrql(), PASSIVE_LEVEL);
+    return true;
+}
 
 static bool t_add_large_statistic(void)
 {
@@ -146,6 +202,7 @@ static bool t_exchange_add(void)
 }
 
 static const test_entry_t ex_interlocked_entries[] = {
+    {"add_large_integer",   t_add_large_integer},
     {"add_large_statistic", t_add_large_statistic},
     {"compare_exchange64", t_compare_exchange64},
     {"compare_exchange",   t_compare_exchange},
