@@ -36,6 +36,8 @@
 
 # --- Hal* ----------------------------------------------------------------- #
 9    HalReadSMCTrayState              # tray state from SMC reg 0x03 + eject count
+38   HalClearSoftwareInterrupt        # the pending-request bit APC/DPC delivery runs on
+48   HalRequestSoftwareInterrupt
 
 # --- Ex* allocator (Xbox ABI: implicit NonPagedPool, no POOL_TYPE arg) ---- #
 12   ExAcquireReadWriteLockExclusive  # ERWLOCK writer acquire (xb/rwlock.c)
