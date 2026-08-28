@@ -128,6 +128,113 @@ static bool t_hmac_two_segments(void)
     return digest_eq(out, want, 20, "hmac(key,2seg)");
 }
 
+
+/*
+ * The caller owns the context, so its layout is part of the interface.
+ * The console reserves 24 bytes it never touches, then the five state
+ * words, the byte count and the 64-byte block buffer: 116 in all.
+ */
+#define CTX_GUARD    0xCC
+#define CTX_STATE    24
+#define CTX_COUNT    44
+#define CTX_BUFFER   52
+#define CTX_BYTES    116
+
+static unsigned char g_ctx[512];
+
+static unsigned long ctx_word(unsigned offset)
+{
+    return (unsigned long)g_ctx[offset] |
+           ((unsigned long)g_ctx[offset + 1] << 8) |
+           ((unsigned long)g_ctx[offset + 2] << 16) |
+           ((unsigned long)g_ctx[offset + 3] << 24);
+}
+
+static bool ctx_clean_outside(unsigned from, unsigned to)
+{
+    unsigned i;
+    for (i = 0; i < sizeof(g_ctx); i++) {
+        if (i >= from && i < to) continue;
+        if (g_ctx[i] != CTX_GUARD)
+            FAIL_AND_RETURN("context byte +%u was written (0x%02x)",
+                            i, g_ctx[i]);
+    }
+    return true;
+}
+
+/* Init writes the five state words and the count, and nothing else. */
+static bool t_sha_context_layout(void)
+{
+    memset(g_ctx, CTX_GUARD, sizeof(g_ctx));
+    XcSHAInit(g_ctx);
+
+    ASSERT_EQ_U32(ctx_word(CTX_STATE +  0), 0x67452301);
+    ASSERT_EQ_U32(ctx_word(CTX_STATE +  4), 0xEFCDAB89);
+    ASSERT_EQ_U32(ctx_word(CTX_STATE +  8), 0x98BADCFE);
+    ASSERT_EQ_U32(ctx_word(CTX_STATE + 12), 0x10325476);
+    ASSERT_EQ_U32(ctx_word(CTX_STATE + 16), 0xC3D2E1F0);
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT), 0);
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT + 4), 0);
+    return ctx_clean_outside(CTX_STATE, CTX_BUFFER);
+}
+
+/* The count is a byte count, and short data waits in the block buffer. */
+static bool t_sha_context_counts_bytes(void)
+{
+    unsigned char data[70];
+
+    memset(data, 'A', sizeof(data));
+    memset(g_ctx, CTX_GUARD, sizeof(g_ctx));
+    XcSHAInit(g_ctx);
+
+    XcSHAUpdate(g_ctx, (PUCHAR)"abc", 3);
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT + 4), 3);
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT), 0);
+    ASSERT_EQ_U32(g_ctx[CTX_BUFFER + 0], 'a');
+    ASSERT_EQ_U32(g_ctx[CTX_BUFFER + 1], 'b');
+    ASSERT_EQ_U32(g_ctx[CTX_BUFFER + 2], 'c');
+    if (!ctx_clean_outside(CTX_STATE, CTX_BUFFER + 3))
+        return false;
+
+    /* Past a block the state has moved on and the remainder is buffered. */
+    XcSHAUpdate(g_ctx, data, sizeof(data));
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT + 4), 73);
+    ASSERT_TRUE(ctx_word(CTX_STATE) != 0x67452301);
+    ASSERT_EQ_U32(g_ctx[CTX_BUFFER], 'A');
+    return ctx_clean_outside(CTX_STATE, CTX_BYTES);
+}
+
+/* The digest is twenty bytes, and the context is left ready to reuse. */
+static bool t_sha_final_reinitialises(void)
+{
+    unsigned char digest[64];
+    unsigned i;
+
+    memset(g_ctx, CTX_GUARD, sizeof(g_ctx));
+    XcSHAInit(g_ctx);
+    XcSHAUpdate(g_ctx, (PUCHAR)"abc", 3);
+
+    memset(digest, CTX_GUARD, sizeof(digest));
+    XcSHAFinal(g_ctx, digest);
+    for (i = 20; i < sizeof(digest); i++)
+        ASSERT_EQ_U32(digest[i], CTX_GUARD);
+
+    ASSERT_EQ_U32(ctx_word(CTX_STATE), 0x67452301);
+    ASSERT_EQ_U32(ctx_word(CTX_COUNT + 4), 0);
+    if (!ctx_clean_outside(CTX_STATE, CTX_BYTES))
+        return false;
+
+    /* And a second run through the same buffer hashes correctly. */
+    {
+        static const unsigned char want[20] = {
+            0xa9,0x99,0x3e,0x36,0x47,0x06,0x81,0x6a,0xba,0x3e,
+            0x25,0x71,0x78,0x50,0xc2,0x6c,0x9c,0xd0,0xd8,0x9d};
+        XcSHAUpdate(g_ctx, (PUCHAR)"abc", 3);
+        XcSHAFinal(g_ctx, digest);
+        return digest_eq(digest, want, 20, "sha1(abc) reusing the context");
+    }
+}
+
 static const test_entry_t xc_crypto_entries[] = {
     {"sha1_abc", t_sha1_abc},
     {"sha1_empty", t_sha1_empty},
@@ -136,6 +243,9 @@ static const test_entry_t xc_crypto_entries[] = {
     {"rc4_roundtrip", t_rc4_roundtrip},
     {"hmac_jefe", t_hmac_jefe},
     {"hmac_two_segments", t_hmac_two_segments},
+    {"sha_context_layout", t_sha_context_layout},
+    {"sha_context_counts_bytes", t_sha_context_counts_bytes},
+    {"sha_final_reinitialises", t_sha_final_reinitialises},
 };
 
 DEFINE_GROUP(xc_crypto, "xc/crypto");

@@ -18,18 +18,78 @@
 #include <rc4.h>
 
 /*
- * XcSHA*: caller allocates the SHA context.  The Xbox layout reserves a
- * 24-byte header the algorithm doesn't use and keeps the SHA-1 state at
- * offset +24.  SHA_CTX is 92 bytes, fitting the slot.
+ * XcSHA*: the caller allocates the context and its layout is therefore
+ * part of the interface.  The console reserves 24 bytes it never
+ * touches, then holds the five state words, the byte count and the
+ * 64-byte block buffer -- 116 bytes in all.  cryptlib's structure
+ * carries the same fields in the other order, buffer first, so the
+ * caller's context is translated either side of every call.
  */
-#define XC_SHA_CTX(c)  ((PSHA_CTX)((PUCHAR)(c) + 24))
+typedef struct _XC_SHA_CONTEXT
+{
+    UCHAR Reserved[24];
+    ULONG State[5];
+    ULONG Count[2];
+    UCHAR Buffer[64];
+} XC_SHA_CONTEXT, *PXC_SHA_CONTEXT;
 
-static VOID NTAPI XcpSHAInit(_In_ PVOID Ctx)
-{ A_SHAInit(XC_SHA_CTX(Ctx)); }
-static VOID NTAPI XcpSHAUpdate(_In_ PVOID Ctx, _In_ PVOID Data, _In_ ULONG Len)
-{ A_SHAUpdate(XC_SHA_CTX(Ctx), (const unsigned char *)Data, Len); }
-static VOID NTAPI XcpSHAFinal(_In_ PVOID Ctx, _Out_writes_(20) PVOID Digest)
-{ A_SHAFinal(XC_SHA_CTX(Ctx), (PULONG)Digest); }
+C_ASSERT(sizeof(XC_SHA_CONTEXT) == 116);
+C_ASSERT(FIELD_OFFSET(XC_SHA_CONTEXT, State) == 24);
+C_ASSERT(FIELD_OFFSET(XC_SHA_CONTEXT, Buffer) == 52);
+
+static VOID
+XcpShaLoad(SHA_CTX *Ctx, const XC_SHA_CONTEXT *Xc)
+{
+    RtlCopyMemory(Ctx->State, Xc->State, sizeof(Ctx->State));
+    RtlCopyMemory(Ctx->Count, Xc->Count, sizeof(Ctx->Count));
+    RtlCopyMemory(Ctx->Buffer, Xc->Buffer, sizeof(Ctx->Buffer));
+}
+
+/*
+ * Only the bytes the algorithm actually buffered go back, so a call
+ * dirties exactly what the console's dirties and no more.
+ */
+static VOID
+XcpShaStore(PXC_SHA_CONTEXT Xc, const SHA_CTX *Ctx, BOOLEAN WholeBuffer)
+{
+    RtlCopyMemory(Xc->State, Ctx->State, sizeof(Xc->State));
+    RtlCopyMemory(Xc->Count, Ctx->Count, sizeof(Xc->Count));
+    RtlCopyMemory(Xc->Buffer, Ctx->Buffer,
+                  WholeBuffer ? sizeof(Xc->Buffer) : (Ctx->Count[1] & 63));
+}
+
+static VOID NTAPI XcpSHAInit(_In_ PVOID Context)
+{
+    PXC_SHA_CONTEXT Xc = (PXC_SHA_CONTEXT)Context;
+    SHA_CTX Ctx;
+
+    A_SHAInit(&Ctx);
+    RtlCopyMemory(Xc->State, Ctx.State, sizeof(Xc->State));
+    RtlCopyMemory(Xc->Count, Ctx.Count, sizeof(Xc->Count));
+}
+
+static VOID NTAPI XcpSHAUpdate(_In_ PVOID Context, _In_ PVOID Data,
+                               _In_ ULONG Len)
+{
+    PXC_SHA_CONTEXT Xc = (PXC_SHA_CONTEXT)Context;
+    SHA_CTX Ctx;
+
+    XcpShaLoad(&Ctx, Xc);
+    A_SHAUpdate(&Ctx, (const unsigned char *)Data, Len);
+    XcpShaStore(Xc, &Ctx, FALSE);
+}
+
+/* The digest leaves the context initialised again, ready for reuse. */
+static VOID NTAPI XcpSHAFinal(_In_ PVOID Context,
+                              _Out_writes_(20) PVOID Digest)
+{
+    PXC_SHA_CONTEXT Xc = (PXC_SHA_CONTEXT)Context;
+    SHA_CTX Ctx;
+
+    XcpShaLoad(&Ctx, Xc);
+    A_SHAFinal(&Ctx, (PULONG)Digest);
+    XcpShaStore(Xc, &Ctx, TRUE);
+}
 
 /* RC4 key schedule.  RC4_CONTEXT (258 B) fits inside the key-struct slot. */
 static VOID NTAPI
