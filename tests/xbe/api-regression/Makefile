@@ -91,5 +91,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/ob/directory.c \
        $(CURDIR)/ps/notify.c \
        $(CURDIR)/ps/statistics.c \
-       $(CURDIR)/ob/create.c
+       $(CURDIR)/ob/create.c \
+       $(CURDIR)/ke/dispatcher.c
 include $(NXDK_DIR)/Makefile

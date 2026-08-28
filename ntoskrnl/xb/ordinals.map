@@ -197,6 +197,7 @@
 159  KeWaitForSingleObject
 160  KfRaiseIrql
 161  KfLowerIrql
+163  KiUnlockDispatcherDatabase  KiExitDispatcher  # holding the lock is holding DISPATCH_LEVEL
 
 # --- LaunchDataPage / Mm contiguous-memory family ------------------------ #
 # Contiguous memory is handed back in the KSEG0 window (VA = PA |
