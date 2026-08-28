@@ -87,5 +87,6 @@ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c \
        $(CURDIR)/xc/align.c \
        $(CURDIR)/ob/bypointer.c \
        $(CURDIR)/ke/pulse.c \
-       $(CURDIR)/ke/boost.c
+       $(CURDIR)/ke/boost.c \
+       $(CURDIR)/ob/directory.c
 include $(NXDK_DIR)/Makefile

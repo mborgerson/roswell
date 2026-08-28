@@ -1099,6 +1099,9 @@ extern NTSTATUS NTAPI ObOpenObjectByName(
 extern NTSTATUS NTAPI ros_NtWaitForMultipleObjects(
     ULONG, PHANDLE, WAIT_TYPE, BOOLEAN, PLARGE_INTEGER)
     __asm__("_NtWaitForMultipleObjects@20");
+extern NTSTATUS NTAPI ros_NtCreateDirectoryObject(
+    PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES)
+    __asm__("_NtCreateDirectoryObject@12");
 extern NTSTATUS NTAPI ros_NtOpenDirectoryObject(
     PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES)
     __asm__("_NtOpenDirectoryObject@12");
@@ -1943,6 +1946,20 @@ XeNtDuplicateObject(HANDLE Source, PHANDLE Target, ULONG Options)
     return ros_NtDuplicateObject(NtCurrentProcess(), Source,
                                  NtCurrentProcess(), Target, 0, 0,
                                  Options | DUPLICATE_SAME_ACCESS);
+}
+/* The Xbox form takes no desired access: a directory is created wide
+ * open, and the handle is the caller's only way back to an unnamed one. */
+NTSTATUS NTAPI
+XeNtCreateDirectoryObject(PHANDLE Handle, PXBE_OBJECT_ATTRIBUTES XAttr)
+{
+    OBJECT_ATTRIBUTES ntoa;
+    UNICODE_STRING name;
+    POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+    NTSTATUS status = ros_NtCreateDirectoryObject(Handle, DIRECTORY_ALL_ACCESS,
+                                                  oa);
+    if (name.Buffer != NULL)
+        RtlFreeUnicodeString(&name);
+    return status;
 }
 NTSTATUS NTAPI
 XeNtOpenDirectoryObject(PHANDLE Handle, PXBE_OBJECT_ATTRIBUTES XAttr)

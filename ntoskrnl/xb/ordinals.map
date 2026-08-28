@@ -228,6 +228,7 @@
 185  NtCancelTimer
 186  NtClearEvent                     # direct; Zw thunks are gone (Zw==Nt)
 187  NtClose
+188  XeNtCreateDirectoryObject       # Xbox OBJECT_ATTRIBUTES; no desired-access argument
 189  XeNtCreateEvent                 # Xbox OBJECT_ATTRIBUTES (ANSI name)
 190  XeNtCreateFile                  # Xbox OBJECT_ATTRIBUTES; no EA params
 191  XeNtCreateIoCompletion          # Xbox object attributes
