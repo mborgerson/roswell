@@ -1759,6 +1759,27 @@ XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
     return ObReferenceObjectByHandle(Handle, 0, XeObjectTypeToInternal(Type),
                                      KernelMode, Object, NULL);
 }
+/*
+ * NT treats the requested type as advisory for a kernel-mode caller, and
+ * there is no other kind here, so the check is ours to make: the type
+ * argument is all that stands between a title and the wrong kind of
+ * object.
+ */
+static BOOLEAN
+XeObjectIsOfType(PVOID Object, POBJECT_TYPE Internal)
+{
+    return Internal == NULL ||
+           OBJECT_TO_OBJECT_HEADER(Object)->Type == Internal;
+}
+NTSTATUS NTAPI
+XeObReferenceObjectByPointer(PVOID Object, PVOID Type)
+{
+    POBJECT_TYPE Internal = XeObjectTypeToInternal(Type);
+
+    if (!XeObjectIsOfType(Object, Internal))
+        return STATUS_OBJECT_TYPE_MISMATCH;
+    return ObReferenceObjectByPointer(Object, 0, Internal, KernelMode);
+}
 NTSTATUS NTAPI
 XeObOpenObjectByName(PXBE_OBJECT_ATTRIBUTES XAttr, PVOID Type,
                        PVOID ParseContext, PHANDLE Handle)

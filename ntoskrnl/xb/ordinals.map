@@ -286,6 +286,7 @@
 243  XeObOpenObjectByName            # Xbox @16: decoy type + ANSI oa -> NT
 246  XeObReferenceObjectByHandle
 247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
+248  XeObReferenceObjectByPointer    # Xbox @8: the type is the only guard
 250  ObfDereferenceObject
 251  ObfReferenceObject
 
