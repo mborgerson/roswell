@@ -34,13 +34,7 @@ SECTIONS
     PROVIDE (_etext = .);
     KEEP (*(.gcc_except_table))
   }
-  /* Retail split image: when the build passes --defsym __nxk_high_base__
-   * (release, retail image base), everything after .text is placed at
-   * that VA -- the kernel high zone (0x83400000 = PA 0x3400000 via
-   * KSEG0) -- so header + .text alone occupy the retail slot below the
-   * title's contiguous-pool floor.  Subsequent sections BLOCK-follow.
-   * Without the defsym the image stays contiguous. */
-  .data (DEFINED(__nxk_high_base__) ? __nxk_high_base__ : ALIGN(__section_alignment__)) :
+  .data ALIGN(__section_alignment__) :
   {
     __data_start__ = . ;
     *(.data)
