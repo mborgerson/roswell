@@ -95,10 +95,12 @@ DriverEntry(
     DriverObject->MajorFunction[IRP_MJ_DIRECTORY_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_QUERY_VOLUME_INFORMATION] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_SET_VOLUME_INFORMATION] = VfatBuildRequest;
-#ifndef SARCH_XBOX
-    /* Nothing sends IRP_MJ_SHUTDOWN on Xbox; reboot drives the SMC directly. */
+    /* On a clean title exit XeHalReturnToFirmware runs IoShutdownSystem, which
+     * delivers this so every mounted volume is flushed before the SMC resets
+     * the machine.  A safety net alongside write-through: it catches dirty
+     * state not tied to a mutating IRP (e.g. memory-mapped writes), and it is
+     * what makes clean exits durable when write-through is turned off. */
     DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = VfatShutdown;
-#endif
     DriverObject->MajorFunction[IRP_MJ_LOCK_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = VfatBuildRequest;
     DriverObject->MajorFunction[IRP_MJ_CLEANUP] = VfatBuildRequest;

@@ -19,14 +19,10 @@ list(APPEND SOURCE
     misc.c
     pnp.c
     rw.c
+    shutdown.c
     string.c
     volume.c
     vfat.h)
-
-# Nothing sends IRP_MJ_SHUTDOWN on Xbox; reboot drives the SMC directly.
-if(NOT SARCH STREQUAL "xbox")
-    list(APPEND SOURCE shutdown.c)
-endif()
 
 if(KDBG)
     add_definitions(-DKDBG)

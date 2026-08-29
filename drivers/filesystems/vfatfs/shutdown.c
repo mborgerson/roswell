@@ -77,7 +77,9 @@ VfatShutdown(
             /* Flush volume & files */
             Status = VfatFlushVolume(DeviceExt, DeviceExt->VolumeFcb);
 
-            /* We're performing a clean shutdown */
+#ifndef SARCH_XBOX
+            /* We're performing a clean shutdown.  FATX has no boot-sector
+             * dirty bit, so SetDirtyStatus is not built on Xbox. */
             if (BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_CLEAR_DIRTY) &&
                 BooleanFlagOn(DeviceExt->VolumeFcb->Flags, VCB_IS_DIRTY))
             {
@@ -85,6 +87,7 @@ VfatShutdown(
                 if (NT_SUCCESS(SetDirtyStatus(DeviceExt, FALSE)))
                     DeviceExt->VolumeFcb->Flags &= ~VCB_IS_DIRTY;
             }
+#endif
 
             if (NT_SUCCESS(Status))
             {
