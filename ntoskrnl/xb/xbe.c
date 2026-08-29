@@ -39,6 +39,10 @@
 /* HalReturnToFirmware. */
 #include <ndk/halfuncs.h>
 
+/* IoShutdownSystem -- flushes registered file systems (declared in
+ * ntoskrnl/include/internal/io.h, not pulled into this TU). */
+VOID NTAPI IoShutdownSystem(_In_ ULONG Phase);
+
 /* HAL SMBus primitives -- forward-declared (defined in hal/halx86/xbox/smbus.c)
  * to avoid pulling HAL-private halxbox.h into a kernel TU. */
 NTSTATUS HalpXboxSmBusReadByte(_In_ UCHAR Address, _In_ UCHAR Register,
@@ -594,6 +598,15 @@ XeHalReturnToFirmware(_In_ XBE_FIRMWARE_REENTRY Routine)
             Action = HalRebootRoutine;
             break;
     }
+
+    /* Flush the file systems before the SMC resets the machine, on the clean
+     * kernel-driven exit path.  A safety net alongside FATX write-through: it
+     * catches dirty state not tied to a mutating IRP (e.g. memory-mapped
+     * writes), and it is what makes a clean exit durable when write-through is
+     * turned off.  Skip the fatal-error path -- the FS may already be
+     * inconsistent and a flush there could hang. */
+    if (Routine != XeFwFatalErrorReboot)
+        IoShutdownSystem(1);
 
     HalReturnToFirmware(Action);
 }
