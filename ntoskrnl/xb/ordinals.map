@@ -146,6 +146,7 @@
 99   KeDelayExecutionThread
 100  XeKeDisconnectInterrupt         # routes through the KINTERRUPT shadow
 101  KeEnterCriticalRegion
+102  MmGlobalData                    # 32 zeroed bytes: sized; ours are NT's internals
 103  KeGetCurrentIrql
 104  XeKeGetCurrentThread            # returns the Xbox-shaped thread shadow
 105  XeKeInitializeApc               # 40-byte console KAPC; pure structure write
@@ -303,6 +304,7 @@
 246  XeObReferenceObjectByHandle
 247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
 248  XeObReferenceObjectByPointer    # Xbox @8: the type is the only guard
+245  ObpObjectHandleTable          # 48 zeroed bytes: sized; the layout behind it is ntoskrnl's
 249  ObSymbolicLinkObjectType  XeObSymbolicLinkObjectType  # 28-byte Xbox-shape struct
 250  XeObfDereferenceObject          # a title object counts its own references
 251  XeObfReferenceObject
@@ -384,6 +386,7 @@
 320  RtlZeroMemory
 
 # --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #
+321  XboxEEPROMKey                 # 16 zeroed bytes: sized, no key (see xb/sizeddata.c)
 322  XboxHardwareInfo              # 8-byte XBOX_HARDWARE_INFO; USB-hub flag + GPU/MCP revs (not the 4-byte scaffold)
 323  XboxHDKey                     # 16-byte console HDD key, out of the EEPROM's sealed section
 324  XboxKrnlVersion               # 8-byte XBOX_KRNL_VERSION; titles gate on Major=1

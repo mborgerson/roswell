@@ -37,7 +37,58 @@ static ULONG collect_neighbours(neighbour_t *out)
     out[n].name = "XboxAlternateSignatureKeys";
     out[n++].at = XboxAlternateSignatureKeys;
     out[n].name = "XeImageFileName";            out[n++].at = &XeImageFileName;
+    out[n].name = "MmGlobalData";               out[n++].at = &MmGlobalData;
+    out[n].name = "ObpObjectHandleTable";
+    out[n++].at = &ObpObjectHandleTable;
     return n;
+}
+
+/* Every data export the console publishes as a structure rather than a
+ * word, and the size it publishes it at. */
+typedef struct { const char *name; const void *at; ULONG size; } sized_t;
+
+static ULONG collect_sized(sized_t *out)
+{
+    ULONG n = 0;
+
+    out[n].name = "XePublicKeyData";      out[n].at = XePublicKeyData;
+    out[n++].size = sizeof(XePublicKeyData);
+    out[n].name = "IdexChannelObject";    out[n].at = &IdexChannelObject;
+    out[n++].size = sizeof(IdexChannelObject);
+    out[n].name = "XboxEEPROMKey";        out[n].at = XboxEEPROMKey;
+    out[n++].size = sizeof(XboxEEPROMKey);
+    out[n].name = "MmGlobalData";         out[n].at = &MmGlobalData;
+    out[n++].size = sizeof(MmGlobalData);
+    out[n].name = "ObpObjectHandleTable"; out[n].at = &ObpObjectHandleTable;
+    out[n++].size = sizeof(ObpObjectHandleTable);
+    out[n].name = "XboxHDKey";            out[n].at = XboxHDKey;
+    out[n++].size = sizeof(XBOX_KEY_DATA);
+    out[n].name = "XboxSignatureKey";     out[n].at = XboxSignatureKey;
+    out[n++].size = sizeof(XBOX_KEY_DATA);
+    out[n].name = "XboxLANKey";           out[n].at = XboxLANKey;
+    out[n++].size = sizeof(XBOX_KEY_DATA);
+    return n;
+}
+
+/* No two of them may occupy the same bytes.  A kernel that publishes
+ * one too small shows up here as an overlap with whatever the linker
+ * put after it. */
+static bool t_no_sized_export_overlaps_another(void)
+{
+    sized_t s[16];
+    ULONG i, j, n = collect_sized(s);
+
+    for (i = 0; i < n; i++) {
+        for (j = i + 1; j < n; j++) {
+            const UCHAR *a = (const UCHAR *)s[i].at;
+            const UCHAR *b = (const UCHAR *)s[j].at;
+            if (a < b + s[j].size && b < a + s[i].size)
+                FAIL_AND_RETURN("%s (%u at %p) overlaps %s (%u at %p)",
+                                s[i].name, (unsigned)s[i].size, a,
+                                s[j].name, (unsigned)s[j].size, b);
+        }
+    }
+    return true;
 }
 
 static bool nothing_lives_inside(const char *name, const void *base,
@@ -106,6 +157,8 @@ static const test_entry_t xbe_sizeddata_entries[] = {
     { "the_two_do_not_overlap", t_the_two_do_not_overlap, NULL },
     { "a_titles_hook_offsets_are_inside_the_object",
       t_a_titles_hook_offsets_are_inside_the_object, NULL },
+    { "no_sized_export_overlaps_another",
+      t_no_sized_export_overlaps_another, NULL },
 };
 
 DEFINE_GROUP(xbe_sizeddata, "xbe/sizeddata");

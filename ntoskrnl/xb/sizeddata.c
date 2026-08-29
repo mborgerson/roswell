@@ -45,4 +45,28 @@ __declspec(align(16)) UCHAR XePublicKeyData[XE_PUBLIC_KEY_SIZE];
 
 __declspec(align(16)) UCHAR IdexChannelObject[IDE_CHANNEL_OBJECT_SIZE];
 
+/*
+ * The remaining three are not imported by any title in the swept
+ * corpus, so nothing reads or writes them today.  They are sized anyway:
+ * the rule "every data export is the size the console publishes it" is
+ * one a test can check and a reader can rely on, where "sized if a title
+ * happens to import it" is neither.  All three are decided against on
+ * content, and zero is the answer that decision calls for.
+ */
+
+/* The key the console seals its EEPROM with.  This kernel opens the
+ * part without it and holds it only in a form it cannot be read back
+ * out of, so there is nothing to publish here. */
+__declspec(align(16)) UCHAR XboxEEPROMKey[16];
+
+/* Eight pointers into the console's MM internals.  Ours are NT's, and
+ * of the eight only the page count has an equivalent here -- there are
+ * no VADs to point a root at -- so a title that walks them would read
+ * the wrong shape where zero makes it give up. */
+__declspec(align(16)) UCHAR MmGlobalData[32];
+
+/* The object handle table.  Same argument: the layout behind it is
+ * ntoskrnl's, not the console's. */
+__declspec(align(16)) UCHAR ObpObjectHandleTable[48];
+
 /* EOF */
