@@ -68,11 +68,17 @@ NxpAddHeapPagesCoalesced(ULONG_PTR Pa, ULONG Pages)
 /* CONTIGUOUS-ALLOCATION TRACKING TABLE *************************************/
 
 /*
- * Tracking: a fixed-size array of {Alias, Pa, PaEnd, Size} entries sorted
+ * Tracking: an array of {Alias, Pa, PaEnd, Size} entries sorted
  * implicitly by walk order.  Alloc walks for a hole between entries, free
  * just clears its slot -- coalescing happens naturally because the next
- * allocation re-scans gaps.  64 slots is enough for any title's contig
- * working set (typically <10 live allocations).
+ * allocation re-scans gaps.
+ *
+ * How many entries a title needs is not something we get to decide.  The
+ * console keeps this in its page database and has no ceiling, and D3D
+ * takes one contiguous allocation per resource, so the count follows the
+ * title's live resource set: dozens sitting in a menu, far more in a
+ * level.  The array therefore starts in the kernel image and moves to
+ * nonpaged pool, doubling, as it fills.
  */
 typedef struct _NXK_CONTIG_ENTRY
 {
@@ -82,10 +88,104 @@ typedef struct _NXK_CONTIG_ENTRY
     SIZE_T    Size;         /* original request size, for MmQueryAllocationSize */
 } NXK_CONTIG_ENTRY;
 
-#define NXK_CONTIG_SLOTS    64
+#define NXK_CONTIG_INITIAL_SLOTS  64
+#define NXK_CONTIG_TAG            'gCxN'
 
-static NXK_CONTIG_ENTRY NxContigTable[NXK_CONTIG_SLOTS];
+static NXK_CONTIG_ENTRY NxContigInitial[NXK_CONTIG_INITIAL_SLOTS];
+static NXK_CONTIG_ENTRY *NxContigTable = NxContigInitial;
+static ULONG NxContigSlots = NXK_CONTIG_INITIAL_SLOTS;
+static ULONG NxContigHint;              /* where the next free-slot scan starts */
 static KSPIN_LOCK NxContigLock;
+
+/* The first slot with no live allocation, or NxContigSlots when every one
+ * is taken.  Caller holds NxContigLock.  The hint keeps the common case
+ * off a full walk once the array is large. */
+static
+ULONG
+NxpContigFindFreeSlotLocked(VOID)
+{
+    ULONG i, Slot = NxContigHint;
+
+    for (i = 0; i < NxContigSlots; i++)
+    {
+        if (NxContigTable[Slot].Alias == NULL)
+        {
+            NxContigHint = (Slot + 1 < NxContigSlots) ? Slot + 1 : 0;
+            return Slot;
+        }
+        if (++Slot == NxContigSlots) Slot = 0;
+    }
+    return NxContigSlots;
+}
+
+/* Double the array.  Caller must NOT hold NxContigLock: the replacement
+ * comes from the pool first, and only the copy and the pointer swap
+ * happen under it, so every reader either sees the old array or the new
+ * one.  FALSE means the pool could not back a larger array. */
+static
+BOOLEAN
+NxpContigGrow(ULONG OldSlots)
+{
+    NXK_CONTIG_ENTRY *New, *Old = NULL;
+    ULONG NewSlots = OldSlots * 2;
+    BOOLEAN Swapped = FALSE;
+    KIRQL OldIrql;
+
+    New = ExAllocatePoolWithTag(NonPagedPool,
+                                NewSlots * sizeof(NXK_CONTIG_ENTRY),
+                                NXK_CONTIG_TAG);
+    if (New == NULL) return FALSE;
+    RtlZeroMemory(New, NewSlots * sizeof(NXK_CONTIG_ENTRY));
+
+    KeAcquireSpinLock(&NxContigLock, &OldIrql);
+    if (NxContigSlots == OldSlots)
+    {
+        RtlCopyMemory(New, NxContigTable,
+                      OldSlots * sizeof(NXK_CONTIG_ENTRY));
+        if (NxContigTable != NxContigInitial) Old = NxContigTable;
+        NxContigTable = New;
+        NxContigSlots = NewSlots;
+        NxContigHint = OldSlots;
+        New = NULL;
+        Swapped = TRUE;
+    }
+    KeReleaseSpinLock(&NxContigLock, OldIrql);
+
+    /* Whichever array is not in use now: ours if someone grew first,
+     * otherwise the one we replaced.  No reader holds either -- they all
+     * read the pointer under the lock. */
+    if (New != NULL) ExFreePoolWithTag(New, NXK_CONTIG_TAG);
+    if (Old != NULL) ExFreePoolWithTag(Old, NXK_CONTIG_TAG);
+    if (Swapped)
+        DPRINT1("MmAllocContig: %lu live, tracking table now %lu slots\n",
+                OldSlots, NewSlots);
+    return TRUE;
+}
+
+/* Reserve a tracking slot.  Returns TRUE with NxContigLock held at
+ * *OldIrql and *Slot usable; FALSE with the lock released. */
+static
+BOOLEAN
+NxpContigTakeSlot(OUT PULONG Slot, OUT PKIRQL OldIrql)
+{
+    for (;;)
+    {
+        ULONG OldSlots;
+
+        KeAcquireSpinLock(&NxContigLock, OldIrql);
+        *Slot = NxpContigFindFreeSlotLocked();
+        if (*Slot != NxContigSlots) return TRUE;
+        OldSlots = NxContigSlots;
+        KeReleaseSpinLock(&NxContigLock, *OldIrql);
+
+        if (!NxpContigGrow(OldSlots))
+        {
+            DPRINT1("MmAllocContig: no pool for a tracking table past "
+                    "%lu live allocations\n", OldSlots);
+            return FALSE;
+        }
+    }
+}
 
 /* POST-BOOT REGION DONATION ************************************************/
 
@@ -211,19 +311,19 @@ NxpHeapAllocFromRegionLocked(const NXK_HEAP_REGION *Region,
     for (;;)
     {
         ULONG_PTR PrevEnd = ClampLow;
-        ULONG j, picked = NXK_CONTIG_SLOTS;
+        ULONG j, picked = NxContigSlots;
 
-        for (j = 0; j < NXK_CONTIG_SLOTS; j++)
+        for (j = 0; j < NxContigSlots; j++)
         {
             if (NxContigTable[j].Alias == NULL) continue;
             if (NxContigTable[j].Pa < HeapStart) continue;       /* other region */
             if (NxContigTable[j].Pa >= HeapEnd)  continue;       /* other region */
             if (NxContigTable[j].PaEnd > NextEnd) continue;
-            if (picked == NXK_CONTIG_SLOTS ||
+            if (picked == NxContigSlots ||
                 NxContigTable[j].PaEnd > NxContigTable[picked].PaEnd)
                 picked = j;
         }
-        if (picked != NXK_CONTIG_SLOTS && NxContigTable[picked].PaEnd > PrevEnd)
+        if (picked != NxContigSlots && NxContigTable[picked].PaEnd > PrevEnd)
             PrevEnd = NxContigTable[picked].PaEnd;
 
         /* Try fitting against the top of [PrevEnd, NextEnd).  Round the
@@ -239,7 +339,7 @@ NxpHeapAllocFromRegionLocked(const NXK_HEAP_REGION *Region,
             }
         }
 
-        if (picked == NXK_CONTIG_SLOTS) return 0;
+        if (picked == NxContigSlots) return 0;
         NextEnd = NxContigTable[picked].Pa;
         if (NextEnd <= ClampLow) return 0;
     }
@@ -258,18 +358,12 @@ NxpHeapAllocFromRegionLocked(const NXK_HEAP_REGION *Region,
 static
 ULONG_PTR
 NxpHeapAllocLocked(SIZE_T AllocBytes, ULONG_PTR Alignment, ULONG_PTR Low,
-                   ULONG_PTR High, ULONG *OutSlot)
+                   ULONG_PTR High, ULONG slot)
 {
-    ULONG slot;
     LONG i;
 
     if (AllocBytes == 0) return 0;
     if (Alignment < PAGE_SIZE) Alignment = PAGE_SIZE;
-
-    /* Find a free table slot first; refuse the alloc if we can't track it. */
-    for (slot = 0; slot < NXK_CONTIG_SLOTS; slot++)
-        if (NxContigTable[slot].Alias == NULL) break;
-    if (slot == NXK_CONTIG_SLOTS) return 0;
 
     /* Pass 1: non-reserve regions, highest-PA region first. */
     for (i = (LONG)NxHeapRegionCount - 1; i >= 0; i--)
@@ -279,11 +373,7 @@ NxpHeapAllocLocked(SIZE_T AllocBytes, ULONG_PTR Alignment, ULONG_PTR Low,
         Pa = NxpHeapAllocFromRegionLocked(&NxHeapRegions[i],
                                           AllocBytes, Alignment,
                                           Low, High, slot);
-        if (Pa != 0)
-        {
-            *OutSlot = slot;
-            return Pa;
-        }
+        if (Pa != 0) return Pa;
     }
     /* Pass 2: low-reserve regions, only for constrained-low requests. */
     if (High < NXK_LOW_PA_THRESHOLD)
@@ -295,11 +385,7 @@ NxpHeapAllocLocked(SIZE_T AllocBytes, ULONG_PTR Alignment, ULONG_PTR Low,
             Pa = NxpHeapAllocFromRegionLocked(&NxHeapRegions[i],
                                               AllocBytes, Alignment,
                                               Low, High, slot);
-            if (Pa != 0)
-            {
-                *OutSlot = slot;
-                return Pa;
-            }
+            if (Pa != 0) return Pa;
         }
     }
     return 0;
@@ -329,7 +415,7 @@ NxpHeapFree(PVOID Alias, SIZE_T *OutSize)
 
     if (OutSize) *OutSize = 0;
     KeAcquireSpinLock(&NxContigLock, &OldIrql);
-    for (i = 0; i < NXK_CONTIG_SLOTS; i++)
+    for (i = 0; i < NxContigSlots; i++)
     {
         if (NxContigTable[i].Alias == Alias)
         {
@@ -370,7 +456,7 @@ NxpHeapFree(PVOID Alias, SIZE_T *OutSize)
 
     if (OutSize) *OutSize = 0;
     KeAcquireSpinLock(&NxContigLock, &OldIrql);
-    for (i = 0; i < NXK_CONTIG_SLOTS; i++)
+    for (i = 0; i < NxContigSlots; i++)
     {
         if (NxContigTable[i].Alias == Alias)
         {
@@ -443,15 +529,7 @@ NxMmAllocateContiguousMemoryEx(
 
     /* Reserve a tracking slot, take the run, record it.  Lock order:
      * NxContigLock, then the PFN lock. */
-    KeAcquireSpinLock(&NxContigLock, &OldIrql);
-    for (Slot = 0; Slot < NXK_CONTIG_SLOTS; Slot++)
-        if (NxContigTable[Slot].Alias == NULL) break;
-    if (Slot == NXK_CONTIG_SLOTS)
-    {
-        KeReleaseSpinLock(&NxContigLock, OldIrql);
-        DPRINT1("MmAllocContig: tracking table full\n");
-        return NULL;
-    }
+    if (!NxpContigTakeSlot(&Slot, &OldIrql)) return NULL;
     {
         KIRQL PfnIrql = MiAcquirePfnLock();
         Base = NxkPageSupplyTakeRun(RunPages, LowPfn, HighPfn, AlignPages);
@@ -531,9 +609,9 @@ NxMmAllocateContiguousMemoryEx(
      * can take what they need. */
     AllocBytes = (NumberOfBytes + PAGE_SIZE - 1) & ~((SIZE_T)PAGE_SIZE - 1);
 
-    KeAcquireSpinLock(&NxContigLock, &OldIrql);
+    if (!NxpContigTakeSlot(&Slot, &OldIrql)) return NULL;
     Pa = NxpHeapAllocLocked(AllocBytes, Alignment, LowestAcceptableAddress,
-                            HighestAcceptableAddress, &Slot);
+                            HighestAcceptableAddress, Slot);
     if (Pa != 0)
     {
         Alias = (PVOID)(NXK_KSEG0_BASE | Pa);
@@ -581,16 +659,15 @@ NxMmAllocateContiguousMemoryEx(
             /* Track the slow-path alloc so NxMmFreeContiguousMemory can find it.
              * We reuse NxContigTable but stash the SystemVa in PaEnd (unused
              * for NT-allocs) so MmFree can call back into NT correctly. */
-            KeAcquireSpinLock(&NxContigLock, &OldIrql);
-            for (Slot = 0; Slot < NXK_CONTIG_SLOTS; Slot++)
-                if (NxContigTable[Slot].Alias == NULL) break;
-            if (Slot < NXK_CONTIG_SLOTS)
+            if (!NxpContigTakeSlot(&Slot, &OldIrql))
             {
-                NxContigTable[Slot].Alias = Alias;
-                NxContigTable[Slot].Pa = 0;     /* 0 == "NT-allocator backing" */
-                NxContigTable[Slot].PaEnd = (ULONG_PTR)SystemVa;
-                NxContigTable[Slot].Size = NumberOfBytes;
+                MmFreeContiguousMemory(SystemVa);
+                return NULL;
             }
+            NxContigTable[Slot].Alias = Alias;
+            NxContigTable[Slot].Pa = 0;     /* 0 == "NT-allocator backing" */
+            NxContigTable[Slot].PaEnd = (ULONG_PTR)SystemVa;
+            NxContigTable[Slot].Size = NumberOfBytes;
             KeReleaseSpinLock(&NxContigLock, OldIrql);
             DPRINT("MmAllocContig req=%lu NT-fallback PA=%08lx alias=%p "
                     "(constrained: low=%08lx high=%08lx)\n",
@@ -641,7 +718,7 @@ NxMmQueryAllocationSize(IN PVOID BaseAddress)
     ULONG i;
 
     KeAcquireSpinLock(&NxContigLock, &OldIrql);
-    for (i = 0; i < NXK_CONTIG_SLOTS; i++)
+    for (i = 0; i < NxContigSlots; i++)
     {
         if (NxContigTable[i].Alias == BaseAddress)
         {
