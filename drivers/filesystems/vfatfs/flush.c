@@ -145,6 +145,48 @@ VfatFlushVolume(
     return ReturnStatus;
 }
 
+/* Retail FATX survives an abrupt SMC power-off -- the console's power button
+ * has no clean-shutdown path -- which the NT cache manager's lazy write-back
+ * does not: a freshly created file/dir can reach the platter while the FAT
+ * that records its cluster chain does not, so the next mount finds an entry
+ * whose chain the FAT no longer holds, leaks the clusters, and eventually
+ * reports a spurious STATUS_DISK_FULL (roswell#20).  When write-through is on
+ * (default for Xbox, VFAT_WRITE_THROUGH), make an operation durable the way
+ * retail does -- on every write and on close -- by flushing this file/dir's
+ * own stream (its data, or a directory's child entries), every ancestor
+ * directory stream up to the root (they hold its entry, and the entries the
+ * operation rewrote when it extended a parent), and the FAT.  A no-op when
+ * the flag is cleared, which relaxes power-loss durability for throughput. */
+VOID
+VfatFlushWriteThrough(
+    PDEVICE_EXTENSION DeviceExt,
+    PVFATFCB pFcb)
+{
+    IO_STATUS_BLOCK IoStatus;
+    PVFATFCB dir;
+
+    if (!BooleanFlagOn(VfatGlobalData->Flags, VFAT_WRITE_THROUGH))
+        return;
+
+    for (dir = pFcb; dir != NULL; dir = dir->parentFcb)
+    {
+        /* CcFlushCache is a no-op when the stream was never cached, so call it
+         * unconditionally: a file's own FCB carries no FileObject and never
+         * sets FCB_CACHE_INITIALIZED (that flag is directory-only), yet its
+         * written data must be flushed too, not just the ancestor entries. */
+        CcFlushCache(&dir->SectionObjectPointers, NULL, 0, &IoStatus);
+        if (vfatFCBIsRoot(dir))
+            break;
+    }
+
+    if (DeviceExt->FATFileObject != NULL)
+    {
+        PVFATFCB FatFcb = (PVFATFCB)DeviceExt->FATFileObject->FsContext;
+        if (FatFcb != NULL)
+            CcFlushCache(&FatFcb->SectionObjectPointers, NULL, 0, &IoStatus);
+    }
+}
+
 NTSTATUS
 VfatFlush(
     PVFAT_IRP_CONTEXT IrpContext)

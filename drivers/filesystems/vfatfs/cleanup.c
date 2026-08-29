@@ -87,6 +87,11 @@ VfatCleanupFile(
             VfatUpdateEntry (DeviceExt, pFcb);
         }
 
+        /* Push this operation's data + metadata to the platter now, not at
+         * the mercy of the lazy writer (no-op unless write-through is on). */
+        if (!BooleanFlagOn(pFcb->Flags, FCB_DELETE_PENDING))
+            VfatFlushWriteThrough(DeviceExt, pFcb);
+
         if (BooleanFlagOn(pFcb->Flags, FCB_DELETE_PENDING) &&
             pFcb->OpenHandleCount == 0)
         {
@@ -120,6 +125,13 @@ VfatCleanupFile(
             pFcb->OpenHandleCount == 0)
         {
             VfatDelEntry(DeviceExt, pFcb, NULL);
+
+            /* Write-through: the entry is now gone and its clusters freed --
+             * flush the parent directory stream and the FAT so the removal is
+             * durable (this FCB's own stream was just torn down above, hence
+             * the parent).  No-op unless VFAT_WRITE_THROUGH is set. */
+            if (pFcb->parentFcb != NULL)
+                VfatFlushWriteThrough(DeviceExt, pFcb->parentFcb);
 
             vfatReportChange(DeviceExt,
                              pFcb,

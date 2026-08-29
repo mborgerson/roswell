@@ -1203,6 +1203,18 @@ Metadata:
 
             vfatReportChange(IrpContext->DeviceExt, Fcb, Filter, FILE_ACTION_MODIFIED);
         }
+
+        /* Write-through (retail parity): commit the entry and flush the
+         * file's data plus its metadata chain (parent entries + FAT) so the
+         * write is on the platter before we return, even if the handle is
+         * never closed.  No-op unless VFAT_WRITE_THROUGH is set. */
+        if (NT_SUCCESS(Status) &&
+            BooleanFlagOn(VfatGlobalData->Flags, VFAT_WRITE_THROUGH))
+        {
+            if (BooleanFlagOn(Fcb->Flags, FCB_IS_DIRTY))
+                VfatUpdateEntry(IrpContext->DeviceExt, Fcb);
+            VfatFlushWriteThrough(IrpContext->DeviceExt, Fcb);
+        }
     }
 
 ByeBye:

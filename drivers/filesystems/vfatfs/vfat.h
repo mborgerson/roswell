@@ -405,6 +405,13 @@ VfatGetNextDirEntry(PDEVICE_EXTENSION DeviceExt,
 }
 
 #define VFAT_BREAK_ON_CORRUPTION 1
+/* Write-through: flush a file/dir's data + its metadata chain (parent
+ * directory entries + FAT) to the platter on every write and on close,
+ * the way retail FATX does, so an abrupt SMC power-off (the console has
+ * no clean-shutdown path) cannot desync the on-disk FAT and directory
+ * streams.  Default on for Xbox; clearing it relaxes power-loss
+ * durability for throughput. */
+#define VFAT_WRITE_THROUGH 2
 
 typedef struct
 {
@@ -1123,6 +1130,11 @@ NTSTATUS
 VfatFlushVolume(
     PDEVICE_EXTENSION DeviceExt,
     PVFATFCB VolumeFcb);
+
+VOID
+VfatFlushWriteThrough(
+    PDEVICE_EXTENSION DeviceExt,
+    PVFATFCB pFcb);
 
 /* fsctl.c */
 
