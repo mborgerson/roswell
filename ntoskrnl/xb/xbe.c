@@ -1677,8 +1677,13 @@ XeNtReadFile(HANDLE File, HANDLE Event, PIO_APC_ROUTINE Apc, PVOID ApcCtx,
                PIO_STATUS_BLOCK Iosb, PVOID Buffer, ULONG Length,
                PLARGE_INTEGER Offset)
 {
-    return NtReadFile(File, Event, Apc, ApcCtx, Iosb, Buffer, Length,
-                      Offset, NULL);
+    NTSTATUS s = NtReadFile(File, Event, Apc, ApcCtx, Iosb, Buffer, Length,
+                            Offset, NULL);
+    XbStraceDbg("NtReadFile(h=%p buf=%p len=%lu off=%lx) -> %08lx info=%lx\n",
+                File, Buffer, Length,
+                Offset ? (ULONG)Offset->LowPart : 0xFFFFFFFFUL, s,
+                Iosb ? (ULONG)Iosb->Information : 0);
+    return s;
 }
 NTSTATUS NTAPI
 XeNtWriteFile(HANDLE File, HANDLE Event, PIO_APC_ROUTINE Apc, PVOID ApcCtx,
