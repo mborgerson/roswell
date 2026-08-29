@@ -1734,6 +1734,13 @@ VfatSetInformation(
         ExReleaseResourceLite(&((PDEVICE_EXTENSION)IrpContext->DeviceObject->DeviceExtension)->DirResource);
     }
 
+    /* Write-through: commit this metadata change (rename / set-alloc /
+     * set-EOF / times) to the platter before returning (no-op unless
+     * VFAT_WRITE_THROUGH is set).  A pending delete is a flag only here --
+     * the removal is flushed when it executes in cleanup. */
+    if (NT_SUCCESS(Status))
+        VfatFlushWriteThrough(IrpContext->DeviceExt, FCB);
+
     IrpContext->Irp->IoStatus.Information = 0;
     return Status;
 }

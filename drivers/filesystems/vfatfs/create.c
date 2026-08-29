@@ -1107,7 +1107,22 @@ VfatCreate(
     ExReleaseResourceLite(&IrpContext->DeviceExt->DirResource);
 
     if (NT_SUCCESS(Status))
+    {
         IrpContext->PriorityBoost = IO_DISK_INCREMENT;
+
+        /* Write-through: a create / overwrite / supersede is a metadata
+         * mutation -- commit the new entry, the parent's extension, and the
+         * FAT now (no-op unless VFAT_WRITE_THROUGH), so it survives a
+         * power-off even if the handle is never closed.  A plain open
+         * (FILE_OPENED) changed nothing. */
+        if (IrpContext->Irp->IoStatus.Information != FILE_OPENED &&
+            IrpContext->FileObject != NULL &&
+            IrpContext->FileObject->FsContext != NULL)
+        {
+            VfatFlushWriteThrough(IrpContext->DeviceExt,
+                                  (PVFATFCB)IrpContext->FileObject->FsContext);
+        }
+    }
 
     return Status;
 }

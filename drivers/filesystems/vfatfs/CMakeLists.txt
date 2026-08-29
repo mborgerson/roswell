@@ -38,8 +38,17 @@ endif()
 # complete FATX (Xbox HDD filesystem) read/write implementation -- folding it
 # in is what gives the kernel FATX.  Built unchanged, in the normal driver
 # view -- kernel-API imports resolve through the in-kernel import table.
+# Write-through durability: flush a FATX operation's data + metadata to the
+# platter before it returns, matching retail (which survives an abrupt SMC
+# power-off).  On by default; turn OFF to relax power-loss durability for
+# throughput.  Only meaningful on the Xbox FATX build.
+option(NXK_FATX_WRITE_THROUGH "FATX write-through durability (retail parity)" ON)
+
 add_library(vfatfs ${SOURCE})
 target_link_libraries(vfatfs ${PSEH_LIB})
 target_compile_definitions(vfatfs PRIVATE DriverEntry=VfatfsDriverEntry)
+if(NXK_FATX_WRITE_THROUGH)
+    target_compile_definitions(vfatfs PRIVATE NXK_FATX_WRITE_THROUGH=1)
+endif()
 add_dependencies(vfatfs psdk xdk bugcodes)
 add_registry_inf(vfatfs_reg.inf)

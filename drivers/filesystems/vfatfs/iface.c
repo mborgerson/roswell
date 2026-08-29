@@ -60,6 +60,14 @@ DriverEntry(
      * has been detected:
     VfatGlobalData->Flags = VFAT_BREAK_ON_CORRUPTION; */
 
+#if defined(SARCH_XBOX) && defined(NXK_FATX_WRITE_THROUGH)
+    /* Retail FATX is write-through: a write is on the platter before the
+     * call returns, so an abrupt power-off never desyncs the FAT and the
+     * directory streams.  Match that by default (build with
+     * -DNXK_FATX_WRITE_THROUGH=OFF to relax it for throughput). */
+    VfatGlobalData->Flags |= VFAT_WRITE_THROUGH;
+#endif
+
 #ifndef SARCH_XBOX
     /* Delayed close support (dead code: the only FCB_DELAYED_CLOSE setter
      * is disabled upstream) */
