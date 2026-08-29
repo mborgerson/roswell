@@ -427,7 +427,9 @@
 352  XeRtlRip                        # prints and breaks, as RtlAssert does
 
 # --- HAL boot / shutdown ------------------------------------------------- #
+355  XePublicKeyData               # 284 zeroed bytes: sized, no key (see xb/sizeddata.c)
 356  HalBootSMCVideoMode           # = 1 (HDTV)
+357  IdexChannelObject             # 264 zeroed bytes: sized so a title's hook writes land inside it
 358  HalIsResetOrShutdownPending
 359  IoMarkIrpMustComplete
 360  HalInitiateShutdown
