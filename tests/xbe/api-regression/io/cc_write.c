@@ -36,6 +36,9 @@
 #ifndef STATUS_NO_SUCH_FILE
 #define STATUS_NO_SUCH_FILE ((NTSTATUS)0xC000000FL)
 #endif
+#ifndef STATUS_INVALID_INFO_CLASS
+#define STATUS_INVALID_INFO_CLASS ((NTSTATUS)0xC0000003L)
+#endif
 
 #define CHUNK_SIZE   0x10000             /* 64 KB */
 #define HEAVY_TOTAL  (8u * 1024 * 1024)  /* 8 MB, written unflushed */
@@ -757,6 +760,67 @@ typedef struct {
     WCHAR FileName[1];
 } DIR_INFO;
 
+/* FILE_STANDARD_INFORMATION prefix (AllocationSize/EndOfFile). */
+typedef struct {
+    LARGE_INTEGER AllocationSize;
+    LARGE_INTEGER EndOfFile;
+    ULONG NumberOfLinks;
+    UCHAR DeletePending;
+    UCHAR Directory;
+} STD_INFO;
+
+/* Enumerate CC_SUBDIR with one dir-info class and check the file entry's
+ * AllocationSize == EndOfFile.  EndOfFile/AllocationSize/FileAttributes sit
+ * at the same offset in the directory/full/both info structs, so DIR_INFO
+ * reads all three.  Exercises each vfatfs enumeration builder. */
+static bool dir_enum_alloc_eq_eof(FILE_INFORMATION_CLASS cls, const char *tag)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    static unsigned char dbuf[1024];
+    ULONG off = 0;
+    bool seen = false;
+
+    name.Length = (USHORT)strlen(CC_SUBDIR); name.MaximumLength = name.Length + 1;
+    name.Buffer = (PCHAR)CC_SUBDIR; oa.RootDirectory = NULL; oa.ObjectName = &name;
+    oa.Attributes = OBJ_CASE_INSENSITIVE;
+    s = NtCreateFile(&h, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL,
+                     FILE_ATTRIBUTE_DIRECTORY,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN,
+                     FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
+    if (s != STATUS_SUCCESS)
+        FAIL_AND_RETURN("%s: diropen 0x%08x", tag, (unsigned)s);
+    memset(dbuf, 0, sizeof(dbuf));
+    s = NtQueryDirectoryFile(h, NULL, NULL, NULL, &iosb, dbuf, sizeof(dbuf),
+                             cls, NULL, TRUE);
+    NtClose(h);
+    /* A class the kernel does not answer is skipped, not a failure
+     * (retail answers fewer NtQueryDirectoryFile classes than nxkrnl). */
+    if (s == STATUS_INVALID_PARAMETER || s == STATUS_INVALID_INFO_CLASS)
+        return true;
+    if (!NT_SUCCESS(s))
+        FAIL_AND_RETURN("%s: query 0x%08x", tag, (unsigned)s);
+    for (;;) {
+        DIR_INFO *di = (DIR_INFO *)(dbuf + off);
+        if (!(di->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            seen = true;
+            if (di->AllocationSize.QuadPart != di->EndOfFile.QuadPart)
+                FAIL_AND_RETURN("%s: eof=%ld alloc=%ld (want equal)", tag,
+                                (long)di->EndOfFile.QuadPart,
+                                (long)di->AllocationSize.QuadPart);
+        }
+        if (di->NextEntryOffset == 0) break;
+        off += di->NextEntryOffset;
+        if (off >= sizeof(dbuf)) break;
+    }
+    if (!seen)
+        FAIL_AND_RETURN("%s: no file entry found", tag);
+    return true;
+}
+
 static bool t_allocsize_matches_eof(void)
 {
     static const ULONG sizes[] = { 1, 512, 4096, 16385, 40000 };
@@ -765,12 +829,15 @@ static bool t_allocsize_matches_eof(void)
     HANDLE h;
     ANSI_STRING name;
     OBJECT_ATTRIBUTES oa;
-    static unsigned char dbuf[1024];
+    bool ok;
 
-    /* by-handle query: FileNetworkOpenInformation */
+    /* by-handle query: FileNetworkOpenInformation and FileStandardInformation
+     * (distinct vfatfs builders) both report AllocationSize == EndOfFile. */
     for (unsigned i = 0; i < sizeof(sizes)/sizeof(sizes[0]); i++) {
         FILE_NETWORK_OPEN_INFORMATION ni;
+        STD_INFO si;
         ULONG n = sizes[i];
+        NTSTATUS s2;
         unlink_path(CC_SCRATCH);
         s = open_path(CC_SCRATCH, &h, GENERIC_READ | GENERIC_WRITE,
                       FILE_OVERWRITE_IF, 0, &iosb);
@@ -783,17 +850,28 @@ static bool t_allocsize_matches_eof(void)
         if (s == STATUS_SUCCESS)
             s = NtQueryInformationFile(h, &iosb, &ni, sizeof(ni),
                                        FileNetworkOpenInformation);
+        s2 = NtQueryInformationFile(h, &iosb, &si, sizeof(si),
+                                    FileStandardInformation);
         NtClose(h);
         unlink_path(CC_SCRATCH);
         if (s != STATUS_SUCCESS)
             FAIL_AND_RETURN("size %lu: write/query 0x%08x", n, (unsigned)s);
         if (ni.EndOfFile.QuadPart != n || ni.AllocationSize.QuadPart != n)
-            FAIL_AND_RETURN("size %lu: eof=%ld alloc=%ld (want both %lu)", n,
+            FAIL_AND_RETURN("size %lu net: eof=%ld alloc=%ld (want both %lu)", n,
                             (long)ni.EndOfFile.QuadPart,
                             (long)ni.AllocationSize.QuadPart, n);
+        /* Retail's NtQueryInformationFile does not answer
+         * FileStandardInformation (STATUS_INVALID_PARAMETER); nxkrnl does.
+         * Assert only when it is answered -- retail-green, and still exercises
+         * the standard-info builder where it runs. */
+        if (s2 == STATUS_SUCCESS &&
+            (si.EndOfFile.QuadPart != n || si.AllocationSize.QuadPart != n))
+            FAIL_AND_RETURN("size %lu std: eof=%ld alloc=%ld (want both %lu)", n,
+                            (long)si.EndOfFile.QuadPart,
+                            (long)si.AllocationSize.QuadPart, n);
     }
 
-    /* directory enumeration: FILE_DIRECTORY_INFORMATION */
+    /* directory enumeration, each info class (each is a distinct builder) */
     name.Length = (USHORT)strlen(CC_SUBDIR); name.MaximumLength = name.Length + 1;
     name.Buffer = (PCHAR)CC_SUBDIR; oa.RootDirectory = NULL; oa.ObjectName = &name;
     oa.Attributes = OBJ_CASE_INSENSITIVE;
@@ -810,51 +888,13 @@ static bool t_allocsize_matches_eof(void)
         NtClose(h);
     }
 
-    name.Length = (USHORT)strlen(CC_SUBDIR); name.MaximumLength = name.Length + 1;
-    name.Buffer = (PCHAR)CC_SUBDIR; oa.RootDirectory = NULL; oa.ObjectName = &name;
-    oa.Attributes = OBJ_CASE_INSENSITIVE;
-    s = NtCreateFile(&h, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL,
-                     FILE_ATTRIBUTE_DIRECTORY,
-                     FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN,
-                     FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
-    if (s != STATUS_SUCCESS) {
-        unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
-        FAIL_AND_RETURN("diropen 0x%08x", (unsigned)s);
-    }
-    memset(dbuf, 0, sizeof(dbuf));
-    s = NtQueryDirectoryFile(h, NULL, NULL, NULL, &iosb, dbuf, sizeof(dbuf),
-                             FileDirectoryInformation, NULL, TRUE);
-    NtClose(h);
-    if (!NT_SUCCESS(s)) {
-        unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
-        FAIL_AND_RETURN("dir-enum query 0x%08x", (unsigned)s);
-    }
-    {
-        ULONG off = 0;
-        bool seen = false;
-        for (;;) {
-            DIR_INFO *di = (DIR_INFO *)(dbuf + off);
-            if (!(di->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                seen = true;
-                if (di->AllocationSize.QuadPart != di->EndOfFile.QuadPart) {
-                    unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
-                    FAIL_AND_RETURN("dir-enum: eof=%ld alloc=%ld (want equal)",
-                                    (long)di->EndOfFile.QuadPart,
-                                    (long)di->AllocationSize.QuadPart);
-                }
-            }
-            if (di->NextEntryOffset == 0) break;
-            off += di->NextEntryOffset;
-            if (off >= sizeof(dbuf)) break;
-        }
-        if (!seen) {
-            unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
-            FAIL_AND_RETURN("dir-enum: no file entry found");
-        }
-    }
+    ok = dir_enum_alloc_eq_eof(FileDirectoryInformation,     "dir-enum")
+      && dir_enum_alloc_eq_eof(FileFullDirectoryInformation, "full-dir-enum")
+      && dir_enum_alloc_eq_eof(FileBothDirectoryInformation, "both-dir-enum");
+
     unlink_path(CC_SUBFILE);
     unlink_path(CC_SUBDIR);
-    return true;
+    return ok;
 }
 
 /* Retail FATX does not set the archive bit and reports FILE_ATTRIBUTE_NORMAL
