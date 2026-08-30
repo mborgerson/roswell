@@ -754,6 +754,45 @@ static bool t_prealloc_write_full(void)
     return repro_prealloc_write(0x10000, 0x10000);
 }
 
+/* Guards the cache write-back reserve directly, independent of the create-
+ * time AllocationSize handling: preallocate 64 KB via
+ * NtSetInformationFile(FileAllocationInformation) -- which allocates the
+ * clusters but leaves EOF at 0 -- then write 64 KB into them.  The clusters
+ * already exist, so the write only reads the FAT to map them; filling all
+ * four cache blocks with the file's data evicts that FAT block, and the
+ * write-back must re-read it with no free slot.  Deadlocked before the
+ * reserve fix; completing is the assertion (roswell#26). */
+static bool t_prealloc_setinfo_write_full(void)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    FILE_ALLOCATION_INFORMATION ai;
+
+    unlink_path(CC_SCRATCH);
+    s = open_path(CC_SCRATCH, &h, GENERIC_READ | GENERIC_WRITE,
+                  FILE_OVERWRITE_IF, 0, &iosb);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    ai.AllocationSize.QuadPart = 0x10000;
+    s = NtSetInformationFile(h, &iosb, &ai, sizeof(ai),
+                             FileAllocationInformation);
+    if (s != STATUS_SUCCESS) {
+        NtClose(h);
+        unlink_path(CC_SCRATCH);
+        FAIL_AND_RETURN("set-alloc 64K -> 0x%08x", (unsigned)s);
+    }
+
+    fill_pattern(g_chunk, CHUNK_SIZE, 0, 0x66);
+    s = NtWriteFile(h, NULL, NULL, NULL, &iosb, g_chunk, CHUNK_SIZE, NULL);
+    NtClose(h);
+    unlink_path(CC_SCRATCH);
+    if (s != STATUS_SUCCESS || iosb.Information != CHUNK_SIZE)
+        FAIL_AND_RETURN("write 64K -> s=0x%08x len=%u", (unsigned)s,
+                        (unsigned)iosb.Information);
+    return true;
+}
+
 static const test_entry_t io_cc_write_entries[] = {
     {"flush_buffers_visibility",  t_flush_buffers_visibility},
     {"cross_handle_no_flush",     t_cross_handle_no_flush},
@@ -766,6 +805,7 @@ static const test_entry_t io_cc_write_entries[] = {
     {"prealloc_create_eof",       t_prealloc_create_eof},
     {"prealloc_write_partial",    t_prealloc_write_partial},
     {"prealloc_write_full",       t_prealloc_write_full},
+    {"prealloc_setinfo_write_full", t_prealloc_setinfo_write_full},
 };
 
 DEFINE_GROUP(io_cc_write, "io/cc-write");
