@@ -857,6 +857,125 @@ static bool t_allocsize_matches_eof(void)
     return true;
 }
 
+/* Retail FATX does not set the archive bit and reports FILE_ATTRIBUTE_NORMAL
+ * for a file with no attribute bits -- in the by-handle query and in
+ * directory enumeration alike.  Retail-captured (--official): a plainly
+ * created file reads back 0x80 (NORMAL) both ways; a read-only file reads
+ * back 0x01 (READONLY), with no archive bit.  vfatfs forced the archive bit
+ * and did not synthesize NORMAL in enumeration. */
+typedef struct {
+    LARGE_INTEGER CreationTime, LastAccessTime, LastWriteTime, ChangeTime;
+    ULONG FileAttributes;
+} BASIC_INFO;
+
+static bool attr_query(ULONG cattr, ULONG *net, ULONG *dir)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    FILE_NETWORK_OPEN_INFORMATION ni;
+    static unsigned char dbuf[512];
+
+    *net = *dir = 0xffffffff;
+
+    name.Length=(USHORT)strlen(CC_SUBDIR); name.MaximumLength=name.Length+1;
+    name.Buffer=(PCHAR)CC_SUBDIR; oa.RootDirectory=NULL; oa.ObjectName=&name;
+    oa.Attributes=OBJ_CASE_INSENSITIVE;
+    s=NtCreateFile(&h,GENERIC_WRITE|SYNCHRONIZE,&oa,&iosb,NULL,
+                   FILE_ATTRIBUTE_DIRECTORY,0,FILE_OPEN_IF,
+                   FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT);
+    if (s!=STATUS_SUCCESS) return false;
+    NtClose(h);
+
+    name.Length=(USHORT)strlen(CC_SUBFILE); name.MaximumLength=name.Length+1;
+    name.Buffer=(PCHAR)CC_SUBFILE; oa.ObjectName=&name;
+    s=NtCreateFile(&h,GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE,&oa,&iosb,NULL,
+                   cattr,0,FILE_OVERWRITE_IF,
+                   FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE);
+    if (s!=STATUS_SUCCESS) return false;
+    fill_pattern(g_chunk,16,0,1);
+    NtWriteFile(h,NULL,NULL,NULL,&iosb,g_chunk,16,NULL);
+    if (NtQueryInformationFile(h,&iosb,&ni,sizeof(ni),
+                               FileNetworkOpenInformation)==STATUS_SUCCESS)
+        *net=ni.FileAttributes;
+    NtClose(h);
+
+    name.Length=(USHORT)strlen(CC_SUBDIR); name.MaximumLength=name.Length+1;
+    name.Buffer=(PCHAR)CC_SUBDIR; oa.ObjectName=&name;
+    s=NtCreateFile(&h,GENERIC_READ|SYNCHRONIZE,&oa,&iosb,NULL,
+                   FILE_ATTRIBUTE_DIRECTORY,FILE_SHARE_READ|FILE_SHARE_WRITE,
+                   FILE_OPEN,FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT);
+    if (s==STATUS_SUCCESS){
+        memset(dbuf,0,sizeof(dbuf));
+        if (NtQueryDirectoryFile(h,NULL,NULL,NULL,&iosb,dbuf,sizeof(dbuf),
+                                 FileDirectoryInformation,NULL,TRUE)==STATUS_SUCCESS)
+            *dir=((DIR_INFO*)dbuf)->FileAttributes;
+        NtClose(h);
+    }
+    return true;
+}
+
+/* A read-only file cannot be delete-on-close unlinked; clear its attribute
+ * first so the shared HDD is left clean. */
+static void attr_cleanup(void)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    BASIC_INFO bi;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+
+    name.Length=(USHORT)strlen(CC_SUBFILE); name.MaximumLength=name.Length+1;
+    name.Buffer=(PCHAR)CC_SUBFILE; oa.RootDirectory=NULL; oa.ObjectName=&name;
+    oa.Attributes=OBJ_CASE_INSENSITIVE;
+    if (NtCreateFile(&h, FILE_WRITE_ATTRIBUTES|SYNCHRONIZE, &oa, &iosb, NULL,
+                     0, 0, FILE_OPEN,
+                     FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE)
+        == STATUS_SUCCESS) {
+        memset(&bi, 0, sizeof(bi));
+        bi.FileAttributes = FILE_ATTRIBUTE_NORMAL;
+        NtSetInformationFile(h, &iosb, &bi, sizeof(bi), FileBasicInformation);
+        NtClose(h);
+    }
+    unlink_path(CC_SUBFILE);
+    unlink_path(CC_SUBDIR);
+}
+
+static bool t_attributes_match_retail(void)
+{
+    ULONG net, dir;
+    bool ok = true;
+
+    attr_cleanup();  /* clear any read-only leftover from a prior run */
+
+    if (!attr_query(FILE_ATTRIBUTE_NORMAL, &net, &dir)) {
+        attr_cleanup();
+        FAIL_AND_RETURN("normal: setup failed");
+    }
+    if (net != FILE_ATTRIBUTE_NORMAL || dir != FILE_ATTRIBUTE_NORMAL) {
+        test_record_failure(__FILE__, __LINE__,
+            "normal file: net=0x%lx dir=0x%lx (want 0x80 both)",
+            (unsigned long)net, (unsigned long)dir);
+        ok = false;
+    }
+    attr_cleanup();
+
+    if (ok && !attr_query(FILE_ATTRIBUTE_READONLY, &net, &dir)) {
+        attr_cleanup();
+        FAIL_AND_RETURN("readonly: setup failed");
+    }
+    if (ok && (net != FILE_ATTRIBUTE_READONLY || dir != FILE_ATTRIBUTE_READONLY)) {
+        test_record_failure(__FILE__, __LINE__,
+            "readonly file: net=0x%lx dir=0x%lx (want 0x01 both)",
+            (unsigned long)net, (unsigned long)dir);
+        ok = false;
+    }
+    attr_cleanup();
+    return ok;
+}
+
 /* Passing control: 64 KB preallocation, 48 KB write (issue test 6b). */
 static bool t_prealloc_write_partial(void)
 {
@@ -918,6 +1037,7 @@ static const test_entry_t io_cc_write_entries[] = {
     {"subdir_small_reopen",       t_subdir_small_reopen},
     {"gap_write_extends",         t_gap_write_extends},
     {"allocsize_matches_eof",     t_allocsize_matches_eof},
+    {"attributes_match_retail",   t_attributes_match_retail},
     {"prealloc_create_eof",       t_prealloc_create_eof},
     {"prealloc_write_partial",    t_prealloc_write_partial},
     {"prealloc_write_full",       t_prealloc_write_full},

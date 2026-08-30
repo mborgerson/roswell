@@ -776,7 +776,11 @@ VfatCreateFile(
                     vfatAddToStat(DeviceExt, Fat.FailedCreates, 1);
                     return STATUS_OBJECT_NAME_INVALID;
                 }
+#ifndef SARCH_XBOX
+                /* Retail FATX does not set the archive bit on a new file;
+                 * a plainly-created file reads back as FILE_ATTRIBUTE_NORMAL. */
                 Attributes |= FILE_ATTRIBUTE_ARCHIVE;
+#endif
             }
             vfatSplitPathName(&PathNameU, NULL, &FileNameU);
 
@@ -979,7 +983,10 @@ VfatCreateFile(
                 {
                     *pFcb->Attributes |= Attributes;
                 }
+#ifndef SARCH_XBOX
+                /* Retail FATX does not set the archive bit on overwrite. */
                 *pFcb->Attributes |= FILE_ATTRIBUTE_ARCHIVE;
+#endif
 
                 KeQuerySystemTime(&SystemTime);
                 if (vfatVolumeIsFatX(DeviceExt))

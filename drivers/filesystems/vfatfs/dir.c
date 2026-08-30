@@ -211,6 +211,16 @@ VfatGetFileDirectoryInformation(
             }
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
+#ifdef SARCH_XBOX
+            /* Retail FATX reports FILE_ATTRIBUTE_NORMAL when no other
+             * attribute bit is set, in enumeration as well as by-handle. */
+            if (0 == (pInfo->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
+                                               FILE_ATTRIBUTE_ARCHIVE |
+                                               FILE_ATTRIBUTE_SYSTEM |
+                                               FILE_ATTRIBUTE_HIDDEN |
+                                               FILE_ATTRIBUTE_READONLY)))
+                pInfo->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+#endif
         }
 #ifndef SARCH_XBOX
         else
@@ -324,6 +334,16 @@ VfatGetFileFullDirectoryInformation(
                                                        DeviceExt->FatInfo.BytesPerCluster);
 #endif
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
+#ifdef SARCH_XBOX
+            /* Retail FATX reports FILE_ATTRIBUTE_NORMAL when no other
+             * attribute bit is set, in enumeration as well as by-handle. */
+            if (0 == (pInfo->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
+                                               FILE_ATTRIBUTE_ARCHIVE |
+                                               FILE_ATTRIBUTE_SYSTEM |
+                                               FILE_ATTRIBUTE_HIDDEN |
+                                               FILE_ATTRIBUTE_READONLY)))
+                pInfo->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+#endif
         }
 #ifndef SARCH_XBOX
         else
@@ -440,6 +460,16 @@ VfatGetFileBothInformation(
             }
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
+#ifdef SARCH_XBOX
+            /* Retail FATX reports FILE_ATTRIBUTE_NORMAL when no other
+             * attribute bit is set, in enumeration as well as by-handle. */
+            if (0 == (pInfo->FileAttributes & (FILE_ATTRIBUTE_DIRECTORY |
+                                               FILE_ATTRIBUTE_ARCHIVE |
+                                               FILE_ATTRIBUTE_SYSTEM |
+                                               FILE_ATTRIBUTE_HIDDEN |
+                                               FILE_ATTRIBUTE_READONLY)))
+                pInfo->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+#endif
         }
 #ifndef SARCH_XBOX
         else
