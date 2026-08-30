@@ -72,6 +72,18 @@ ULONG CcDataPages;
  * headroom; a title asking for more is clamped and simply caches less
  * (LRU eviction -- a perf bound, never a correctness one). */
 #define NXC_MAX_BLOCKS      32
+/* Write-back reserve.  A cached write large enough to dirty every
+ * title-visible block deadlocks without it: flushing one dirty block
+ * re-enters the FSD to read the FAT (to map the block's cluster), which
+ * needs a cache block -- but every block holds this file's dirty data, and
+ * freeing one means flushing another dirty block that needs the same FAT,
+ * a cycle with no free slot (roswell#26).  These extra blocks are handed
+ * out only to a re-entrant metadata read issued from inside a write-back
+ * (NxcWbDepth > 0); the data-fill path never touches them, so one is always
+ * available to break the cycle.  Two covers a FAT block plus a directory
+ * block.  Not title-visible capacity (FscGetCacheSize excludes them). */
+#define NXC_WB_RESERVE      2
+#define NXC_TOTAL_BLOCKS    (NXC_MAX_BLOCKS + NXC_WB_RESERVE)
 
 #define NXC_TAG           'cCxN'
 
@@ -102,6 +114,7 @@ typedef struct _NXC_BLOCK
     BOOLEAN Valid;                  /* contents populated */
     BOOLEAN Dirty;
     BOOLEAN Busy;                   /* read-in or write-out in flight */
+    BOOLEAN Reserved;               /* write-back-only slot (never a data fill) */
 } NXC_BLOCK;
 
 typedef struct _NXC_BCB
@@ -113,8 +126,9 @@ typedef struct _NXC_BCB
     LONG PinCount;
 } NXC_BCB;
 
-static NXC_BLOCK NxcBlocks[NXC_MAX_BLOCKS];     /* Data==NULL = inactive */
-static ULONG NxcActiveBlocks;
+static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];   /* Data==NULL = inactive */
+static ULONG NxcActiveBlocks;                   /* title-visible; excludes reserve */
+static ULONG NxcWbDepth;                        /* write-back re-entrancy depth */
 static LIST_ENTRY NxcLruList;       /* head = oldest */
 static LIST_ENTRY NxcMapList;
 static FAST_MUTEX NxcMutex;
@@ -247,10 +261,16 @@ NxcFlushBlock(
 
     if (WriteLen != 0)
     {
+        /* The paging write re-enters the FSD, which reads the FAT through
+         * the cache to map this block's cluster.  Flag the re-entrancy so
+         * that nested read can dip into the write-back reserve if every
+         * title-visible block is otherwise spoken for (roswell#26). */
+        NxcWbDepth++;
         ExReleaseFastMutex(&NxcMutex);
         Status = NxcPagingIo(Map->FileObject, Block->Data, Block->Offset,
                              WriteLen, TRUE, &Got);
         ExAcquireFastMutex(&NxcMutex);
+        NxcWbDepth--;
     }
 
     if (NT_SUCCESS(Status))
@@ -289,12 +309,43 @@ NxcLookupBlock(
     IN NXC_MAP *Map,
     IN LONGLONG Offset)
 {
-    for (ULONG i = 0; i < NXC_MAX_BLOCKS; i++)
+    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
     {
         if (NxcBlocks[i].Map == Map && NxcBlocks[i].Offset == Offset &&
             NxcBlocks[i].Data != NULL)
             return &NxcBlocks[i];
     }
+    return NULL;
+}
+
+/* Claim a write-back reserve slot (a free one, else a clean unreferenced
+ * reserve block).  Returns NULL if none is available.  Reserve blocks are
+ * handed out only here, and only to the re-entrant metadata read of a
+ * write-back, so the data-fill path can never exhaust them (roswell#26). */
+static NXC_BLOCK *
+NxcClaimReserve(VOID)
+{
+    for (ULONG i = NXC_MAX_BLOCKS; i < NXC_TOTAL_BLOCKS; i++)
+    {
+        if (NxcBlocks[i].Data != NULL && NxcBlocks[i].Map == NULL)
+        {
+            NxcBlocks[i].RefCount = 1;
+            return &NxcBlocks[i];
+        }
+    }
+
+    for (ULONG i = NXC_MAX_BLOCKS; i < NXC_TOTAL_BLOCKS; i++)
+    {
+        NXC_BLOCK *B = &NxcBlocks[i];
+        if (B->Data == NULL || B->RefCount != 0 || B->Busy || B->Dirty)
+            continue;
+        RemoveEntryList(&B->LruLink);
+        B->Map = NULL;
+        B->Valid = FALSE;
+        B->RefCount = 1;
+        return B;
+    }
+
     return NULL;
 }
 
@@ -322,11 +373,12 @@ NxcClaimSlot(
             }
         }
 
-        /* Clean-first LRU scan. */
+        /* Clean-first LRU scan.  Reserve blocks are never taken here -- they
+         * stay available for the write-back metadata read below. */
         for (Entry = NxcLruList.Flink; Entry != &NxcLruList; Entry = Entry->Flink)
         {
             NXC_BLOCK *B = CONTAINING_RECORD(Entry, NXC_BLOCK, LruLink);
-            if (B->RefCount != 0 || B->Busy) continue;
+            if (B->Reserved || B->RefCount != 0 || B->Busy) continue;
             if (!B->Dirty)
             {
                 Victim = B;
@@ -353,6 +405,15 @@ NxcClaimSlot(
             Victim->Valid = FALSE;
             Victim->RefCount = 1;
             return Victim;
+        }
+
+        /* Every title-visible block is referenced or busy.  If this is the
+         * metadata read of an in-flight write-back, take a reserve block so
+         * the flush can make progress instead of deadlocking on itself. */
+        if (NxcWbDepth > 0)
+        {
+            NXC_BLOCK *Block = NxcClaimReserve();
+            if (Block != NULL) return Block;
         }
 
         if (!Wait) return NULL;
@@ -530,7 +591,7 @@ NxcFlushMap(
     SIZE_T Total = 0;
 
 restart:
-    for (ULONG i = 0; i < NXC_MAX_BLOCKS; i++)
+    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
     {
         NXC_BLOCK *Block = &NxcBlocks[i];
         SIZE_T Written;
@@ -733,7 +794,7 @@ CcPurgeCacheSection(
                                               : Start + Length;
 
     /* Purge fails if anything in range is referenced. */
-    for (ULONG i = 0; i < NXC_MAX_BLOCKS; i++)
+    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
     {
         NXC_BLOCK *Block = &NxcBlocks[i];
         if (Block->Map != Map || Block->Data == NULL) continue;
@@ -1309,7 +1370,7 @@ CcIsThereDirtyData(
     BOOLEAN Dirty = FALSE;
 
     ExAcquireFastMutex(&NxcMutex);
-    for (ULONG i = 0; i < NXC_MAX_BLOCKS && !Dirty; i++)
+    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS && !Dirty; i++)
     {
         NXC_BLOCK *Block = &NxcBlocks[i];
         if (Block->Map == NULL || Block->Data == NULL || !Block->Dirty)
@@ -1334,7 +1395,7 @@ restart:
     for (Entry = NxcMapList.Flink; Entry != &NxcMapList; Entry = Entry->Flink)
     {
         NXC_MAP *Map = CONTAINING_RECORD(Entry, NXC_MAP, MapLinks);
-        for (ULONG i = 0; i < NXC_MAX_BLOCKS; i++)
+        for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
         {
             if (NxcBlocks[i].Map == Map && NxcBlocks[i].Dirty)
             {
@@ -1686,7 +1747,7 @@ NTAPI
 FscInvalidateIdleBlocks(VOID)
 {
     ExAcquireFastMutex(&NxcMutex);
-    for (ULONG i = 0; i < NXC_MAX_BLOCKS; i++)
+    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
     {
         NXC_BLOCK *Block = &NxcBlocks[i];
         if (Block->Data == NULL || Block->Map == NULL) continue;
@@ -1715,6 +1776,17 @@ CcInitializeCacheManager(VOID)
                                                   NXC_BLOCK_SIZE, NXC_TAG);
         if (NxcBlocks[i].Data == NULL) return FALSE;
         NxcActiveBlocks++;
+    }
+
+    /* Write-back reserve blocks: always allocated, never part of the
+     * title-visible count, handed out only to re-entrant write-back
+     * metadata reads (see NXC_WB_RESERVE). */
+    for (ULONG i = NXC_MAX_BLOCKS; i < NXC_TOTAL_BLOCKS; i++)
+    {
+        NxcBlocks[i].Data = ExAllocatePoolWithTag(NonPagedPool,
+                                                  NXC_BLOCK_SIZE, NXC_TAG);
+        if (NxcBlocks[i].Data == NULL) return FALSE;
+        NxcBlocks[i].Reserved = TRUE;
     }
 
     ZeroPage = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, NXC_TAG);
