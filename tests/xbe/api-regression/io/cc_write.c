@@ -614,12 +614,13 @@ static bool t_gap_write_extends(void)
 }
 
 /* --- roswell#26 repro: preallocated create + full-coverage write ------------
- * NtCreateFile with a non-NULL AllocationSize preallocates clusters (and, in
- * this vfatfs, sets FileSize to the allocation).  A single WriteFile that
- * covers the whole preallocation is reported to hang when both the allocation
- * and the write are >= 64 KB; a shorter write, or a smaller allocation, is
- * fine.  Mirrors abaire/roswell PR#2 exactly (FILE_SUPERSEDE, GENERIC_WRITE,
- * SYNCHRONOUS | NON_DIRECTORY | SEQUENTIAL_ONLY). */
+ * NtCreateFile with a non-NULL AllocationSize followed by a single WriteFile
+ * that covers the whole allocation.  It deadlocked the file cache when both
+ * the allocation and the write were >= 64 KB (every cache block filled with
+ * the file's dirty data, leaving none for the FAT the write-back re-reads); a
+ * shorter write, or a smaller allocation, left a free block and passed.
+ * Mirrors abaire/roswell PR#2 (FILE_SUPERSEDE, GENERIC_WRITE, SYNCHRONOUS |
+ * NON_DIRECTORY | SEQUENTIAL_ONLY). */
 #ifndef FILE_SUPERSEDE
 #define FILE_SUPERSEDE 0
 #endif
@@ -665,6 +666,82 @@ static bool repro_prealloc_write(ULONG alloc_bytes, ULONG write_bytes)
     return true;
 }
 
+/* Retail FATX ignores the create-time NtCreateFile AllocationSize: a new
+ * file is empty (EndOfFile 0) until written, and a write moves EOF to the
+ * high-water mark.  Retail-captured (--official): eof=0 after create(64 K),
+ * eof=10 after a 10-byte write.  vfatfs used to set EOF to the allocation,
+ * so a preallocated file reported its full size with no data written.
+ * (AllocationSize is left unasserted: retail reports it == EOF, vfatfs
+ * reports the cluster-rounded size -- a separate, pre-existing difference.) */
+static LONGLONG query_eof(HANDLE h)
+{
+    IO_STATUS_BLOCK iosb;
+    FILE_NETWORK_OPEN_INFORMATION ni;
+    if (NtQueryInformationFile(h, &iosb, &ni, sizeof(ni),
+                               FileNetworkOpenInformation) != STATUS_SUCCESS)
+        return -1;
+    return ni.EndOfFile.QuadPart;
+}
+
+static bool t_prealloc_create_eof(void)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    LARGE_INTEGER alloc;
+    LONGLONG eof;
+
+    unlink_path(CC_SCRATCH);
+    name.Length        = (USHORT)strlen(CC_SCRATCH);
+    name.MaximumLength = name.Length + 1;
+    name.Buffer        = (PCHAR)CC_SCRATCH;
+    oa.RootDirectory   = NULL;
+    oa.ObjectName      = &name;
+    oa.Attributes      = OBJ_CASE_INSENSITIVE;
+    alloc.QuadPart = 0x10000;
+
+    s = NtCreateFile(&h, FILE_GENERIC_READ | FILE_GENERIC_WRITE | SYNCHRONIZE,
+                     &oa, &iosb, &alloc, FILE_ATTRIBUTE_NORMAL, 0,
+                     FILE_SUPERSEDE,
+                     FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
+    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
+
+    eof = query_eof(h);
+    if (eof != 0) {
+        NtClose(h);
+        unlink_path(CC_SCRATCH);
+        FAIL_AND_RETURN("eof after create(alloc=64K): got %ld want 0", (long)eof);
+    }
+
+    fill_pattern(g_chunk, 10, 0, 0x77);
+    s = NtWriteFile(h, NULL, NULL, NULL, &iosb, g_chunk, 10, NULL);
+    eof = query_eof(h);
+    NtClose(h);
+    if (s != STATUS_SUCCESS || iosb.Information != 10) {
+        unlink_path(CC_SCRATCH);
+        FAIL_AND_RETURN("write(10): s=0x%08x len=%u", (unsigned)s,
+                        (unsigned)iosb.Information);
+    }
+    if (eof != 10) {
+        unlink_path(CC_SCRATCH);
+        FAIL_AND_RETURN("eof after write(10): got %ld want 10", (long)eof);
+    }
+
+    s = open_path(CC_SCRATCH, &h, FILE_GENERIC_READ, FILE_OPEN, 0, &iosb);
+    if (s == STATUS_SUCCESS) {
+        eof = query_eof(h);
+        NtClose(h);
+        if (eof != 10) {
+            unlink_path(CC_SCRATCH);
+            FAIL_AND_RETURN("eof after reopen: got %ld want 10", (long)eof);
+        }
+    }
+    unlink_path(CC_SCRATCH);
+    return true;
+}
+
 /* Passing control: 64 KB preallocation, 48 KB write (issue test 6b). */
 static bool t_prealloc_write_partial(void)
 {
@@ -686,6 +763,7 @@ static const test_entry_t io_cc_write_entries[] = {
     {"small_file_reopen",         t_small_file_reopen},
     {"subdir_small_reopen",       t_subdir_small_reopen},
     {"gap_write_extends",         t_gap_write_extends},
+    {"prealloc_create_eof",       t_prealloc_create_eof},
     {"prealloc_write_partial",    t_prealloc_write_partial},
     {"prealloc_write_full",       t_prealloc_write_full},
 };

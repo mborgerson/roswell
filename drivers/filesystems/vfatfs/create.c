@@ -800,11 +800,21 @@ VfatCreateFile(
                 }
 
                 Irp->IoStatus.Information = FILE_CREATED;
-                VfatSetAllocationSizeInformation(FileObject,
-                                                 pFcb,
-                                                 DeviceExt,
-                                                 &Irp->Overlay.AllocationSize,
-                                                 FALSE);
+                {
+#ifdef SARCH_XBOX
+                    /* Retail FATX ignores the create-time AllocationSize
+                     * hint: a new file is empty (EOF 0) until written.
+                     * Honoring it set EOF to the preallocation, so a
+                     * preallocated file reported its full size with no data
+                     * written. */
+                    LARGE_INTEGER CreateAlloc = { .QuadPart = 0 };
+#else
+                    LARGE_INTEGER CreateAlloc = Irp->Overlay.AllocationSize;
+#endif
+                    VfatSetAllocationSizeInformation(FileObject, pFcb,
+                                                     DeviceExt, &CreateAlloc,
+                                                     FALSE);
+                }
                 VfatSetExtendedAttributes(FileObject,
                                           Irp->AssociatedIrp.SystemBuffer,
                                           Stack->Parameters.Create.EaLength);
@@ -989,11 +999,19 @@ VfatCreateFile(
             }
 
             ExAcquireResourceExclusiveLite(&(pFcb->MainResource), TRUE);
-            Status = VfatSetAllocationSizeInformation(FileObject,
-                                                      pFcb,
-                                                      DeviceExt,
-                                                      &Irp->Overlay.AllocationSize,
-                                                      FALSE);
+            {
+#ifdef SARCH_XBOX
+                /* Overwrite/supersede truncates to empty; retail FATX
+                 * ignores the create-time AllocationSize hint (see the
+                 * create path above). */
+                LARGE_INTEGER CreateAlloc = { .QuadPart = 0 };
+#else
+                LARGE_INTEGER CreateAlloc = Irp->Overlay.AllocationSize;
+#endif
+                Status = VfatSetAllocationSizeInformation(FileObject, pFcb,
+                                                          DeviceExt,
+                                                          &CreateAlloc, FALSE);
+            }
             ExReleaseResourceLite(&(pFcb->MainResource));
             if (!NT_SUCCESS (Status))
             {
