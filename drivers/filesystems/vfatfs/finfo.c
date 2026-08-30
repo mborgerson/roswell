@@ -97,7 +97,13 @@ VfatGetStandardInformation(
     }
     else
     {
+#ifdef SARCH_XBOX
+        /* FATX has no separate allocation field; retail reports
+         * AllocationSize == EndOfFile, not the cluster-rounded size. */
+        StandardInfo->AllocationSize = FCB->RFCB.FileSize;
+#else
         StandardInfo->AllocationSize = FCB->RFCB.AllocationSize;
+#endif
         StandardInfo->EndOfFile = FCB->RFCB.FileSize;
         StandardInfo->Directory = FALSE;
     }
@@ -1112,7 +1118,13 @@ VfatGetNetworkOpenInformation(
     }
     else
     {
+#ifdef SARCH_XBOX
+        /* FATX: retail reports AllocationSize == EndOfFile (see
+         * VfatGetStandardInformation). */
+        NetworkInfo->AllocationSize = Fcb->RFCB.FileSize;
+#else
         NetworkInfo->AllocationSize = Fcb->RFCB.AllocationSize;
+#endif
         NetworkInfo->EndOfFile = Fcb->RFCB.FileSize;
     }
 
