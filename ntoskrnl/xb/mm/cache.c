@@ -334,6 +334,17 @@ NxcClaimReserve(VOID)
         }
     }
 
+    /* Recovery path, reached only once every reserve slot already holds a
+     * distinct cached metadata block (write-backs re-reading FATs in several
+     * FAT blocks at once): reclaim a clean one.  Only a clean block is taken
+     * (the Dirty check below): its contents already match the platter, so
+     * dropping it loses nothing -- it is re-read on next use.  A dirty block
+     * is never evicted here, so no unwritten data can be lost; if every
+     * reserve slot is dirty/busy/referenced this returns NULL and the caller
+     * waits rather than dropping anything.  Reserve blocks only ever cache the
+     * read-only FAT a write-back maps its clusters through, so they stay clean
+     * and this rarely runs -- a single write-back re-reads one FAT block, so
+     * the free-slot scan above almost always wins. */
     for (ULONG i = NXC_MAX_BLOCKS; i < NXC_TOTAL_BLOCKS; i++)
     {
         NXC_BLOCK *B = &NxcBlocks[i];
