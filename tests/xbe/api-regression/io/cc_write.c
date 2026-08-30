@@ -613,6 +613,70 @@ static bool t_gap_write_extends(void)
     return true;
 }
 
+/* --- roswell#26 repro: preallocated create + full-coverage write ------------
+ * NtCreateFile with a non-NULL AllocationSize preallocates clusters (and, in
+ * this vfatfs, sets FileSize to the allocation).  A single WriteFile that
+ * covers the whole preallocation is reported to hang when both the allocation
+ * and the write are >= 64 KB; a shorter write, or a smaller allocation, is
+ * fine.  Mirrors abaire/roswell PR#2 exactly (FILE_SUPERSEDE, GENERIC_WRITE,
+ * SYNCHRONOUS | NON_DIRECTORY | SEQUENTIAL_ONLY). */
+#ifndef FILE_SUPERSEDE
+#define FILE_SUPERSEDE 0
+#endif
+#ifndef FILE_SEQUENTIAL_ONLY
+#define FILE_SEQUENTIAL_ONLY 0x00000004
+#endif
+
+static bool repro_prealloc_write(ULONG alloc_bytes, ULONG write_bytes)
+{
+    HANDLE h;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    LARGE_INTEGER alloc;
+
+    unlink_path(CC_SCRATCH);
+
+    name.Length        = (USHORT)strlen(CC_SCRATCH);
+    name.MaximumLength = name.Length + 1;
+    name.Buffer        = (PCHAR)CC_SCRATCH;
+    oa.RootDirectory   = NULL;
+    oa.ObjectName      = &name;
+    oa.Attributes      = OBJ_CASE_INSENSITIVE;
+
+    alloc.QuadPart = alloc_bytes;
+
+    s = NtCreateFile(&h, FILE_GENERIC_WRITE | SYNCHRONIZE, &oa, &iosb, &alloc,
+                     FILE_ATTRIBUTE_NORMAL, 0, FILE_SUPERSEDE,
+                     FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE
+                         | FILE_SEQUENTIAL_ONLY);
+    if (s != STATUS_SUCCESS)
+        FAIL_AND_RETURN("create alloc=%lu -> 0x%08x", alloc_bytes, (unsigned)s);
+
+    fill_pattern(g_chunk, write_bytes, 0, 0x77);
+    s = NtWriteFile(h, NULL, NULL, NULL, &iosb, g_chunk, write_bytes, NULL);
+    NtClose(h);
+    unlink_path(CC_SCRATCH);
+    if (s != STATUS_SUCCESS || iosb.Information != write_bytes)
+        FAIL_AND_RETURN("write alloc=%lu len=%lu -> s=0x%08x got=%u",
+                        alloc_bytes, write_bytes, (unsigned)s,
+                        (unsigned)iosb.Information);
+    return true;
+}
+
+/* Passing control: 64 KB preallocation, 48 KB write (issue test 6b). */
+static bool t_prealloc_write_partial(void)
+{
+    return repro_prealloc_write(0x10000, 0xC000);
+}
+
+/* The repro: 64 KB preallocation, 64 KB write (issue test 7). */
+static bool t_prealloc_write_full(void)
+{
+    return repro_prealloc_write(0x10000, 0x10000);
+}
+
 static const test_entry_t io_cc_write_entries[] = {
     {"flush_buffers_visibility",  t_flush_buffers_visibility},
     {"cross_handle_no_flush",     t_cross_handle_no_flush},
@@ -622,6 +686,8 @@ static const test_entry_t io_cc_write_entries[] = {
     {"small_file_reopen",         t_small_file_reopen},
     {"subdir_small_reopen",       t_subdir_small_reopen},
     {"gap_write_extends",         t_gap_write_extends},
+    {"prealloc_write_partial",    t_prealloc_write_partial},
+    {"prealloc_write_full",       t_prealloc_write_full},
 };
 
 DEFINE_GROUP(io_cc_write, "io/cc-write");
