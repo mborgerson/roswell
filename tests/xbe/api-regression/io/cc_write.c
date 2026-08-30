@@ -742,6 +742,121 @@ static bool t_prealloc_create_eof(void)
     return true;
 }
 
+/* Retail FATX has no separate allocation field: it reports AllocationSize
+ * equal to EndOfFile -- in both the by-handle query and directory
+ * enumeration -- where vfatfs reported the cluster-rounded size.  Retail-
+ * captured (--official): alloc == eof for every write size, and for the
+ * same file listed via NtQueryDirectoryFile. */
+typedef struct {
+    ULONG NextEntryOffset;
+    ULONG FileIndex;
+    LARGE_INTEGER CreationTime, LastAccessTime, LastWriteTime, ChangeTime;
+    LARGE_INTEGER EndOfFile, AllocationSize;
+    ULONG FileAttributes;
+    ULONG FileNameLength;
+    WCHAR FileName[1];
+} DIR_INFO;
+
+static bool t_allocsize_matches_eof(void)
+{
+    static const ULONG sizes[] = { 1, 512, 4096, 16385, 40000 };
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS s;
+    HANDLE h;
+    ANSI_STRING name;
+    OBJECT_ATTRIBUTES oa;
+    static unsigned char dbuf[1024];
+
+    /* by-handle query: FileNetworkOpenInformation */
+    for (unsigned i = 0; i < sizeof(sizes)/sizeof(sizes[0]); i++) {
+        FILE_NETWORK_OPEN_INFORMATION ni;
+        ULONG n = sizes[i];
+        unlink_path(CC_SCRATCH);
+        s = open_path(CC_SCRATCH, &h, GENERIC_READ | GENERIC_WRITE,
+                      FILE_OVERWRITE_IF, 0, &iosb);
+        if (s != STATUS_SUCCESS) {
+            unlink_path(CC_SCRATCH);
+            FAIL_AND_RETURN("size %lu: create 0x%08x", n, (unsigned)s);
+        }
+        fill_pattern(g_chunk, n, 0, 0x33);
+        s = NtWriteFile(h, NULL, NULL, NULL, &iosb, g_chunk, n, NULL);
+        if (s == STATUS_SUCCESS)
+            s = NtQueryInformationFile(h, &iosb, &ni, sizeof(ni),
+                                       FileNetworkOpenInformation);
+        NtClose(h);
+        unlink_path(CC_SCRATCH);
+        if (s != STATUS_SUCCESS)
+            FAIL_AND_RETURN("size %lu: write/query 0x%08x", n, (unsigned)s);
+        if (ni.EndOfFile.QuadPart != n || ni.AllocationSize.QuadPart != n)
+            FAIL_AND_RETURN("size %lu: eof=%ld alloc=%ld (want both %lu)", n,
+                            (long)ni.EndOfFile.QuadPart,
+                            (long)ni.AllocationSize.QuadPart, n);
+    }
+
+    /* directory enumeration: FILE_DIRECTORY_INFORMATION */
+    name.Length = (USHORT)strlen(CC_SUBDIR); name.MaximumLength = name.Length + 1;
+    name.Buffer = (PCHAR)CC_SUBDIR; oa.RootDirectory = NULL; oa.ObjectName = &name;
+    oa.Attributes = OBJ_CASE_INSENSITIVE;
+    s = NtCreateFile(&h, GENERIC_WRITE | SYNCHRONIZE, &oa, &iosb, NULL,
+                     FILE_ATTRIBUTE_DIRECTORY, 0, FILE_OPEN_IF,
+                     FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
+    if (s != STATUS_SUCCESS) FAIL_AND_RETURN("mkdir 0x%08x", (unsigned)s);
+    NtClose(h);
+
+    s = open_path(CC_SUBFILE, &h, GENERIC_WRITE, FILE_OVERWRITE_IF, 0, &iosb);
+    if (s == STATUS_SUCCESS) {
+        fill_pattern(g_chunk, 4096, 0, 0x33);
+        NtWriteFile(h, NULL, NULL, NULL, &iosb, g_chunk, 4096, NULL);
+        NtClose(h);
+    }
+
+    name.Length = (USHORT)strlen(CC_SUBDIR); name.MaximumLength = name.Length + 1;
+    name.Buffer = (PCHAR)CC_SUBDIR; oa.RootDirectory = NULL; oa.ObjectName = &name;
+    oa.Attributes = OBJ_CASE_INSENSITIVE;
+    s = NtCreateFile(&h, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL,
+                     FILE_ATTRIBUTE_DIRECTORY,
+                     FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN,
+                     FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
+    if (s != STATUS_SUCCESS) {
+        unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
+        FAIL_AND_RETURN("diropen 0x%08x", (unsigned)s);
+    }
+    memset(dbuf, 0, sizeof(dbuf));
+    s = NtQueryDirectoryFile(h, NULL, NULL, NULL, &iosb, dbuf, sizeof(dbuf),
+                             FileDirectoryInformation, NULL, TRUE);
+    NtClose(h);
+    if (!NT_SUCCESS(s)) {
+        unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
+        FAIL_AND_RETURN("dir-enum query 0x%08x", (unsigned)s);
+    }
+    {
+        ULONG off = 0;
+        bool seen = false;
+        for (;;) {
+            DIR_INFO *di = (DIR_INFO *)(dbuf + off);
+            if (!(di->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                seen = true;
+                if (di->AllocationSize.QuadPart != di->EndOfFile.QuadPart) {
+                    unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
+                    FAIL_AND_RETURN("dir-enum: eof=%ld alloc=%ld (want equal)",
+                                    (long)di->EndOfFile.QuadPart,
+                                    (long)di->AllocationSize.QuadPart);
+                }
+            }
+            if (di->NextEntryOffset == 0) break;
+            off += di->NextEntryOffset;
+            if (off >= sizeof(dbuf)) break;
+        }
+        if (!seen) {
+            unlink_path(CC_SUBFILE); unlink_path(CC_SUBDIR);
+            FAIL_AND_RETURN("dir-enum: no file entry found");
+        }
+    }
+    unlink_path(CC_SUBFILE);
+    unlink_path(CC_SUBDIR);
+    return true;
+}
+
 /* Passing control: 64 KB preallocation, 48 KB write (issue test 6b). */
 static bool t_prealloc_write_partial(void)
 {
@@ -802,6 +917,7 @@ static const test_entry_t io_cc_write_entries[] = {
     {"small_file_reopen",         t_small_file_reopen},
     {"subdir_small_reopen",       t_subdir_small_reopen},
     {"gap_write_extends",         t_gap_write_extends},
+    {"allocsize_matches_eof",     t_allocsize_matches_eof},
     {"prealloc_create_eof",       t_prealloc_create_eof},
     {"prealloc_write_partial",    t_prealloc_write_partial},
     {"prealloc_write_full",       t_prealloc_write_full},

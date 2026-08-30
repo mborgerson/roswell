@@ -201,8 +201,13 @@ VfatGetFileDirectoryInformation(
                 pInfo->EndOfFile.u.LowPart = DirContext->DirEntry.FatX.FileSize;
                 /* Make allocsize a rounded up multiple of BytesPerCluster */
                 pInfo->AllocationSize.u.HighPart = 0;
+#ifdef SARCH_XBOX
+                /* FATX: retail reports AllocationSize == EndOfFile. */
+                pInfo->AllocationSize.u.LowPart = DirContext->DirEntry.FatX.FileSize;
+#else
                 pInfo->AllocationSize.u.LowPart = ROUND_UP(DirContext->DirEntry.FatX.FileSize,
                                                            DeviceExt->FatInfo.BytesPerCluster);
+#endif
             }
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
@@ -311,8 +316,13 @@ VfatGetFileFullDirectoryInformation(
             pInfo->EndOfFile.u.LowPart = DirContext->DirEntry.FatX.FileSize;
             /* Make allocsize a rounded up multiple of BytesPerCluster */
             pInfo->AllocationSize.u.HighPart = 0;
+#ifdef SARCH_XBOX
+            /* FATX: retail reports AllocationSize == EndOfFile. */
+            pInfo->AllocationSize.u.LowPart = DirContext->DirEntry.FatX.FileSize;
+#else
             pInfo->AllocationSize.u.LowPart = ROUND_UP(DirContext->DirEntry.FatX.FileSize,
                                                        DeviceExt->FatInfo.BytesPerCluster);
+#endif
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
         }
 #ifndef SARCH_XBOX
@@ -420,8 +430,13 @@ VfatGetFileBothInformation(
                 pInfo->EndOfFile.u.LowPart = DirContext->DirEntry.FatX.FileSize;
                 /* Make allocsize a rounded up multiple of BytesPerCluster */
                 pInfo->AllocationSize.u.HighPart = 0;
+#ifdef SARCH_XBOX
+                /* FATX: retail reports AllocationSize == EndOfFile. */
+                pInfo->AllocationSize.u.LowPart = DirContext->DirEntry.FatX.FileSize;
+#else
                 pInfo->AllocationSize.u.LowPart = ROUND_UP(DirContext->DirEntry.FatX.FileSize,
                                                            DeviceExt->FatInfo.BytesPerCluster);
+#endif
             }
 
             pInfo->FileAttributes = DirContext->DirEntry.FatX.Attrib & 0x3f;
